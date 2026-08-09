@@ -109,7 +109,7 @@ dependencies = [
   # guerrillamail, tempmail, etc). Used by UserSignupForm when
   # REJECT_DISPOSABLE_EMAILS is enabled — off by default for community/
   # self-hosted deployments, on in cloud to deter free-trial abuse.
-  "disposable-email-domains==0.0.236",
+  "disposable-email-domains==0.0.237",
   # validibot-shared: Our shared library for Validibot integrations (e.g., EnergyPlus).
   # 0.7.0 adds ``StepValidatorRecord.validator_backend_image_digest``;
   # 0.7.1–0.7.3 shipped publish-workflow fixes;
@@ -374,7 +374,7 @@ force-single-line = true
 [dependency-groups]
 dev = [
   # Testing
-  "coverage==7.15.2",
+  "coverage==7.15.3",
   "django-coverage-plugin==3.2.2",
   "factory-boy==3.3.3",
   "pytest==9.1.1",
