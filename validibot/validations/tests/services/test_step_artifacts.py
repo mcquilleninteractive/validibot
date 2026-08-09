@@ -17,6 +17,7 @@ from validibot_shared.validations.envelopes import (
     ValidationArtifact as ValidationArtifactEnvelope,
 )
 
+from validibot.submissions.constants import SubmissionDataFormat
 from validibot.validations.constants import ArtifactKind
 from validibot.validations.constants import BindingSourceScope
 from validibot.validations.constants import CatalogValueType
@@ -60,6 +61,29 @@ def _validation_artifact(**kwargs) -> ValidationArtifactEnvelope:
         kwargs.setdefault("sha256", TEST_ARTIFACT_SHA256)
         kwargs.setdefault("storage_version", "generation-1")
     return ValidationArtifactEnvelope(**kwargs)
+
+
+def _declare_generated_model_output(step):
+    """Declare the producer port required by the relational binding contract."""
+    return StepIODefinitionFactory(
+        validator=step.validator,
+        workflow_step=None,
+        direction=StepIODirection.OUTPUT,
+        contract_key="generated_model",
+        native_name="generated_model",
+        data_type=CatalogValueType.ARTIFACT_REF,
+        io_medium=StepIOMedium.ARTIFACT,
+        artifact_kind=ArtifactKind.FILE,
+        media_type="application/json",
+        data_format=SubmissionDataFormat.ENERGYPLUS_EPJSON,
+        accepted_data_formats=[SubmissionDataFormat.ENERGYPLUS_EPJSON],
+        accepted_media_types=["application/json"],
+        metadata={"accepted_extensions": ["epjson", "json"]},
+        envelope_channel=EnvelopeChannel.OUTPUT_ARTIFACTS,
+        role="generated-model",
+        min_items=0,
+        max_items=1,
+    )
 
 
 class TestArtifactPromotionContract:
@@ -764,6 +788,7 @@ class TestStepArtifactRunContext:
             name="Build Model",
             order=10,
         )
+        _declare_generated_model_output(upstream_step)
         downstream_step = WorkflowStepFactory(
             workflow=run.workflow,
             name="Run Simulation",
@@ -808,6 +833,7 @@ class TestStepArtifactRunContext:
             name="Build Model",
             order=10,
         )
+        _declare_generated_model_output(upstream_step)
         downstream_step = WorkflowStepFactory(
             workflow=run.workflow,
             name="Run Simulation",

@@ -113,6 +113,40 @@ def _validation_artifact(**kwargs) -> ValidationArtifactEnvelope:
     return ValidationArtifactEnvelope(**kwargs)
 
 
+def _declare_output_file_port(
+    step,
+    *,
+    contract_key: str,
+    role: str,
+    data_format: str,
+    media_type: str,
+    accepted_media_types: list[str] | None = None,
+    extensions: list[str] | None = None,
+):
+    """Declare the producer contract required by a relational artifact binding."""
+    return StepIODefinitionFactory(
+        validator=step.validator,
+        workflow_step=None,
+        contract_key=contract_key,
+        native_name=contract_key,
+        direction=StepIODirection.OUTPUT,
+        origin_kind=StepIOOriginKind.CATALOG,
+        source_kind=StepIOSourceKind.INTERNAL,
+        data_type=CatalogValueType.ARTIFACT_REF,
+        io_medium=StepIOMedium.ARTIFACT,
+        artifact_kind=ArtifactKind.FILE,
+        media_type=media_type,
+        data_format=data_format,
+        accepted_data_formats=[data_format],
+        accepted_media_types=accepted_media_types or [media_type],
+        metadata={"accepted_extensions": extensions or []},
+        envelope_channel=EnvelopeChannel.OUTPUT_ARTIFACTS,
+        role=role,
+        min_items=0,
+        max_items=1,
+    )
+
+
 def _build_test_input_envelope(
     run,
     *,
@@ -323,6 +357,7 @@ def _build_shacl_data_graph_run(
         validator=validator,
         name="Validate RDF",
         ruleset=ruleset,
+        order=10,
     )
     submission = SubmissionFactory(
         workflow=step.workflow,
@@ -395,6 +430,7 @@ def _build_schematron_xml_document_run():
         validator=validator,
         name="Validate XML Rules",
         ruleset=ruleset,
+        order=10,
     )
     submission = SubmissionFactory(
         workflow=step.workflow,
@@ -430,6 +466,7 @@ def _build_energyplus_file_port_run():
         validator=validator,
         name="Run Simulation",
         config={"timestep_per_hour": 6},
+        order=10,
     )
     submission = SubmissionFactory(
         workflow=step.workflow,
@@ -837,6 +874,14 @@ class TestEnergyPlusFilePortMaterialization:
             name="Build Model",
             order=step.order - 5,
         )
+        _declare_output_file_port(
+            upstream_step,
+            contract_key="generated_model",
+            role="generated-model",
+            data_format=SubmissionDataFormat.ENERGYPLUS_EPJSON,
+            media_type="application/json",
+            extensions=["epjson", "json"],
+        )
         upstream_run = ValidationStepRunFactory(
             validation_run=run,
             workflow_step=upstream_step,
@@ -901,6 +946,14 @@ class TestEnergyPlusFilePortMaterialization:
             workflow=step.workflow,
             name="Build Model",
             order=step.order - 5,
+        )
+        _declare_output_file_port(
+            upstream_step,
+            contract_key="generated_model",
+            role="generated-model",
+            data_format=SubmissionDataFormat.ENERGYPLUS_EPJSON,
+            media_type="application/json",
+            extensions=["epjson", "json"],
         )
         upstream_run = ValidationStepRunFactory(
             validation_run=run,
@@ -968,6 +1021,14 @@ class TestEnergyPlusFilePortMaterialization:
             name="Build Model",
             order=step.order - 5,
         )
+        _declare_output_file_port(
+            upstream_step,
+            contract_key="generated_model",
+            role="generated-model",
+            data_format=SubmissionDataFormat.ENERGYPLUS_EPJSON,
+            media_type="application/json",
+            extensions=["epjson", "json"],
+        )
         upstream_run = ValidationStepRunFactory(
             validation_run=run,
             workflow_step=upstream_step,
@@ -981,12 +1042,15 @@ class TestEnergyPlusFilePortMaterialization:
                     _validation_artifact(
                         name="model.epjson",
                         type="generated-model",
-                        mime_type="application/pdf",
+                        mime_type="application/json",
                         uri="gs://validibot/runs/run-1/model.epjson",
                     ),
                 ],
                 raw_outputs=None,
             ),
+        )
+        Artifact.objects.filter(step_run=upstream_run).update(
+            content_type="application/pdf",
         )
         StepInputBindingFactory(
             workflow_step=step,
@@ -1519,6 +1583,15 @@ class TestSHACLDataGraphFilePortMaterialization:
             name="Build RDF",
             order=step.order - 5,
         )
+        _declare_output_file_port(
+            upstream_step,
+            contract_key="data_graph",
+            role="data_graph",
+            data_format=SubmissionDataFormat.JSON,
+            media_type="application/ld+json",
+            accepted_media_types=["application/ld+json", "application/json"],
+            extensions=["jsonld"],
+        )
         upstream_run = ValidationStepRunFactory(
             validation_run=run,
             workflow_step=upstream_step,
@@ -1657,6 +1730,14 @@ class TestSchematronXmlDocumentFilePortMaterialization:
             workflow=step.workflow,
             name="Normalize XML",
             order=step.order - 5,
+        )
+        _declare_output_file_port(
+            upstream_step,
+            contract_key="xml_document",
+            role="xml_document",
+            data_format=SubmissionDataFormat.XML,
+            media_type="application/xml",
+            extensions=["xml"],
         )
         upstream_run = ValidationStepRunFactory(
             validation_run=run,

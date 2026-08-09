@@ -285,3 +285,127 @@ def test_resolver_verifies_and_returns_exact_upstream_xml_bytes() -> None:
 
     assert result.passed is True
     assert result.issues == []
+
+
+def _bound_xml_artifact_case():
+    """Build one PDF-output-to-XML-input edge and its concrete run rows."""
+    workflow = WorkflowFactory()
+    pdf_validator = ValidatorFactory()
+    xml_validator = ValidatorFactory(validation_type=ValidationType.XML_SCHEMA)
+    producer = WorkflowStepFactory(
+        workflow=workflow,
+        validator=pdf_validator,
+        order=10,
+        name="Inspect package",
+    )
+    consumer = WorkflowStepFactory(
+        workflow=workflow,
+        validator=xml_validator,
+        order=20,
+        name="Validate selected XML",
+    )
+    output = _artifact_port(
+        validator=pdf_validator,
+        contract_key="selected_xml",
+        direction=StepIODirection.OUTPUT,
+        data_format=SubmissionDataFormat.XML,
+        media_type="application/xml",
+    )
+    input_port = _artifact_port(
+        validator=xml_validator,
+        contract_key="xml_document",
+        direction=StepIODirection.INPUT,
+        data_format=SubmissionDataFormat.XML,
+        media_type="application/xml",
+        allow_upstream=True,
+    )
+    set_artifact_input_binding(
+        consumer_step=consumer,
+        consumer_port=input_port,
+        source_scope=BindingSourceScope.UPSTREAM_ARTIFACT,
+        artifact_reference=f"{producer.step_key}.{output.contract_key}",
+    )
+    run = ValidationRunFactory(workflow=workflow)
+    producer_run = ValidationStepRunFactory(
+        validation_run=run,
+        workflow_step=producer,
+    )
+    consumer_run = ValidationStepRunFactory(
+        validation_run=run,
+        workflow_step=consumer,
+    )
+    return run, producer, consumer, producer_run, consumer_run
+
+
+def test_resolver_fails_when_required_upstream_output_is_missing() -> None:
+    """A producer success without its promised singleton output must not fall back."""
+    run, _producer, consumer, _producer_run, consumer_run = _bound_xml_artifact_case()
+
+    with pytest.raises(ValueError, match="did not produce 'selected_xml'"):
+        resolve_file_inputs(run=run, step=consumer, step_run=consumer_run)
+
+    trace = consumer_run.input_traces.get(input_contract_key="xml_document")
+    assert trace.resolved is False
+    assert "did not produce 'selected_xml'" in trace.error_message
+
+
+def test_resolver_fails_when_upstream_artifact_carrier_is_incompatible() -> None:
+    """Envelope metadata cannot relabel JSON bytes as the consumer's XML input."""
+    run, producer, consumer, producer_run, consumer_run = _bound_xml_artifact_case()
+    payload = b'{"not":"xml"}'
+    digest = hashlib.sha256(payload).hexdigest()
+    artifact = Artifact.objects.create(
+        org=run.org,
+        validation_run=run,
+        step_run=producer_run,
+        workflow_step=producer,
+        label="selected.json",
+        content_type="application/json",
+        contract_key="selected_xml",
+        role="selected_xml",
+        kind=ArtifactKind.FILE,
+        data_format=SubmissionDataFormat.JSON,
+        size_bytes=len(payload),
+        sha256=digest,
+        storage_version=f"sha256:{digest}",
+    )
+    artifact.file.save("selected.json", ContentFile(payload), save=True)
+
+    with pytest.raises(ValueError, match="does not accept data format"):
+        resolve_file_inputs(run=run, step=consumer, step_run=consumer_run)
+
+    trace = consumer_run.input_traces.get(input_contract_key="xml_document")
+    assert trace.resolved is False
+    assert "does not accept data format" in trace.error_message
+
+
+def test_resolver_fails_when_upstream_bytes_are_tampered() -> None:
+    """A stored artifact whose bytes changed after indexing must fail closed."""
+    run, producer, consumer, producer_run, consumer_run = _bound_xml_artifact_case()
+    payload = b'<handover xmlns="urn:example"><id>A-1</id></handover>'
+    digest = hashlib.sha256(payload).hexdigest()
+    artifact = Artifact.objects.create(
+        org=run.org,
+        validation_run=run,
+        step_run=producer_run,
+        workflow_step=producer,
+        label="selected.xml",
+        content_type="application/xml",
+        contract_key="selected_xml",
+        role="selected_xml",
+        kind=ArtifactKind.FILE,
+        data_format=SubmissionDataFormat.XML,
+        size_bytes=len(payload),
+        sha256=digest,
+        storage_version=f"sha256:{digest}",
+    )
+    artifact.file.save("selected.xml", ContentFile(payload), save=True)
+    with artifact.file.open("wb") as stored_file:
+        stored_file.write(payload.replace(b"A-1", b"A-2"))
+
+    with pytest.raises(ValueError, match="trusted identity"):
+        resolve_file_inputs(run=run, step=consumer, step_run=consumer_run)
+
+    trace = consumer_run.input_traces.get(input_contract_key="xml_document")
+    assert trace.resolved is False
+    assert "trusted identity" in trace.error_message

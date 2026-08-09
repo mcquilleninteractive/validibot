@@ -327,7 +327,7 @@ def validate_workflow_dependencies(
 
     bindings = (
         StepInputBinding.objects.filter(
-            workflow_step__workflow=workflow,
+            workflow_step__workflow_id=workflow.pk,
             source_scope=BindingSourceScope.UPSTREAM_ARTIFACT,
         )
         .select_related(
