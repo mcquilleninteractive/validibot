@@ -4,10 +4,6 @@ click==8.4.2 \
     --hash=sha256:9a6cea6e60b17ebe0a44c5cc636d94f09bd66142c1cd7d8b4cd731c4917a15f6 \
     --hash=sha256:e6f9f66136c816745b9d65817da91d61d957fb16e02e4dcd0552553c5a197b76
     # via zensical
-colorama==0.4.6 ; sys_platform == 'win32' \
-    --hash=sha256:08695f5cb7ed6e0531a20572697297273c47b8cae5a63ffc6d6ed5c201be6e44 \
-    --hash=sha256:4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6
-    # via click
 deepmerge==2.1.0 \
     --hash=sha256:07ca7a7b8935df596c512fa8161877c0487ac61f691c07766e7d71d2b23bdd2f \
     --hash=sha256:8f148339a91d680a75ecb74ade235d9e759a93df373a0b04e9d31c8666cfeb75
@@ -117,9 +113,9 @@ pygments==2.20.0 \
     --hash=sha256:6757cd03768053ff99f3039c1a36d6c0aa0b263438fcab17520b30a303a82b5f \
     --hash=sha256:81a9e26dd42fd28a23a2d169d86d7ac03b46e2f8b59ed4698fb4785f946d0176
     # via zensical
-pymdown-extensions==11.0 \
-    --hash=sha256:8269cef0247f9e2d0a62fcea10860aba05c1cbab5470fd4b63230b96434dc589 \
-    --hash=sha256:fbc4acb641814fa9d17521bbd21a5240ef739a662f11c06330c4b78c93e954d6
+pymdown-extensions==11.0.1 \
+    --hash=sha256:db3943a62bab7e03af1364f0c4083e64b91fb097675a4b6cceccfbe9a77e5eb2 \
+    --hash=sha256:dd2905ae6fc5b75582fafb139a1266ffc754705efa902aa50067fa7ff4f94ec0
     # via zensical
 pyyaml==6.0.3 \
     --hash=sha256:00c4bdeba853cc34e7dd471f16b4114f4162dc03e6b7afcc2128711f0eca823c \
@@ -261,4 +257,4 @@ zensical==0.0.52 \
     --hash=sha256:b11b79dd1bb7da4c1a5293cbc5a2f4394d980bf2bf1c4c326062bc5ddcf2a2e8 \
     --hash=sha256:d26c29272ce5bad16564a19ecdfd43bbd9b41568a57b923e8b710359de633322 \
     --hash=sha256:dd904e316f1cdc4fee707febdd85d0ac13f742a8ba14da9f9a4dacb8603fe480
-    # via -r requirements/docs.in
+    # via -r docs.in
