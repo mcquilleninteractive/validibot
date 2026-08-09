@@ -2992,7 +2992,9 @@ class StepInputBinding(TimeStampedModel):
                 )
             return
 
-        if not self.source_step_id or not self.source_output_io_definition_id:
+        source_step = self.source_step
+        source_output = self.source_output_io_definition
+        if source_step is None or source_output is None:
             raise ValidationError(
                 {
                     "source_data_path": _(
@@ -3000,7 +3002,7 @@ class StepInputBinding(TimeStampedModel):
                     ),
                 },
             )
-        if self.source_step.workflow_id != self.workflow_step.workflow_id:
+        if source_step.workflow_id != self.workflow_step.workflow_id:
             raise ValidationError(
                 {"source_step": _("The producer must belong to this workflow.")},
             )
@@ -3008,12 +3010,11 @@ class StepInputBinding(TimeStampedModel):
             raise ValidationError(
                 {"source_step": _("A step cannot consume its own output.")},
             )
-        if self.source_step.order >= self.workflow_step.order:
+        if source_step.order >= self.workflow_step.order:
             raise ValidationError(
                 {"source_step": _("The producer must be earlier in the workflow.")},
             )
 
-        source_output = self.source_output_io_definition
         if source_output.direction != StepIODirection.OUTPUT:
             raise ValidationError(
                 {
@@ -3040,7 +3041,7 @@ class StepInputBinding(TimeStampedModel):
             )
         if (
             source_output.validator_id is not None
-            and source_output.validator_id != self.source_step.validator_id
+            and source_output.validator_id != source_step.validator_id
         ):
             raise ValidationError(
                 {
@@ -3050,7 +3051,7 @@ class StepInputBinding(TimeStampedModel):
                 },
             )
 
-        expected_path = f"{self.source_step.step_key}.{source_output.contract_key}"
+        expected_path = f"{source_step.step_key}.{source_output.contract_key}"
         if self.source_data_path and self.source_data_path != expected_path:
             raise ValidationError(
                 {
@@ -3075,16 +3076,19 @@ class StepInputBinding(TimeStampedModel):
                     resolve_artifact_reference,
                 )
 
-                source_step, source_output = resolve_artifact_reference(
-                    workflow=self.workflow_step.workflow,
-                    reference=self.source_data_path,
+                resolved_source_step, resolved_source_output = (
+                    resolve_artifact_reference(
+                        workflow=self.workflow_step.workflow,
+                        reference=self.source_data_path,
+                    )
                 )
-                self.source_step = source_step
-                self.source_output_io_definition = source_output
-            if self.source_step_id and self.source_output_io_definition_id:
+                self.source_step = resolved_source_step
+                self.source_output_io_definition = resolved_source_output
+            source_step = self.source_step
+            source_output = self.source_output_io_definition
+            if source_step is not None and source_output is not None:
                 self.source_data_path = (
-                    f"{self.source_step.step_key}."
-                    f"{self.source_output_io_definition.contract_key}"
+                    f"{source_step.step_key}.{source_output.contract_key}"
                 )
         else:
             self.source_step = None

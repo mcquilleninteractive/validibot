@@ -12,6 +12,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
+from typing import Any
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
@@ -274,7 +275,7 @@ def set_artifact_input_binding(
     from validibot.validations.models import StepInputBinding
 
     validate_source_scope(consumer_port, source_scope)
-    defaults = {
+    defaults: dict[str, Any] = {
         "source_scope": source_scope,
         "default_value": None,
         "is_required": consumer_port.min_items > 0,

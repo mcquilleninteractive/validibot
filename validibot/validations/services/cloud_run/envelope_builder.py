@@ -1896,7 +1896,7 @@ def build_input_envelope(
                 msg = f"Step {step.id} has no immutable primary file for Schematron"
                 raise ValueError(msg)
 
-        envelope = build_schematron_input_envelope(
+        schematron_envelope = build_schematron_input_envelope(
             run_id=str(run.id),
             validator=validator,
             org_id=str(run.org.id),
@@ -1920,8 +1920,8 @@ def build_input_envelope(
             skip_callback=skip_callback,
         )
         if xml_document_item is not None:
-            envelope.input_files = [xml_document_item]
-        return envelope
+            schematron_envelope.input_files = [xml_document_item]
+        return schematron_envelope
 
     if validator.validation_type == ValidationType.PDF:
         resolved_pdf = _resolve_input_file_artifact_port_item(
@@ -1958,17 +1958,19 @@ def build_input_envelope(
                 "selected_xml": (step.config or {}).get("selected_xml"),
             }
         )
-        context = ExecutionContext(
-            callback_id=callback_id,
-            callback_nonce=callback_nonce,
-            callback_nonce_commitment=callback_nonce_commitment,
-            callback_url=callback_url,
-            execution_bundle_uri=execution_bundle_uri,
-            execution_attempt_id=execution_attempt_id,
-            step_run_id=step_run_id,
-            attempt_contract_version=ATTEMPT_CONTRACT_VERSION,
-            expected_output_uri=expected_output_uri,
-            skip_callback=skip_callback,
+        context = ExecutionContext.model_validate(
+            {
+                "callback_id": callback_id,
+                "callback_nonce": callback_nonce,
+                "callback_nonce_commitment": callback_nonce_commitment,
+                "callback_url": callback_url,
+                "execution_bundle_uri": execution_bundle_uri,
+                "execution_attempt_id": execution_attempt_id,
+                "step_run_id": step_run_id,
+                "attempt_contract_version": ATTEMPT_CONTRACT_VERSION,
+                "expected_output_uri": expected_output_uri,
+                "skip_callback": skip_callback,
+            }
         )
         return PdfInputEnvelope(
             run_id=str(run.id),

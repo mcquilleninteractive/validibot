@@ -1936,7 +1936,7 @@ class WorkflowStepTypeForm(forms.Form):
         return self.options_by_value[value]
 
 
-class ArtifactInputBindingsFormMixin:
+class ArtifactInputBindingsFormMixin(forms.Form):
     """Add reusable source controls for declared singleton file inputs.
 
     Validator-specific forms opt in by inheriting this mixin. Port declarations
@@ -1944,6 +1944,7 @@ class ArtifactInputBindingsFormMixin:
     workflow author's source choice.
     """
 
+    workflow: Workflow | None
     artifact_input_contract_keys: tuple[str, ...] | None = None
 
     def __init__(
@@ -1952,8 +1953,8 @@ class ArtifactInputBindingsFormMixin:
         proposed_order: int | None = None,
         **kwargs,
     ):
+        super().__init__(*args, **kwargs)
         self.proposed_order = proposed_order
-        super().__init__(*args, proposed_order=proposed_order, **kwargs)
         self._configure_artifact_input_bindings()
 
     def _configure_artifact_input_bindings(self) -> None:
@@ -2016,11 +2017,16 @@ class ArtifactInputBindingsFormMixin:
                 help_text=port.description or _("Choose where this file comes from."),
             )
 
-            choices = compatible_artifact_choices(
-                consumer_step=step,
-                consumer_port=port,
-                workflow=self.workflow,
-                proposed_order=self.proposed_order,
+            workflow = self.workflow
+            choices = (
+                compatible_artifact_choices(
+                    consumer_step=step,
+                    consumer_port=port,
+                    workflow=workflow,
+                    proposed_order=self.proposed_order,
+                )
+                if workflow is not None
+                else []
             )
             self.fields[output_name] = forms.ChoiceField(
                 label=_("Earlier step output"),
@@ -3401,7 +3407,11 @@ class EnergyPlusStepConfigForm(BaseStepConfigForm):
                 self.fields.pop(upstream_field, None)
                 continue
 
-            self.fields[source_field].choices = source_choices
+            source_choice_field = cast(
+                "forms.ChoiceField",
+                self.fields[source_field],
+            )
+            source_choice_field.choices = source_choices
             self.fields[source_field].initial = self._initial_source_for_file_port(
                 port,
                 binding_map.get(contract_key),
@@ -3411,13 +3421,22 @@ class EnergyPlusStepConfigForm(BaseStepConfigForm):
                     compatible_artifact_choices,
                 )
 
-                upstream_choices = compatible_artifact_choices(
-                    consumer_step=step,
-                    consumer_port=port,
-                    workflow=self.workflow,
-                    proposed_order=self.proposed_order,
+                workflow = self.workflow
+                upstream_choices = (
+                    compatible_artifact_choices(
+                        consumer_step=step,
+                        consumer_port=port,
+                        workflow=workflow,
+                        proposed_order=self.proposed_order,
+                    )
+                    if workflow is not None
+                    else []
                 )
-                self.fields[upstream_field].choices = [
+                upstream_choice_field = cast(
+                    "forms.ChoiceField",
+                    self.fields[upstream_field],
+                )
+                upstream_choice_field.choices = [
                     ("", _("— Select generated file —")),
                     *((choice.reference, choice.label) for choice in upstream_choices),
                 ]
@@ -3499,7 +3518,9 @@ class EnergyPlusStepConfigForm(BaseStepConfigForm):
                 self.file_port_binding_map.get(contract_key),
             )
             cleaned[source_field] = source
-            allowed = {value for value, _label in self.fields[source_field].choices}
+            allowed = {
+                value for value, _label in self._source_choices_for_file_port(port)
+            }
             if source and source not in allowed:
                 self.add_error(source_field, _("Choose an allowed file source."))
                 continue
