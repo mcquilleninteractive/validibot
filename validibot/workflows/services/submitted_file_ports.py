@@ -9,12 +9,9 @@ from django.utils.text import slugify
 from django.utils.translation import gettext_lazy as _
 
 from validibot.validations.constants import BindingSourceScope
+from validibot.validations.constants import EnvelopeChannel
 from validibot.validations.constants import StepIODirection
 from validibot.validations.constants import StepIOMedium
-
-PRIMARY_SUBMISSION_PORT_KEYS = frozenset(
-    {"primary_model", "data_graph", "xml_document"},
-)
 
 
 @dataclass(frozen=True)
@@ -40,6 +37,14 @@ def submitted_file_port_field_name(*, workflow_step_id, port_key: str) -> str:
     """Return the launch-form field name for a submitted artifact-port file."""
 
     return f"submitted_file_port__{workflow_step_id}__{port_key}"
+
+
+def submitted_file_source_path(io_definition) -> str:
+    """Return the primary or auxiliary launch-file identity for one input port."""
+
+    if io_definition.envelope_channel == EnvelopeChannel.INPUT_FILES:
+        return "primary"
+    return io_definition.contract_key
 
 
 def submitted_file_port_requirements(
@@ -72,7 +77,7 @@ def submitted_file_port_requirements(
         io_definition = binding.io_definition
         if (
             not include_primary
-            and io_definition.contract_key in PRIMARY_SUBMISSION_PORT_KEYS
+            and submitted_file_source_path(io_definition) == "primary"
         ):
             continue
 

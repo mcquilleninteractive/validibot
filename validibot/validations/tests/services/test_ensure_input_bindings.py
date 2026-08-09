@@ -146,7 +146,7 @@ class TestEnsureStepInputBindings(TestCase):
             io_definition=io_definition,
         )
         self.assertEqual(binding.source_scope, BindingSourceScope.SUBMISSION_FILE)
-        self.assertEqual(binding.source_data_path, "primary-model")
+        self.assertEqual(binding.source_data_path, "primary")
         self.assertTrue(binding.is_required)
 
     def test_resource_artifact_input_uses_workflow_resource_scope_by_default(self):

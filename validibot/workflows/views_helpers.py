@@ -22,6 +22,7 @@ from validibot.submissions.models import detect_file_type
 from validibot.users.models import Organization
 from validibot.users.models import User
 from validibot.users.permissions import PermissionCode
+from validibot.validations.constants import BindingSourceScope
 from validibot.validations.constants import JSONSchemaVersion
 from validibot.validations.constants import RulesetType
 from validibot.validations.constants import ValidationType
@@ -40,6 +41,7 @@ from validibot.workflows.forms import AiAssistStepConfigForm
 from validibot.workflows.forms import EnergyPlusStepConfigForm
 from validibot.workflows.forms import FMUValidatorStepConfigForm
 from validibot.workflows.forms import JsonSchemaStepConfigForm
+from validibot.workflows.forms import PdfStepConfigForm
 from validibot.workflows.forms import PortfolioManagerStepConfigForm
 from validibot.workflows.forms import ShaclStepConfigForm
 from validibot.workflows.forms import TabularStepConfigForm
@@ -1551,19 +1553,24 @@ def _sync_step_file_port_bindings(step: WorkflowStep, form: forms.Form) -> None:
     if not callable(build_updates):
         return
 
-    from validibot.validations.models import StepInputBinding
+    from validibot.validations.services.artifact_bindings import (
+        set_artifact_input_binding,
+    )
 
     for update in build_updates():
-        io_definition = update["io_definition"]
-        StepInputBinding.objects.update_or_create(
-            workflow_step=step,
-            io_definition=io_definition,
-            defaults={
-                "source_scope": update["source_scope"],
-                "source_data_path": update["source_data_path"],
-                "is_required": update["is_required"],
-                "default_value": None,
-            },
+        set_artifact_input_binding(
+            consumer_step=step,
+            consumer_port=update["io_definition"],
+            source_scope=update["source_scope"],
+            source_data_path=update.get("source_data_path", ""),
+            artifact_reference=(
+                update.get("artifact_reference")
+                or (
+                    update.get("source_data_path", "")
+                    if update["source_scope"] == BindingSourceScope.UPSTREAM_ARTIFACT
+                    else ""
+                )
+            ),
         )
 
 
@@ -1808,6 +1815,37 @@ def build_portfolio_manager_config(
     }
 
 
+def build_pdf_config(form: PdfStepConfigForm) -> dict[str, Any]:
+    """Build strict PDF inventory and fixed exact-selector configuration."""
+    cleaned = form.cleaned_data
+    config = {
+        "profile": cleaned.get("profile") or "inventory_v1",
+        "emit_extracted_files_bundle": bool(cleaned.get("emit_extracted_files_bundle")),
+    }
+    for suffix in ("xml", "json", "step_p21"):
+        selector_key = f"selected_{suffix}"
+        selector = None
+        if cleaned.get(f"select_{suffix}"):
+            selector = {
+                "required": bool(cleaned.get(f"{selector_key}_required")),
+                "original_filename": (
+                    cleaned.get(f"{selector_key}_filename") or ""
+                ).strip(),
+                "declared_media_type": (
+                    cleaned.get(f"{selector_key}_declared_media_type") or ""
+                ).strip(),
+                "af_relationship": (
+                    cleaned.get(f"{selector_key}_af_relationship") or ""
+                ).strip(),
+            }
+            if suffix == "xml":
+                selector["xml_root_qname"] = (
+                    cleaned.get("selected_xml_root_qname") or ""
+                ).strip()
+        config[selector_key] = selector
+    return config
+
+
 def _sync_portfolio_manager_resources(
     step: WorkflowStep,
     form: PortfolioManagerStepConfigForm,
@@ -2041,6 +2079,8 @@ def save_workflow_step(
         config = build_portfolio_manager_config(
             cast("PortfolioManagerStepConfigForm", form),
         )
+    elif vtype == ValidationType.PDF:
+        config = build_pdf_config(cast("PdfStepConfigForm", form))
     else:
         config = {}
 
@@ -2094,7 +2134,6 @@ def save_workflow_step(
     # after step.save() gives us a PK for new steps.
     if vtype == ValidationType.ENERGYPLUS:
         _sync_energyplus_resources(step, form)
-        _sync_step_file_port_bindings(step, form)
         _sync_template_step_io(step, template_vars)
     elif vtype == ValidationType.FMU and getattr(form, "is_system_validator", False):
         _sync_fmu_resources(step, form)
@@ -2104,7 +2143,11 @@ def save_workflow_step(
             step,
             cast("PortfolioManagerStepConfigForm", form),
         )
-        _sync_step_file_port_bindings(step, form)
+
+    # File-port source persistence is validator-neutral. Forms that expose the
+    # reusable component provide ``build_file_port_binding_updates``; forms
+    # without declared file inputs simply produce no updates.
+    _sync_step_file_port_bindings(step, form)
 
     # Ensure bindings exist for validator-owned step inputs so the
     # input resolution engine activates.

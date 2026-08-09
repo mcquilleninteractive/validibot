@@ -61,6 +61,7 @@ from validibot.validations.services.submission_file_ports import (
 from validibot.validations.validators.base import ValidationIssue
 from validibot.validations.validators.base import ValidationResult
 from validibot.validations.validators.base.config import get_config
+from validibot.validations.validators.pdf.validator import PDF_MAX_SUBMISSION_BYTES
 
 if TYPE_CHECKING:
     from validibot.submissions.models import Submission
@@ -1436,6 +1437,127 @@ def launch_portfolio_manager_validation(
                     ),
                     severity=Severity.ERROR,
                     code="portfolio_manager.backend_unavailable",
+                    meta={"infra_error": True},
+                )
+            ],
+            stats={},
+        )
+
+
+def launch_pdf_validation(
+    *,
+    run: ValidationRun,
+    validator: Validator,
+    submission: Submission,
+    ruleset: Ruleset | None,
+    step: WorkflowStep,
+    job_name: str | None = None,
+    expected_image_digest: str | None = None,
+    provider_dispatch=None,
+) -> ValidationResult:
+    """Stage exact PDF bytes and launch the isolated package backend."""
+    del ruleset
+    current_step_run = None
+    try:
+        current_step_run = run.current_step_run
+        if not current_step_run:
+            msg = f"No active step run for run {run.id}"
+            raise ValueError(msg)  # noqa: TRY301
+        already_launched = _check_already_launched(current_step_run)
+        if already_launched:
+            return already_launched
+
+        bundle = _attempt_execution_bundle(run=run, step_run=current_step_run)
+        execution_bundle_uri = bundle.execution_bundle_uri
+        input_envelope_uri = bundle.input_envelope_uri
+        staged_name = "document.pdf"
+        submission_uri = f"{execution_bundle_uri}/{staged_name}"
+        local_submission_path = (
+            bundle.local_dir / staged_name if bundle.local_dir is not None else None
+        )
+        content_bytes = submission.read_bytes(max_bytes=PDF_MAX_SUBMISSION_BYTES)
+        if bundle.is_gcs:
+            submission_file = upload_file(
+                content=content_bytes,
+                uri=submission_uri,
+                content_type="application/pdf",
+            )
+        else:
+            if local_submission_path is None:
+                msg = "Local attempt bundle did not provide a filesystem path"
+                raise RuntimeError(msg)  # noqa: TRY301
+            create_local_bytes(local_submission_path, content_bytes)
+            submission_file = local_bytes_identity(
+                content=content_bytes,
+                uri=submission_uri,
+            )
+
+        callback_url = build_validation_callback_url()
+        callback_credentials = _issue_callback_credentials_for_step(current_step_run)
+        envelope = build_input_envelope(
+            run=run,
+            callback_url=callback_url,
+            callback_id=callback_credentials.callback_id,
+            callback_nonce=callback_credentials.callback_nonce,
+            callback_nonce_commitment=(callback_credentials.callback_nonce_commitment),
+            execution_bundle_uri=execution_bundle_uri,
+            input_file_uris={
+                "pdf_document": submission_file,
+                "primary_file_uri": submission_file,
+            },
+        )
+        envelope = _prepare_attempt_capability_envelope(
+            envelope,
+            execution_bundle_uri=execution_bundle_uri,
+        )
+        if bundle.is_gcs:
+            upload_envelope(envelope, input_envelope_uri)
+        else:
+            upload_envelope_local(envelope, Path(input_envelope_uri))
+
+        job_name = job_name or _resolve_cloud_run_job_name("PDF")
+        dispatch = provider_dispatch or _dispatch_cloud_run_validation
+        execution_name, _ = dispatch(
+            step_run=current_step_run,
+            job_name=job_name,
+            input_envelope_uri=input_envelope_uri,
+            execution_bundle_uri=execution_bundle_uri,
+            envelope=envelope,
+            submission=submission,
+            step=step,
+            expected_image_digest=expected_image_digest,
+        )
+        return ValidationResult(
+            passed=None,
+            issues=[],
+            stats={
+                "job_status": CloudRunJobStatus.PENDING,
+                "job_name": job_name,
+                "execution_name": execution_name,
+                "input_uri": input_envelope_uri,
+                "execution_bundle_uri": execution_bundle_uri,
+                "output_values": {},
+            },
+        )
+    except ProviderDispatchAmbiguousError:
+        logger.warning("Cloud Run acceptance is unknown for PDF run %s", run.id)
+        return _ambiguous_dispatch_result()
+    except Exception:
+        if _attempt_requires_reconciliation(current_step_run):
+            logger.exception("PDF launch follow-up failed after provider claim")
+            return _ambiguous_dispatch_result()
+        logger.exception("Failed to launch PDF package backend for run %s", run.id)
+        return ValidationResult(
+            passed=False,
+            issues=[
+                ValidationIssue(
+                    path="",
+                    message=(
+                        "The PDF package validation backend could not be "
+                        "launched. The error has been logged for investigation."
+                    ),
+                    severity=Severity.ERROR,
+                    code="pdf.backend_unavailable",
                     meta={"infra_error": True},
                 )
             ],

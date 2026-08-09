@@ -191,7 +191,7 @@ def _build_artifact_binding_defaults(
         source_data_path = io_definition.resource_type
     else:
         source_scope = BindingSourceScope.SUBMISSION_FILE
-        source_data_path = io_definition.role or io_definition.contract_key
+        source_data_path = "primary"
 
     return {
         "source_scope": source_scope,

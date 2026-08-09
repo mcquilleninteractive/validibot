@@ -70,6 +70,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
+from django.core.exceptions import ValidationError
 from django.utils.translation import gettext_lazy as _
 
 if TYPE_CHECKING:
@@ -100,6 +101,7 @@ class ViolationCode(StrEnum):
     WORKFLOW_INACTIVE = "workflow_inactive"
     NO_STEPS = "no_steps"
     VALIDATOR_UNAVAILABLE = "validator_unavailable"
+    INVALID_STEP_DEPENDENCY = "invalid_step_dependency"
     UNSUPPORTED_FILE_TYPE = "unsupported_file_type"
     INCOMPATIBLE_STEP = "incompatible_step"
     PAYLOAD_TOO_LARGE = "payload_too_large"
@@ -250,6 +252,24 @@ class LaunchContract:
                     },
                 ),
                 detail=reason,
+            )
+
+        from validibot.validations.services.artifact_bindings import (
+            validate_workflow_dependencies,
+        )
+
+        try:
+            validate_workflow_dependencies(workflow)
+        except ValidationError as exc:
+            return LaunchContractViolation(
+                code=ViolationCode.INVALID_STEP_DEPENDENCY,
+                message=str(
+                    _(
+                        "This workflow contains an invalid earlier-step file "
+                        "dependency and cannot be launched."
+                    ),
+                ),
+                detail="; ".join(exc.messages),
             )
 
         # 4. and 5. — file-type and step-compatibility checks.

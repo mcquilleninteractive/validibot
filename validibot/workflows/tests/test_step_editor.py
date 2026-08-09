@@ -889,7 +889,7 @@ def test_energyplus_file_source_picker_saves_default_bindings(client):
         ).select_related("io_definition")
     }
     assert bindings["primary_model"].source_scope == BindingSourceScope.SUBMISSION_FILE
-    assert bindings["primary_model"].source_data_path == "primary-model"
+    assert bindings["primary_model"].source_data_path == "primary"
     assert bindings["weather_file"].source_scope == BindingSourceScope.WORKFLOW_RESOURCE
     assert (
         bindings["weather_file"].source_data_path == ResourceFileType.ENERGYPLUS_WEATHER

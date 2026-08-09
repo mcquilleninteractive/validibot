@@ -480,6 +480,7 @@ class WorkflowStepWizardView(WorkflowObjectMixin, View):
                     ValidationType.ENERGYPLUS,
                     ValidationType.FMU,
                     ValidationType.PORTFOLIO_MANAGER,
+                    ValidationType.PDF,
                 },
                 str(_("No advanced validators available yet.")),
             ),
@@ -1210,6 +1211,28 @@ class WorkflowStepFormView(WorkflowObjectMixin, FormView):
             kwargs["workflow"] = workflow
             kwargs["org"] = workflow.org
             kwargs["validator"] = self.get_validator()
+            step = self.get_step()
+            if step is not None:
+                kwargs["proposed_order"] = step.order
+            else:
+                insert_after = self._get_insert_after_step()
+                target_order = (
+                    workflow.steps.filter(pk=insert_after)
+                    .values_list("order", flat=True)
+                    .first()
+                    if insert_after is not None
+                    else None
+                )
+                if target_order is None:
+                    target_order = (
+                        workflow.steps.order_by("-order")
+                        .values_list("order", flat=True)
+                        .first()
+                        or 0
+                    )
+                    kwargs["proposed_order"] = target_order + 10
+                else:
+                    kwargs["proposed_order"] = target_order + 1
         return kwargs
 
     def _get_insert_after_step(self) -> int | None:
@@ -2462,12 +2485,22 @@ class WorkflowStepIOEditView(WorkflowObjectMixin, FormView):
             io_definition=io_definition,
         ).first()
         if self._binding is None:
+            is_artifact_input = (
+                io_definition.direction == "input"
+                and io_definition.io_medium == "artifact"
+            )
             self._binding = StepInputBinding(
                 workflow_step=self.step,
                 io_definition=io_definition,
-                source_scope=BindingSourceScope.SUBMISSION_PAYLOAD,
-                source_data_path=io_definition.native_name or "",
-                is_required=True,
+                source_scope=(
+                    BindingSourceScope.SUBMISSION_FILE
+                    if is_artifact_input
+                    else BindingSourceScope.SUBMISSION_PAYLOAD
+                ),
+                source_data_path=(
+                    "primary" if is_artifact_input else io_definition.native_name or ""
+                ),
+                is_required=io_definition.min_items > 0 if is_artifact_input else True,
             )
         return self._binding
 
@@ -2491,6 +2524,9 @@ class WorkflowStepIOEditView(WorkflowObjectMixin, FormView):
                 "is_library_definition": bool(io_definition.validator_id),
                 "is_path_editable": io_definition.is_path_editable,
                 "source_kind_display": io_definition.get_source_kind_display(),
+                "is_artifact_input": bool(
+                    is_input and io_definition.io_medium == "artifact"
+                ),
                 "modal_title": (
                     f"{title_prefix}: "
                     f"{io_definition.label or io_definition.contract_key}"
@@ -2500,7 +2536,7 @@ class WorkflowStepIOEditView(WorkflowObjectMixin, FormView):
 
         # Build source path suggestions for the datalist: workflow-level
         # signals (s.name) so the user can easily bind an input to a signal.
-        if is_input:
+        if is_input and io_definition.io_medium != "artifact":
             from validibot.workflows.models import WorkflowSignalMapping
 
             workflow = self.get_workflow()
@@ -2729,10 +2765,30 @@ class WorkflowStepDeleteView(WorkflowObjectMixin, View):
             guard_workflow_definition_mutation,
         )
 
+        artifact_consumers = list(
+            step.artifact_output_consumers.select_related("workflow_step").order_by(
+                "workflow_step__order",
+            )
+        )
+        if artifact_consumers:
+            consumer_names = ", ".join(
+                binding.workflow_step.name or binding.workflow_step.step_key
+                for binding in artifact_consumers
+            )
+            return hx_trigger_response(
+                status_code=400,
+                message=_(
+                    "This step supplies a file to: %(consumers)s. Change those "
+                    "inputs before deleting it."
+                )
+                % {"consumers": consumer_names},
+                level="warning",
+            )
+
         with guard_workflow_definition_mutation(workflow.pk):
             try:
                 step.delete()
-            except models.ProtectedError:
+            except (models.ProtectedError, models.RestrictedError):
                 messages.warning(
                     request,
                     _(
@@ -2783,6 +2839,25 @@ class WorkflowStepMoveView(WorkflowObjectMixin, View):
             return hx_trigger_response(
                 status_code=400,
                 message=placement_error,
+                level="warning",
+            )
+
+        from validibot.validations.services.artifact_bindings import (
+            validate_workflow_dependencies,
+        )
+
+        proposed_order = {
+            item.pk: position * 10 for position, item in enumerate(steps, start=1)
+        }
+        try:
+            validate_workflow_dependencies(
+                workflow,
+                proposed_order=proposed_order,
+            )
+        except ValidationError as exc:
+            return hx_trigger_response(
+                status_code=400,
+                message=" ".join(exc.messages),
                 level="warning",
             )
 

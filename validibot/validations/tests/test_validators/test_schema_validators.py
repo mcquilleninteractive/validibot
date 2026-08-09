@@ -22,6 +22,13 @@ from validibot.validations.validators.xml_schema.validator import XmlSchemaValid
 from validibot.workflows.tests.factories import WorkflowStepFactory
 
 
+class _ResolvedFile:
+    """Minimal resolved-file fixture carrying authoritative artifact bytes."""
+
+    def __init__(self, content: bytes):
+        self.content = content
+
+
 def _run_context_for(validator, submission):
     """Build a real run_context so the submission envelope resolves.
 
@@ -117,6 +124,71 @@ def test_xml_schema_validator_runs_step_assertions_after_schema_validation(db):
     assert result.assertion_stats.failures == 1
     assert result.issues[0].assertion_id == assertion.pk
     assert result.issues[0].message == "Area is below the project minimum."
+
+
+def test_json_schema_validator_prefers_resolved_artifact_bytes(db):
+    """A composed JSON step validates its selected upstream artifact, not the PDF."""
+    validator = ValidatorFactory(
+        validation_type=ValidationType.JSON_SCHEMA,
+        supports_assertions=False,
+    )
+    ruleset = RulesetFactory(
+        ruleset_type=RulesetType.JSON_SCHEMA,
+        rules_text=(
+            '{"$schema": "https://json-schema.org/draft/2020-12/schema", '
+            '"type": "object", "required": ["asset_id"]}'
+        ),
+    )
+    submission = SubmissionFactory(
+        content="%PDF-2.0 not JSON",
+        file_type=SubmissionFileType.BINARY,
+    )
+    run_context = RunContext(
+        resolved_file_inputs={"json_document": _ResolvedFile(b'{"asset_id": "A-42"}')}
+    )
+
+    result = JsonSchemaValidator().validate(
+        validator,
+        submission,
+        ruleset,
+        run_context=run_context,
+    )
+
+    assert result.passed is True
+    assert result.stats["schema_error_count"] == 0
+
+
+def test_xml_schema_validator_prefers_resolved_artifact_bytes(db):
+    """A composed XML step validates its selected upstream artifact, not the PDF."""
+    validator = ValidatorFactory(
+        validation_type=ValidationType.XML_SCHEMA,
+        supports_assertions=False,
+    )
+    ruleset = RulesetFactory(
+        ruleset_type=RulesetType.XML_SCHEMA,
+        rules_text=(
+            '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">'
+            '<xs:element name="asset" type="xs:string"/></xs:schema>'
+        ),
+        metadata={"schema_type": XMLSchemaType.XSD.value},
+    )
+    submission = SubmissionFactory(
+        content="%PDF-2.0 not XML",
+        file_type=SubmissionFileType.BINARY,
+    )
+    run_context = RunContext(
+        resolved_file_inputs={"xml_document": _ResolvedFile(b"<asset>A-42</asset>")}
+    )
+
+    result = XmlSchemaValidator().validate(
+        validator,
+        submission,
+        ruleset,
+        run_context=run_context,
+    )
+
+    assert result.passed is True
+    assert result.stats["schema_error_count"] == 0
 
 
 # ── submission.* in BASIC assertions, per validator (ADR-2026-06-03b) ─────

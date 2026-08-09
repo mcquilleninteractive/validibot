@@ -1936,6 +1936,177 @@ class WorkflowStepTypeForm(forms.Form):
         return self.options_by_value[value]
 
 
+class ArtifactInputBindingsFormMixin(forms.Form):
+    """Add reusable source controls for declared singleton file inputs.
+
+    Validator-specific forms opt in by inheriting this mixin. Port declarations
+    remain the source of truth; the mixin only renders and validates the
+    workflow author's source choice.
+    """
+
+    workflow: Workflow | None
+    artifact_input_contract_keys: tuple[str, ...] | None = None
+
+    def __init__(
+        self,
+        *args,
+        proposed_order: int | None = None,
+        **kwargs,
+    ):
+        super().__init__(*args, **kwargs)
+        self.proposed_order = proposed_order
+        self._configure_artifact_input_bindings()
+
+    def _configure_artifact_input_bindings(self) -> None:
+        """Create domain-labelled source and earlier-output fields per port."""
+        from validibot.validations.models import StepInputBinding
+        from validibot.validations.models import StepIODefinition
+        from validibot.validations.services.artifact_bindings import (
+            compatible_artifact_choices,
+        )
+
+        validator = getattr(self, "validator", None)
+        if validator is None:
+            self.artifact_input_ports = {}
+            return
+        ports = StepIODefinition.objects.filter(
+            validator=validator,
+            direction=StepIODirection.INPUT,
+            io_medium=StepIOMedium.ARTIFACT,
+            is_collection=False,
+        ).order_by("order", "pk")
+        if self.artifact_input_contract_keys is not None:
+            ports = ports.filter(contract_key__in=self.artifact_input_contract_keys)
+        self.artifact_input_ports = {port.contract_key: port for port in ports}
+        self.artifact_default_sources = {}
+
+        step = getattr(self, "step", None)
+        binding_map = {}
+        if step is not None and step.pk:
+            binding_map = {
+                binding.io_definition_id: binding
+                for binding in StepInputBinding.objects.filter(
+                    workflow_step=step,
+                    io_definition__in=self.artifact_input_ports.values(),
+                ).select_related(
+                    "io_definition",
+                    "source_step",
+                    "source_output_io_definition",
+                )
+            }
+        self.artifact_input_binding_map = binding_map
+
+        source_labels = {
+            BindingSourceScope.SUBMISSION_FILE: _("Submitted file"),
+            BindingSourceScope.UPSTREAM_ARTIFACT: _("Earlier step output"),
+            BindingSourceScope.WORKFLOW_RESOURCE: _("Workflow resource"),
+        }
+        for port in self.artifact_input_ports.values():
+            source_name = f"{port.contract_key}_source"
+            output_name = f"{port.contract_key}_upstream_artifact"
+            source_choices = [
+                (scope, source_labels[scope])
+                for scope in (port.allowed_source_scopes or [])
+                if scope in source_labels
+            ]
+            self.fields[source_name] = forms.ChoiceField(
+                label=port.label or _("File source"),
+                required=False,
+                choices=source_choices,
+                widget=forms.RadioSelect,
+                help_text=port.description or _("Choose where this file comes from."),
+            )
+
+            workflow = self.workflow
+            choices = (
+                compatible_artifact_choices(
+                    consumer_step=step,
+                    consumer_port=port,
+                    workflow=workflow,
+                    proposed_order=self.proposed_order,
+                )
+                if workflow is not None
+                else []
+            )
+            self.fields[output_name] = forms.ChoiceField(
+                label=_("Earlier step output"),
+                required=False,
+                choices=[
+                    ("", _("— Select an earlier output —")),
+                    *((choice.reference, choice.label) for choice in choices),
+                ],
+                help_text=_("Only compatible files from earlier steps are shown."),
+            )
+
+            binding = binding_map.get(port.pk)
+            allowed_scopes = [value for value, _label in source_choices]
+            initial_scope = getattr(binding, "source_scope", "")
+            if initial_scope not in allowed_scopes:
+                initial_scope = (
+                    BindingSourceScope.SUBMISSION_FILE
+                    if BindingSourceScope.SUBMISSION_FILE in allowed_scopes
+                    else next(iter(allowed_scopes), "")
+                )
+            self.fields[source_name].initial = initial_scope
+            self.artifact_default_sources[port.contract_key] = initial_scope
+            if binding and binding.source_scope == BindingSourceScope.UPSTREAM_ARTIFACT:
+                self.fields[output_name].initial = binding.source_data_path
+
+    def clean(self):
+        """Require one compatible upstream choice when that source is selected."""
+        cleaned = super().clean() or {}
+        for port in getattr(self, "artifact_input_ports", {}).values():
+            source_name = f"{port.contract_key}_source"
+            output_name = f"{port.contract_key}_upstream_artifact"
+            source = cleaned.get(source_name) or self.artifact_default_sources.get(
+                port.contract_key,
+                "",
+            )
+            cleaned[source_name] = source
+            if source == BindingSourceScope.UPSTREAM_ARTIFACT and not cleaned.get(
+                output_name
+            ):
+                self.add_error(
+                    output_name,
+                    _("Choose the file produced by an earlier step."),
+                )
+        return cleaned
+
+    def build_file_port_binding_updates(self) -> list[dict[str, Any]]:
+        """Return generic binding updates consumed by the shared save service."""
+        updates: list[dict[str, Any]] = []
+        for port in getattr(self, "artifact_input_ports", {}).values():
+            source = self.cleaned_data.get(f"{port.contract_key}_source")
+            if not source:
+                continue
+            artifact_reference = ""
+            if source == BindingSourceScope.UPSTREAM_ARTIFACT:
+                artifact_reference = self.cleaned_data.get(
+                    f"{port.contract_key}_upstream_artifact",
+                    "",
+                )
+            if source == BindingSourceScope.WORKFLOW_RESOURCE:
+                source_data_path = port.resource_type or port.data_format
+            elif source == BindingSourceScope.SUBMISSION_FILE:
+                from validibot.workflows.services.submitted_file_ports import (
+                    submitted_file_source_path,
+                )
+
+                source_data_path = submitted_file_source_path(port)
+            else:
+                source_data_path = ""
+            updates.append(
+                {
+                    "io_definition": port,
+                    "source_scope": source,
+                    "source_data_path": source_data_path,
+                    "artifact_reference": artifact_reference,
+                    "is_required": port.min_items > 0,
+                }
+            )
+        return updates
+
+
 class BaseStepConfigForm(forms.Form):
     show_display_schema = False
     supports_execution_profile = False
@@ -2012,12 +2183,14 @@ class BaseStepConfigForm(forms.Form):
         workflow=None,
         org=None,
         validator=None,
+        proposed_order: int | None = None,
         **kwargs,
     ):
         self.step = step
         self.workflow = workflow or getattr(step, "workflow", None)
         self.org = org
         self.validator = validator
+        self.proposed_order = proposed_order
         super().__init__(*args, **kwargs)
         if not self.show_display_schema:
             self.fields.pop("display_schema", None)
@@ -2217,7 +2390,7 @@ class FMUValidatorStepConfigForm(BaseStepConfigForm):
         )
 
 
-class JsonSchemaStepConfigForm(BaseStepConfigForm):
+class JsonSchemaStepConfigForm(ArtifactInputBindingsFormMixin, BaseStepConfigForm):
     show_display_schema = True
     schema_type = forms.ChoiceField(
         label=_("Schema version"),
@@ -2334,7 +2507,7 @@ class JsonSchemaStepConfigForm(BaseStepConfigForm):
         return cleaned
 
 
-class XmlSchemaStepConfigForm(BaseStepConfigForm):
+class XmlSchemaStepConfigForm(ArtifactInputBindingsFormMixin, BaseStepConfigForm):
     show_display_schema = True
     schema_type = forms.ChoiceField(
         label=_("Schema type"),
@@ -3219,7 +3392,6 @@ class EnergyPlusStepConfigForm(BaseStepConfigForm):
             return
 
         self.fields["weather_file"].required = False
-        upstream_choices = self._build_upstream_artifact_choices(step)
         binding_map = self._existing_file_port_bindings(step)
         self.file_port_binding_map = binding_map
 
@@ -3235,13 +3407,39 @@ class EnergyPlusStepConfigForm(BaseStepConfigForm):
                 self.fields.pop(upstream_field, None)
                 continue
 
-            self.fields[source_field].choices = source_choices
+            source_choice_field = cast(
+                "forms.ChoiceField",
+                self.fields[source_field],
+            )
+            source_choice_field.choices = source_choices
             self.fields[source_field].initial = self._initial_source_for_file_port(
                 port,
                 binding_map.get(contract_key),
             )
             if upstream_field in self.fields:
-                self.fields[upstream_field].choices = upstream_choices
+                from validibot.validations.services.artifact_bindings import (
+                    compatible_artifact_choices,
+                )
+
+                workflow = self.workflow
+                upstream_choices = (
+                    compatible_artifact_choices(
+                        consumer_step=step,
+                        consumer_port=port,
+                        workflow=workflow,
+                        proposed_order=self.proposed_order,
+                    )
+                    if workflow is not None
+                    else []
+                )
+                upstream_choice_field = cast(
+                    "forms.ChoiceField",
+                    self.fields[upstream_field],
+                )
+                upstream_choice_field.choices = [
+                    ("", _("— Select generated file —")),
+                    *((choice.reference, choice.label) for choice in upstream_choices),
+                ]
                 binding = binding_map.get(contract_key)
                 if (
                     binding
@@ -3297,52 +3495,6 @@ class EnergyPlusStepConfigForm(BaseStepConfigForm):
             ).select_related("io_definition")
         }
 
-    def _build_upstream_artifact_choices(self, step) -> list[tuple[str, Any]]:
-        """Build choices for artifacts produced by earlier workflow steps."""
-        workflow = self.workflow
-        choices: list[tuple[str, Any]] = [("", _("— Select generated file —"))]
-        if not workflow:
-            return choices
-
-        from validibot.validations.models import StepIODefinition
-        from validibot.workflows.models import WorkflowStep
-
-        steps = WorkflowStep.objects.filter(workflow=workflow).order_by("order", "pk")
-        if step and step.pk:
-            steps = steps.filter(order__lt=step.order).exclude(pk=step.pk)
-
-        seen: set[tuple[str, str]] = set()
-        for upstream_step in steps.select_related("validator"):
-            step_key = upstream_step.step_key or str(upstream_step.pk)
-            output_ports = list(
-                StepIODefinition.objects.filter(
-                    workflow_step=upstream_step,
-                    direction=StepIODirection.OUTPUT,
-                    io_medium=StepIOMedium.ARTIFACT,
-                ).order_by("order", "pk"),
-            )
-            if upstream_step.validator_id:
-                output_ports.extend(
-                    StepIODefinition.objects.filter(
-                        validator=upstream_step.validator,
-                        direction=StepIODirection.OUTPUT,
-                        io_medium=StepIOMedium.ARTIFACT,
-                    ).order_by("order", "pk"),
-                )
-            for port in output_ports:
-                key = (step_key, port.contract_key)
-                if key in seen:
-                    continue
-                seen.add(key)
-                label = port.label or port.contract_key
-                choices.append(
-                    (
-                        f"{step_key}.{port.contract_key}",
-                        f"{upstream_step.name} · {label}",
-                    ),
-                )
-        return choices
-
     def clean(self):
         cleaned = super().clean() or {}
         run_simulation = cleaned.get(
@@ -3366,7 +3518,9 @@ class EnergyPlusStepConfigForm(BaseStepConfigForm):
                 self.file_port_binding_map.get(contract_key),
             )
             cleaned[source_field] = source
-            allowed = {value for value, _label in self.fields[source_field].choices}
+            allowed = {
+                value for value, _label in self._source_choices_for_file_port(port)
+            }
             if source and source not in allowed:
                 self.add_error(source_field, _("Choose an allowed file source."))
                 continue
@@ -3424,7 +3578,11 @@ class EnergyPlusStepConfigForm(BaseStepConfigForm):
             elif source == BindingSourceScope.WORKFLOW_RESOURCE:
                 source_data_path = port.resource_type or port.data_format
             else:
-                source_data_path = port.role or port.contract_key
+                from validibot.workflows.services.submitted_file_ports import (
+                    submitted_file_source_path,
+                )
+
+                source_data_path = submitted_file_source_path(port)
 
             updates.append(
                 {
@@ -4785,7 +4943,7 @@ class TabularStepConfigForm(BaseStepConfigForm):
         return inferred.descriptor
 
 
-class SchematronStepConfigForm(BaseStepConfigForm):
+class SchematronStepConfigForm(ArtifactInputBindingsFormMixin, BaseStepConfigForm):
     """Step configuration for the Schematron validator (ADR-2026-07-01 D2).
 
     Mirrors the XML Schema / SHACL authoring flow: the author pastes or
@@ -4940,6 +5098,214 @@ class SchematronStepConfigForm(BaseStepConfigForm):
         cleaned["schematron_filename"] = (
             upload.name if cleaned["schematron_source"] == "upload" else ""
         )
+        return cleaned
+
+
+class PdfStepConfigForm(ArtifactInputBindingsFormMixin, BaseStepConfigForm):
+    """Configure package inventory and fixed exact typed extractions."""
+
+    supports_execution_profile = True
+    artifact_input_contract_keys = ("pdf_document",)
+
+    profile = forms.ChoiceField(
+        label=_("Inspection profile"),
+        choices=[
+            ("inventory_v1", _("Inventory only")),
+            ("safe_static_package_v1", _("Safe static package")),
+        ],
+        initial="inventory_v1",
+        help_text=_(
+            "Inventory records package structure. Safe static package also rejects "
+            "dangerous active or external behavior; ordinary hyperlinks are "
+            "inventoried as warnings."
+        ),
+    )
+    emit_extracted_files_bundle = forms.BooleanField(
+        label=_("Create an extracted-files evidence bundle"),
+        required=False,
+        help_text=_(
+            "Store a deterministic ZIP of eligible embedded files. This does "
+            "not make those files safe to open."
+        ),
+    )
+    select_xml = forms.BooleanField(
+        label=_("Expose one embedded XML document to a later step"),
+        required=False,
+        help_text=_(
+            "The PDF step will emit selected_xml only when exactly one member "
+            "matches the exact fields below."
+        ),
+    )
+    selected_xml_required = forms.BooleanField(
+        label=_("Fail when no matching XML document exists"),
+        required=False,
+        initial=True,
+    )
+    selected_xml_filename = forms.CharField(
+        label=_("Exact embedded filename"),
+        required=False,
+        max_length=512,
+        help_text=_("For example: asset-handover.xml. No globs or regex."),
+    )
+    selected_xml_root_qname = forms.CharField(
+        label=_("Exact XML root QName"),
+        required=False,
+        max_length=1024,
+        help_text=_(
+            "Optional semantic match, for example {urn:example:asset}handover."
+        ),
+    )
+    selected_xml_af_relationship = forms.CharField(
+        label=_("Exact PDF associated-file relationship"),
+        required=False,
+        max_length=128,
+        help_text=_("Optional, for example Data or Source."),
+    )
+    selected_xml_declared_media_type = forms.CharField(
+        label=_("Exact declared media type"),
+        required=False,
+        max_length=255,
+        initial="application/xml",
+    )
+    select_json = forms.BooleanField(
+        label=_("Expose one embedded JSON document to a later step"),
+        required=False,
+    )
+    selected_json_required = forms.BooleanField(
+        label=_("Fail when no matching JSON document exists"),
+        required=False,
+        initial=True,
+    )
+    selected_json_filename = forms.CharField(
+        label=_("Exact embedded JSON filename"),
+        required=False,
+        max_length=512,
+        help_text=_("For example: asset-index.json. No globs or regex."),
+    )
+    selected_json_af_relationship = forms.CharField(
+        label=_("Exact JSON associated-file relationship"),
+        required=False,
+        max_length=128,
+        help_text=_("Optional, for example Data or Source."),
+    )
+    selected_json_declared_media_type = forms.CharField(
+        label=_("Exact declared JSON media type"),
+        required=False,
+        max_length=255,
+        initial="application/json",
+    )
+    select_step_p21 = forms.BooleanField(
+        label=_("Expose one embedded STEP Part 21 file to a later step"),
+        required=False,
+    )
+    selected_step_p21_required = forms.BooleanField(
+        label=_("Fail when no matching STEP file exists"),
+        required=False,
+        initial=True,
+    )
+    selected_step_p21_filename = forms.CharField(
+        label=_("Exact embedded STEP filename"),
+        required=False,
+        max_length=512,
+        help_text=_("For example: assembly.p21. No globs or regex."),
+    )
+    selected_step_p21_af_relationship = forms.CharField(
+        label=_("Exact STEP associated-file relationship"),
+        required=False,
+        max_length=128,
+        help_text=_("Optional, for example Data or Source."),
+    )
+    selected_step_p21_declared_media_type = forms.CharField(
+        label=_("Exact declared STEP media type"),
+        required=False,
+        max_length=255,
+        initial="model/step",
+    )
+
+    def __init__(self, *args, step=None, **kwargs):
+        super().__init__(*args, step=step, **kwargs)
+        config = getattr(step, "config", None) or {}
+        self.fields["profile"].initial = config.get("profile", "inventory_v1")
+        self.fields["emit_extracted_files_bundle"].initial = bool(
+            config.get("emit_extracted_files_bundle", False)
+        )
+        selector = config.get("selected_xml") or {}
+        self.fields["select_xml"].initial = bool(selector)
+        self.fields["selected_xml_required"].initial = selector.get(
+            "required",
+            True,
+        )
+        self.fields["selected_xml_filename"].initial = selector.get(
+            "original_filename",
+            "",
+        )
+        self.fields["selected_xml_root_qname"].initial = selector.get(
+            "xml_root_qname",
+            "",
+        )
+        self.fields["selected_xml_af_relationship"].initial = selector.get(
+            "af_relationship",
+            "",
+        )
+        self.fields["selected_xml_declared_media_type"].initial = selector.get(
+            "declared_media_type",
+            "application/xml",
+        )
+        for selector_key, default_media_type in (
+            ("selected_json", "application/json"),
+            ("selected_step_p21", "model/step"),
+        ):
+            selector = config.get(selector_key) or {}
+            suffix = selector_key.removeprefix("selected_")
+            self.fields[f"select_{suffix}"].initial = bool(selector)
+            self.fields[f"{selector_key}_required"].initial = selector.get(
+                "required",
+                True,
+            )
+            self.fields[f"{selector_key}_filename"].initial = selector.get(
+                "original_filename",
+                "",
+            )
+            self.fields[f"{selector_key}_af_relationship"].initial = selector.get(
+                "af_relationship",
+                "",
+            )
+            self.fields[f"{selector_key}_declared_media_type"].initial = selector.get(
+                "declared_media_type",
+                default_media_type,
+            )
+
+    def clean(self):
+        """Require at least one exact key for every enabled typed output."""
+        cleaned = super().clean() or {}
+        selector_fields = {
+            "xml": (
+                "selected_xml_filename",
+                "selected_xml_root_qname",
+                "selected_xml_af_relationship",
+                "selected_xml_declared_media_type",
+            ),
+            "json": (
+                "selected_json_filename",
+                "selected_json_af_relationship",
+                "selected_json_declared_media_type",
+            ),
+            "step_p21": (
+                "selected_step_p21_filename",
+                "selected_step_p21_af_relationship",
+                "selected_step_p21_declared_media_type",
+            ),
+        }
+        labels = {"xml": "XML", "json": "JSON", "step_p21": "STEP"}
+        for suffix, match_fields in selector_fields.items():
+            if cleaned.get(f"select_{suffix}") and not any(
+                (cleaned.get(name) or "").strip() for name in match_fields
+            ):
+                self.add_error(
+                    match_fields[0],
+                    _("Define at least one exact %(kind)s member match.")
+                    % {"kind": labels[suffix]},
+                )
         return cleaned
 
 
@@ -5385,6 +5751,7 @@ def get_config_form_class(validation_type: str) -> type[forms.Form]:
         ValidationType.SHACL: ShaclStepConfigForm,
         ValidationType.TABULAR: TabularStepConfigForm,
         ValidationType.PORTFOLIO_MANAGER: PortfolioManagerStepConfigForm,
+        ValidationType.PDF: PdfStepConfigForm,
         ValidationType.ENERGYPLUS: EnergyPlusStepConfigForm,
         ValidationType.FMU: FMUValidatorStepConfigForm,
         ValidationType.AI_ASSIST: AiAssistStepConfigForm,
@@ -5574,11 +5941,30 @@ class StepInputBindingEditForm(forms.Form):
             "Cannot be used together with a default value."
         ),
     )
+    file_source = forms.ChoiceField(
+        required=False,
+        label=_("File source"),
+        choices=(),
+        widget=forms.RadioSelect,
+        help_text=_("Choose which file is supplied to this validator input."),
+    )
+    earlier_step_output = forms.ChoiceField(
+        required=False,
+        label=_("Earlier step output"),
+        choices=(),
+        help_text=_("Only compatible outputs from earlier steps are shown."),
+    )
+    binding_revision = forms.CharField(required=False, widget=forms.HiddenInput)
 
     def __init__(self, *args, io_definition=None, binding=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.io_definition = io_definition
         self.binding = binding
+        self.is_artifact_input = bool(
+            io_definition
+            and io_definition.direction == StepIODirection.INPUT
+            and io_definition.io_medium == StepIOMedium.ARTIFACT
+        )
 
         # Pre-populate from existing data.
         if io_definition and not self.is_bound:
@@ -5610,6 +5996,14 @@ class StepInputBindingEditForm(forms.Form):
             if binding.default_value is not None:
                 self.fields["default_value"].initial = str(binding.default_value)
             self.fields["is_required"].initial = binding.is_required
+            self.fields["binding_revision"].initial = binding.modified.isoformat()
+
+        if self.is_artifact_input:
+            self._configure_artifact_input_fields()
+        else:
+            self.fields.pop("file_source", None)
+            self.fields.pop("earlier_step_output", None)
+            self.fields.pop("binding_revision", None)
 
         # Library-owned definitions: definition fields are read-only.
         if io_definition and io_definition.validator_id:
@@ -5621,8 +6015,75 @@ class StepInputBindingEditForm(forms.Form):
         if io_definition and not io_definition.is_path_editable:
             self.fields["source_data_path"].disabled = True
 
+    def _configure_artifact_input_fields(self) -> None:
+        """Replace value-path controls with the reusable file-source picker."""
+        from validibot.validations.constants import BindingSourceScope
+        from validibot.validations.services.artifact_bindings import (
+            compatible_artifact_choices,
+        )
+
+        labels = {
+            BindingSourceScope.SUBMISSION_FILE: _("Submitted file"),
+            BindingSourceScope.UPSTREAM_ARTIFACT: _("Earlier step output"),
+            BindingSourceScope.WORKFLOW_RESOURCE: _("Workflow resource"),
+        }
+        allowed = self.io_definition.allowed_source_scopes or []
+        self.fields["file_source"].choices = [
+            (scope, labels[scope]) for scope in allowed if scope in labels
+        ]
+        current_scope = getattr(self.binding, "source_scope", "")
+        if current_scope not in allowed:
+            current_scope = next(iter(allowed), "")
+        self.fields["file_source"].initial = current_scope
+
+        step = getattr(self.binding, "workflow_step", None)
+        choices = []
+        if step is not None and step.workflow_id:
+            choices = compatible_artifact_choices(
+                consumer_step=step,
+                consumer_port=self.io_definition,
+                workflow=step.workflow,
+            )
+        self.artifact_binding_choices = choices
+        self.fields["earlier_step_output"].choices = [
+            ("", _("— Select an earlier output —")),
+            *((choice.reference, choice.label) for choice in choices),
+        ]
+        if (
+            self.binding
+            and self.binding.source_scope == BindingSourceScope.UPSTREAM_ARTIFACT
+        ):
+            self.fields["earlier_step_output"].initial = self.binding.source_data_path
+
+        for field_name in ("source_data_path", "default_value", "is_required"):
+            self.fields.pop(field_name, None)
+
     def clean(self):
         cleaned = super().clean()
+        if self.is_artifact_input:
+            source = cleaned.get("file_source") or ""
+            allowed = {value for value, _label in self.fields["file_source"].choices}
+            if source not in allowed:
+                self.add_error("file_source", _("Choose an allowed file source."))
+            if source == BindingSourceScope.UPSTREAM_ARTIFACT and not cleaned.get(
+                "earlier_step_output"
+            ):
+                self.add_error(
+                    "earlier_step_output",
+                    _("Choose the file produced by an earlier step."),
+                )
+            if self.binding and not self.binding._state.adding:
+                current = type(self.binding).objects.get(pk=self.binding.pk)
+                posted_revision = cleaned.get("binding_revision") or ""
+                if posted_revision and current.modified.isoformat() != posted_revision:
+                    self.add_error(
+                        "file_source",
+                        _(
+                            "This file source changed in another editor. Reload "
+                            "the step and try again."
+                        ),
+                    )
+            return cleaned
         default_value = (cleaned.get("default_value") or "").strip()
         is_required = cleaned.get("is_required", False)
         if default_value and is_required:
@@ -5646,9 +6107,24 @@ class StepInputBindingEditForm(forms.Form):
             io_definition.unit = self.cleaned_data.get("unit") or ""
             io_definition.save(update_fields=["label", "description", "unit"])
 
-        if binding:
-            from validibot.validations.constants import BindingSourceScope
+        if binding and self.is_artifact_input:
+            from validibot.validations.services.artifact_bindings import (
+                set_artifact_input_binding,
+            )
 
+            set_artifact_input_binding(
+                consumer_step=binding.workflow_step,
+                consumer_port=io_definition,
+                source_scope=self.cleaned_data["file_source"],
+                artifact_reference=(self.cleaned_data.get("earlier_step_output") or ""),
+                source_data_path=(
+                    binding.source_data_path
+                    if self.cleaned_data["file_source"]
+                    == BindingSourceScope.WORKFLOW_RESOURCE
+                    else ""
+                ),
+            )
+        elif binding:
             update_fields = ["default_value", "is_required"]
 
             # Only update path/scope when the field is editable. When

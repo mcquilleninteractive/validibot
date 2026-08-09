@@ -185,4 +185,85 @@
       applyPortfolioManagerMode();
     })();
   </script>
+  <script nonce="{{ CSP_NONCE }}">
+    (function initArtifactSourceToggles() {
+      const sourceRadios = Array.from(
+        document.querySelectorAll('input[type="radio"][name$="_source"]')
+      );
+      if (!sourceRadios.length) return;
+
+      const sourceNames = Array.from(new Set(sourceRadios.map(function(radio) {
+        return radio.name;
+      })));
+
+      function applySource(name) {
+        const selected = document.querySelector(
+          'input[name="' + CSS.escape(name) + '"]:checked'
+        );
+        const prefix = name.slice(0, -'_source'.length);
+        const earlierField = document.getElementById(
+          'div_id_' + prefix + '_upstream_artifact'
+        );
+        if (earlierField) {
+          earlierField.classList.toggle(
+            'd-none',
+            !selected || selected.value !== 'upstream_artifact'
+          );
+        }
+      }
+
+      sourceNames.forEach(function(name) {
+        document.querySelectorAll(
+          'input[name="' + CSS.escape(name) + '"]'
+        ).forEach(function(radio) {
+          radio.addEventListener('change', function() {
+            applySource(name);
+          });
+        });
+        applySource(name);
+      });
+    })();
+  </script>
+  <script nonce="{{ CSP_NONCE }}">
+    (function initPdfSelectorToggles() {
+      const selectors = {
+        xml: [
+          'selected_xml_required',
+          'selected_xml_filename',
+          'selected_xml_root_qname',
+          'selected_xml_af_relationship',
+          'selected_xml_declared_media_type'
+        ],
+        json: [
+          'selected_json_required',
+          'selected_json_filename',
+          'selected_json_af_relationship',
+          'selected_json_declared_media_type'
+        ],
+        step_p21: [
+          'selected_step_p21_required',
+          'selected_step_p21_filename',
+          'selected_step_p21_af_relationship',
+          'selected_step_p21_declared_media_type'
+        ]
+      };
+
+      Object.entries(selectors).forEach(function(entry) {
+        const suffix = entry[0];
+        const fieldNames = entry[1];
+        const control = document.getElementById('id_select_' + suffix);
+        if (!control) return;
+
+        function applyPdfSelector() {
+          fieldNames.forEach(function(name) {
+            const field = document.getElementById('div_id_' + name);
+            if (field) field.classList.toggle('d-none', !control.checked);
+          });
+        }
+
+        control.addEventListener('change', applyPdfSelector);
+        applyPdfSelector();
+      });
+    })();
+  </script>
 {% endblock app_content %}

@@ -64,7 +64,12 @@ class XmlSchemaValidator(BaseValidator):
         """
         self.run_context = run_context
 
-        if submission.file_type != SubmissionFileType.XML:
+        resolved_file = (
+            (run_context.resolved_file_inputs or {}).get("xml_document")
+            if run_context is not None
+            else None
+        )
+        if resolved_file is None and submission.file_type != SubmissionFileType.XML:
             return ValidationResult(
                 passed=False,
                 issues=[
@@ -107,10 +112,17 @@ class XmlSchemaValidator(BaseValidator):
                 stats={"schema_type": schema_type},
             )
 
-        # Parse input
-        # Prefer Submission.get_content() if available
+        # The declared file port is authoritative for composed workflows. Keep
+        # the direct Submission fallback for validator v1 and isolated unit
+        # tests that do not construct a full run context.
         try:
-            content = submission.get_content() if submission else None
+            content = (
+                resolved_file.content
+                if resolved_file is not None
+                else submission.read_bytes()
+                if submission
+                else None
+            )
         except Exception as e:
             return ValidationResult(
                 passed=False,
@@ -143,7 +155,7 @@ class XmlSchemaValidator(BaseValidator):
                 resolve_entities=False,
                 no_network=True,
             )
-            doc = etree.fromstring((content or "").encode("utf-8"), parser=parser)
+            doc = etree.fromstring(content, parser=parser)
         except Exception as e:
             return ValidationResult(
                 passed=False,

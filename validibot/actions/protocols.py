@@ -59,6 +59,8 @@ class RunContext:
             for an advanced validator step.
         execution_deployment: Exact managed-provider route pinned to the
             attempt. Empty for local and self-hosted execution.
+        resolved_file_inputs: Exact bounded files supplied through declared
+            artifact input ports, keyed by input contract key.
     """
 
     validation_run: ValidationRun | None = None
@@ -67,6 +69,7 @@ class RunContext:
     workflow_signals: dict[str, Any] = field(default_factory=dict)
     workflow_constants: dict[str, Any] = field(default_factory=dict)
     step_input_contract_values: dict[str, Any] = field(default_factory=dict)
+    resolved_file_inputs: dict[str, Any] = field(default_factory=dict)
     execution_attempt: ExecutionAttempt | None = None
     execution_deployment: ValidatorExecutionDeployment | None = None
 

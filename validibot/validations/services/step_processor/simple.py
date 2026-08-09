@@ -48,6 +48,21 @@ class SimpleValidationProcessor(ValidationStepProcessor):
             return self._handle_validator_not_found(e)
 
         run_context = self._build_run_context()
+        from validibot.validations.services.resolved_files import resolve_file_inputs
+
+        try:
+            run_context.resolved_file_inputs = resolve_file_inputs(
+                run=self.validation_run,
+                step=self.workflow_step,
+                step_run=self.step_run,
+            )
+        except ValueError as exc:
+            logger.warning(
+                "Could not resolve file inputs for simple validation step %s: %s",
+                self.step_run.id,
+                exc,
+            )
+            return self._handle_error(exc)
 
         try:
             # Call validator.validate() - this does EVERYTHING:

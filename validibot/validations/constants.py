@@ -382,6 +382,7 @@ class ValidationType(TextChoices):
         "PORTFOLIO_MANAGER",
         _("Building Benchmark Report Validator"),
     )
+    PDF = "PDF", _("PDF Package Validator")
     # SYSMLV2 = "SYSMLV2", _("SysMLv2 Model Validator")
 
 
@@ -429,6 +430,7 @@ ADVANCED_VALIDATION_TYPES = {
     ValidationType.CUSTOM_VALIDATOR,
     ValidationType.AI_ASSIST,
     ValidationType.PORTFOLIO_MANAGER,
+    ValidationType.PDF,
 }
 # NOTE on SHACL: it is "advanced" purely for ROUTING — SHACL parses untrusted RDF
 # and runs author-supplied SPARQL, which must execute inside the isolated
@@ -523,6 +525,8 @@ DEFAULT_COMPUTE_TIERS: dict[str, str] = {
     ValidationType.TABULAR: ComputeTier.LOW,
     # Spreadsheet/XML/ZIP parsing is isolated for safety, not heavy compute.
     ValidationType.PORTFOLIO_MANAGER: ComputeTier.LOW,
+    # PDF parsing is isolated because it crosses an untrusted binary boundary.
+    ValidationType.PDF: ComputeTier.LOW,
     # ValidationType.SYSMLV2: ComputeTier.LOW,
 }
 

@@ -30,6 +30,7 @@ from dataclasses import field
 from typing import TYPE_CHECKING
 from typing import Any
 
+from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils.text import slugify
 
@@ -136,6 +137,19 @@ def import_definition(
         workflow_data.get("constants") or [],
     )
     _note_unsupported_role_access(workflow_data, warnings)
+
+    from validibot.validations.services.artifact_bindings import (
+        validate_workflow_dependencies,
+    )
+
+    try:
+        validate_workflow_dependencies(workflow)
+    except ValidationError as exc:
+        raise WorkflowImportError(
+            "The imported workflow has an invalid earlier-step file dependency: "
+            + "; ".join(exc.messages),
+            code="vaf.invalid_artifact_dependency",
+        ) from exc
 
     return ImportResult(workflow=workflow, warnings=warnings, components=components)
 
@@ -420,7 +434,11 @@ def _make_io_definition_resolver(
 
 def _import_input_bindings(step, rows, resolver) -> None:
     """Create step input bindings, re-binding each to its io_definition definition."""
+    from validibot.validations.constants import BindingSourceScope
     from validibot.validations.models import StepInputBinding
+    from validibot.validations.services.artifact_bindings import (
+        resolve_artifact_reference,
+    )
 
     for row in rows:
         io_definition = resolver(row.get("io_definition_ref"))
@@ -436,6 +454,13 @@ def _import_input_bindings(step, rows, resolver) -> None:
                 if row.get(f) is not None
             },
         )
+        if binding.source_scope == BindingSourceScope.UPSTREAM_ARTIFACT:
+            source_step, source_output = resolve_artifact_reference(
+                workflow=step.workflow,
+                reference=binding.source_data_path,
+            )
+            binding.source_step = source_step
+            binding.source_output_io_definition = source_output
         binding.full_clean()
         binding.save()
 
