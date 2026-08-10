@@ -17,22 +17,47 @@
 #   VALIDIBOT_MCP_SERVICE_KEY — shared secret for MCP→Django service auth
 #     (only used in local dev; Cloud Run uses OIDC identity tokens)
 
-# Base image pinned by digest (OSSF Scorecard Pinned-Dependencies); Dependabot's
-# docker ecosystem bumps the digest+tag together so patches still flow.
-FROM python:3.13-slim@sha256:6771159cd4fa5d9bba1258caf0b82e6b73458c694d178ad97c5e925c2d0e1a91 AS base
+# The uv helper and Python runtime are both pinned by digest. Dependabot updates
+# the readable tag and reviewed digest together; builds never consume ``latest``.
+FROM ghcr.io/astral-sh/uv:0.11.19@sha256:b46b03ddfcfbf8f547af7e9eaefdf8a39c8cebcba7c98858d3162bd28cf536f6 AS uv
+
+FROM python:3.13-slim@sha256:6771159cd4fa5d9bba1258caf0b82e6b73458c694d178ad97c5e925c2d0e1a91 AS builder
+
+COPY --from=uv /uv /usr/local/bin/uv
+
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_PYTHON_DOWNLOADS=never \
+    UV_CACHE_DIR=/tmp/uv-cache
 
 WORKDIR /app
 
-# uv for fast dependency resolution (matches the cloud image).
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+# Install the exact production dependency graph recorded in the MCP lockfile.
+# The project source is copied separately into the runtime image, matching the
+# main Django image's source-run layout and avoiding an isolated package build.
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev --no-install-project \
+    && rm -rf /tmp/uv-cache
 
-# Copy the full package and install. The package is small; no layer
-# caching win from splitting pyproject.toml and src/.
-COPY pyproject.toml .
-COPY src/ src/
-RUN uv pip install --system --no-cache-dir .
 
-ENV PORT=8080
+FROM python:3.13-slim@sha256:6771159cd4fa5d9bba1258caf0b82e6b73458c694d178ad97c5e925c2d0e1a91 AS runtime
+
+ENV PATH="/app/.venv/bin:${PATH}" \
+    PYTHONPATH=/app/src \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PORT=8080
+
+WORKDIR /app
+
+RUN groupadd --gid 1000 validibot \
+    && useradd --uid 1000 --gid validibot --create-home \
+        --home-dir /home/validibot --shell /usr/sbin/nologin validibot
+
+COPY --from=builder --chown=validibot:validibot /app/.venv /app/.venv
+COPY --chown=validibot:validibot src/ /app/src/
+
+USER validibot:validibot
 
 # Uvicorn serves the ASGI app. The startup lifespan runs the license
 # gate before accepting traffic.
