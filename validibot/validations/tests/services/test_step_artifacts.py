@@ -17,6 +17,7 @@ from validibot_shared.validations.envelopes import (
     ValidationArtifact as ValidationArtifactEnvelope,
 )
 
+from validibot.submissions.constants import SubmissionDataFormat
 from validibot.validations.constants import ArtifactKind
 from validibot.validations.constants import BindingSourceScope
 from validibot.validations.constants import CatalogValueType
@@ -24,6 +25,7 @@ from validibot.validations.constants import EnvelopeChannel
 from validibot.validations.constants import StepIODirection
 from validibot.validations.constants import StepIOMedium
 from validibot.validations.constants import StepStatus
+from validibot.validations.constants import ValidationType
 from validibot.validations.models import Artifact
 from validibot.validations.models import WorkflowStepIOPromotion
 from validibot.validations.services.artifacts import build_step_artifact_refs
@@ -36,12 +38,15 @@ from validibot.validations.tests.factories import StepInputBindingFactory
 from validibot.validations.tests.factories import StepIODefinitionFactory
 from validibot.validations.tests.factories import ValidationRunFactory
 from validibot.validations.tests.factories import ValidationStepRunFactory
+from validibot.validations.tests.factories import ValidatorFactory
+from validibot.validations.validators.pdf.config import config as pdf_config
 from validibot.workflows.tests.factories import WorkflowStepFactory
 
 pytestmark = pytest.mark.django_db
 
 UPDATED_REPORT_SIZE_BYTES = 200
 TEST_ARTIFACT_SHA256 = "a" * 64
+PDF_OUTPUT_ARTIFACT_COUNT = 6
 
 
 def _validation_artifact(**kwargs) -> ValidationArtifactEnvelope:
@@ -56,6 +61,29 @@ def _validation_artifact(**kwargs) -> ValidationArtifactEnvelope:
         kwargs.setdefault("sha256", TEST_ARTIFACT_SHA256)
         kwargs.setdefault("storage_version", "generation-1")
     return ValidationArtifactEnvelope(**kwargs)
+
+
+def _declare_generated_model_output(step):
+    """Declare the producer port required by the relational binding contract."""
+    return StepIODefinitionFactory(
+        validator=step.validator,
+        workflow_step=None,
+        direction=StepIODirection.OUTPUT,
+        contract_key="generated_model",
+        native_name="generated_model",
+        data_type=CatalogValueType.ARTIFACT_REF,
+        io_medium=StepIOMedium.ARTIFACT,
+        artifact_kind=ArtifactKind.FILE,
+        media_type="application/json",
+        data_format=SubmissionDataFormat.ENERGYPLUS_EPJSON,
+        accepted_data_formats=[SubmissionDataFormat.ENERGYPLUS_EPJSON],
+        accepted_media_types=["application/json"],
+        metadata={"accepted_extensions": ["epjson", "json"]},
+        envelope_channel=EnvelopeChannel.OUTPUT_ARTIFACTS,
+        role="generated-model",
+        min_items=0,
+        max_items=1,
+    )
 
 
 class TestArtifactPromotionContract:
@@ -541,6 +569,69 @@ class TestStepArtifactRegistration:
         assert artifact.metadata["source"] == "declared_output_port"
         assert refs == [build_step_artifact_refs(step_run)["eplusout_sql"]]
 
+    def test_pdf_attempt_maps_all_six_artifacts_to_distinct_declared_ports(self):
+        """One PDF attempt must not conflate its six similarly named outputs."""
+        run = ValidationRunFactory()
+        validator = ValidatorFactory(validation_type=ValidationType.PDF)
+        step = WorkflowStepFactory(
+            workflow=run.workflow,
+            validator=validator,
+            name="Inspect PDF",
+        )
+        output_entries = [
+            entry
+            for entry in pdf_config.catalog_entries
+            if entry.run_stage == "output" and entry.io_medium == StepIOMedium.ARTIFACT
+        ]
+        for entry in output_entries:
+            StepIODefinitionFactory(
+                validator=validator,
+                direction=StepIODirection.OUTPUT,
+                contract_key=entry.slug,
+                native_name=entry.slug,
+                data_type=entry.data_type,
+                io_medium=entry.io_medium,
+                artifact_kind=entry.artifact_kind,
+                media_type=entry.media_type,
+                data_format=entry.data_format,
+                accepted_data_formats=entry.accepted_data_formats,
+                accepted_media_types=entry.accepted_media_types,
+                envelope_channel=entry.envelope_channel,
+                role=entry.role,
+                metadata=entry.metadata,
+                min_items=entry.min_items,
+                max_items=entry.max_items,
+            )
+        step_run = ValidationStepRunFactory(
+            validation_run=run,
+            workflow_step=step,
+            step_order=step.order,
+            status=StepStatus.PASSED,
+        )
+        envelope_artifacts = [
+            _validation_artifact(
+                name=f"{entry.slug}.artifact",
+                type=entry.role,
+                mime_type=entry.media_type,
+                uri=f"gs://validibot/runs/run-1/outputs/{entry.slug}.artifact",
+                size_bytes=123,
+            )
+            for entry in output_entries
+        ]
+
+        refs = register_output_artifacts(
+            step_run=step_run,
+            output_envelope=SimpleNamespace(
+                artifacts=envelope_artifacts,
+                raw_outputs=None,
+            ),
+        )
+
+        expected_keys = {entry.slug for entry in output_entries}
+        assert len(expected_keys) == PDF_OUTPUT_ARTIFACT_COUNT
+        assert {ref["contract_key"] for ref in refs} == expected_keys
+        assert set(build_step_artifact_refs(step_run)) == expected_keys
+
     def test_declared_json_output_uses_port_domain_format(self):
         """Portfolio Manager JSON should retain its declared domain identity."""
 
@@ -697,6 +788,7 @@ class TestStepArtifactRunContext:
             name="Build Model",
             order=10,
         )
+        _declare_generated_model_output(upstream_step)
         downstream_step = WorkflowStepFactory(
             workflow=run.workflow,
             name="Run Simulation",
@@ -741,6 +833,7 @@ class TestStepArtifactRunContext:
             name="Build Model",
             order=10,
         )
+        _declare_generated_model_output(upstream_step)
         downstream_step = WorkflowStepFactory(
             workflow=run.workflow,
             name="Run Simulation",

@@ -100,9 +100,15 @@ class JsonSchemaValidator(BaseValidator):
         """
         self.run_context = run_context
 
+        resolved_file = (
+            (run_context.resolved_file_inputs or {}).get("json_document")
+            if run_context is not None
+            else None
+        )
+
         # JSON Schema validators require JSON content. This check is a safety
         # net - the handler also validates file type before calling validate().
-        if submission.file_type != SubmissionFileType.JSON:
+        if resolved_file is None and submission.file_type != SubmissionFileType.JSON:
             return ValidationResult(
                 passed=False,
                 issues=[
@@ -129,7 +135,11 @@ class JsonSchemaValidator(BaseValidator):
             )
 
         # Now load incoming content...
-        payload = submission.get_content()
+        payload = (
+            resolved_file.content
+            if resolved_file is not None
+            else submission.get_content()
+        )
 
         try:
             data = json.loads(payload)

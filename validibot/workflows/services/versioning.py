@@ -266,6 +266,9 @@ class WorkflowVersioningService:
         from validibot.validations.models import RulesetAssertion
         from validibot.validations.models import StepIODefinition
         from validibot.validations.models import WorkflowStepIOPromotion
+        from validibot.validations.services.artifact_bindings import (
+            validate_workflow_dependencies,
+        )
         from validibot.workflows.models import Workflow
         from validibot.workflows.models import WorkflowConstant
         from validibot.workflows.models import WorkflowPublicInfo
@@ -426,6 +429,8 @@ class WorkflowVersioningService:
                 io_definition_count += 1
 
             for old_binding in step_binding_map.get(old_pk, []):
+                source_step_id = old_binding.source_step_id
+                source_output_id = old_binding.source_output_io_definition_id
                 io_definition = io_definition_clone_map.get(
                     old_binding.io_definition_id,
                     old_binding.io_definition,
@@ -433,7 +438,19 @@ class WorkflowVersioningService:
                 old_binding.pk = None
                 old_binding.workflow_step = new_step
                 old_binding.io_definition = io_definition
+                old_binding.source_step = (
+                    step_clone_map.get(source_step_id) if source_step_id else None
+                )
+                old_binding.source_output_io_definition = (
+                    io_definition_clone_map.get(
+                        source_output_id,
+                        old_binding.source_output_io_definition,
+                    )
+                    if source_output_id
+                    else None
+                )
                 old_binding.default_value = deepcopy(old_binding.default_value)
+                old_binding.full_clean()
                 old_binding.save()
                 binding_count += 1
 
@@ -577,6 +594,10 @@ class WorkflowVersioningService:
             const.workflow = new_workflow
         WorkflowConstant.objects.bulk_create(constants)
         components_copied["constants"] = len(constants)
+
+        # Validate the cloned dependency graph as one contract before the
+        # transaction locks the source or returns a runnable new version.
+        validate_workflow_dependencies(new_workflow)
 
         # 8. Lock the source workflow.
         workflow.is_locked = True

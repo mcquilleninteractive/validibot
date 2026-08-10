@@ -152,7 +152,7 @@ dependencies = [
   # organization-owned, signed-tag, single-artifact release pipeline.
   # 0.23.0 adds the minimal permanent evidence receipt and its optional
   # per-step backend image identity.
-  "validibot-shared==0.24.0",
+  "validibot-shared==0.25.0",
   "django-csp==4.0",
   "django-permissions-policy==4.32.0",
   # OIDC provider runtime deps. allauth.idp.oidc is unconditionally in

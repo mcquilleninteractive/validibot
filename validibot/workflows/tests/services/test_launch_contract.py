@@ -65,6 +65,10 @@ def _make_workflow_mock(
     (web / API / MCP / x402), which use real fixtures end-to-end.
     """
     workflow = MagicMock()
+    # The relational artifact-dependency launch guard queries by workflow
+    # identity. A stable impossible primary key keeps this unit-test double
+    # isolated from persisted integration fixtures while exercising the guard.
+    workflow.pk = -1
     workflow.is_active = is_active
     # ``workflow.steps.exists()`` is what the contract calls.
     workflow.steps.exists.return_value = has_steps

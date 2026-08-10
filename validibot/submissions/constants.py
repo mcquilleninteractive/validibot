@@ -159,6 +159,9 @@ class SubmissionDataFormat(models.TextChoices):
     THERM_THMX = "therm_thmx", _("THERM THMX")
     THERM_THMZ = "therm_thmz", _("THERM THMZ (Archive)")
     CSV = "csv", _("CSV (tabular)")
+    PDF = "pdf", _("PDF document package")
+    STEP_P21 = "step_p21", _("STEP Part 21")
+    ZIP = "zip", _("ZIP archive")
     PORTFOLIO_MANAGER_REPORT = (
         "portfolio_manager_report",
         _("ENERGY STAR® Portfolio Manager® Report"),
@@ -183,6 +186,9 @@ DATA_FORMAT_FILE_TYPE_MAP: dict[str, list[str]] = {
     SubmissionDataFormat.THERM_THMZ: [SubmissionFileType.BINARY],
     # CSV is carried as a plain-text file (the Tabular Validator reads it).
     SubmissionDataFormat.CSV: [SubmissionFileType.TEXT],
+    SubmissionDataFormat.PDF: [SubmissionFileType.BINARY],
+    SubmissionDataFormat.STEP_P21: [SubmissionFileType.TEXT],
+    SubmissionDataFormat.ZIP: [SubmissionFileType.BINARY],
     SubmissionDataFormat.PORTFOLIO_MANAGER_REPORT: [
         SubmissionFileType.BINARY,
         SubmissionFileType.XML,

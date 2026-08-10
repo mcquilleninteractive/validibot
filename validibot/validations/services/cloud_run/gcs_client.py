@@ -205,6 +205,36 @@ def gcs_object_exists(uri: str) -> bool:
     return client.bucket(bucket_name).blob(blob_path).exists()
 
 
+def download_bytes_generation(
+    *,
+    uri: str,
+    storage_version: str,
+    max_bytes: int,
+) -> bytes:
+    """Download one exact bounded GCS object generation as bytes.
+
+    Artifact consumers must not read a mutable latest version. The persisted
+    ``storage_version`` is the provider generation committed by the producing
+    attempt, so both metadata and download are pinned to it.
+    """
+    bucket_name, blob_path = parse_gcs_uri(uri)
+    try:
+        generation = int(storage_version)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("GCS artifact storage version must be a generation.") from exc
+
+    client = storage.Client()
+    blob = client.bucket(bucket_name).blob(blob_path, generation=generation)
+    blob.reload(if_generation_match=generation)
+    if blob.size is None:
+        raise ValueError(f"GCS artifact size is unavailable: {uri}")
+    if blob.size > max_bytes:
+        raise ValueError(
+            f"GCS artifact is {blob.size} bytes; limit is {max_bytes} bytes."
+        )
+    return blob.download_as_bytes(if_generation_match=generation)
+
+
 def delete_prefix(uri_prefix: str) -> int:
     """
     Delete every object under a ``gs://`` prefix and return the count deleted.

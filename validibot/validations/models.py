@@ -2877,6 +2877,28 @@ class StepInputBinding(TimeStampedModel):
         related_name="input_bindings",
         help_text="The step input definition this binding wires up.",
     )
+    source_step = models.ForeignKey(
+        "workflows.WorkflowStep",
+        on_delete=models.RESTRICT,
+        related_name="artifact_output_consumers",
+        null=True,
+        blank=True,
+        help_text=(
+            "Earlier workflow step that produces this artifact-backed input. "
+            "Set only when source_scope is upstream_artifact."
+        ),
+    )
+    source_output_io_definition = models.ForeignKey(
+        StepIODefinition,
+        on_delete=models.RESTRICT,
+        related_name="artifact_output_bindings",
+        null=True,
+        blank=True,
+        help_text=(
+            "Artifact output port on source_step. Set only when source_scope "
+            "is upstream_artifact."
+        ),
+    )
     source_scope = models.CharField(
         max_length=30,
         choices=BindingSourceScope.choices,
@@ -2921,6 +2943,21 @@ class StepInputBinding(TimeStampedModel):
                 fields=["workflow_step", "io_definition"],
                 name="uq_step_input_binding_definition",
             ),
+            models.CheckConstraint(
+                condition=(
+                    Q(
+                        source_scope=BindingSourceScope.UPSTREAM_ARTIFACT,
+                        source_step__isnull=False,
+                        source_output_io_definition__isnull=False,
+                    )
+                    | (
+                        ~Q(source_scope=BindingSourceScope.UPSTREAM_ARTIFACT)
+                        & Q(source_step__isnull=True)
+                        & Q(source_output_io_definition__isnull=True)
+                    )
+                ),
+                name="ck_step_input_binding_artifact_source_fields",
+            ),
         ]
 
     SEMANTIC_DEFINITION_FIELDS = (
@@ -2928,12 +2965,142 @@ class StepInputBinding(TimeStampedModel):
         "io_definition_id",
         "is_required",
         "source_data_path",
+        "source_output_io_definition_id",
         "source_scope",
+        "source_step_id",
         "workflow_step_id",
     )
 
+    def clean(self):
+        """Validate the local invariants of an artifact dependency edge.
+
+        Whole-workflow ordering and compatibility are rechecked by the shared
+        dependency service. Keeping the row-level invariants here also protects
+        imports, admin code, and tests that call ``full_clean()`` directly.
+        """
+        super().clean()
+        is_upstream_artifact = self.source_scope == BindingSourceScope.UPSTREAM_ARTIFACT
+        if not is_upstream_artifact:
+            if self.source_step_id or self.source_output_io_definition_id:
+                raise ValidationError(
+                    {
+                        "source_scope": _(
+                            "Producer fields are only valid for an earlier-step "
+                            "artifact source."
+                        ),
+                    },
+                )
+            return
+
+        source_step = self.source_step
+        source_output = self.source_output_io_definition
+        if source_step is None or source_output is None:
+            raise ValidationError(
+                {
+                    "source_data_path": _(
+                        "Choose an output file from an earlier workflow step."
+                    ),
+                },
+            )
+        if source_step.workflow_id != self.workflow_step.workflow_id:
+            raise ValidationError(
+                {"source_step": _("The producer must belong to this workflow.")},
+            )
+        if self.source_step_id == self.workflow_step_id:
+            raise ValidationError(
+                {"source_step": _("A step cannot consume its own output.")},
+            )
+        if source_step.order >= self.workflow_step.order:
+            raise ValidationError(
+                {"source_step": _("The producer must be earlier in the workflow.")},
+            )
+
+        if source_output.direction != StepIODirection.OUTPUT:
+            raise ValidationError(
+                {
+                    "source_output_io_definition": _(
+                        "The selected producer contract must be an output."
+                    ),
+                },
+            )
+        if source_output.io_medium != StepIOMedium.ARTIFACT:
+            raise ValidationError(
+                {
+                    "source_output_io_definition": _(
+                        "The selected producer contract must carry a file artifact."
+                    ),
+                },
+            )
+        if source_output.workflow_step_id not in {None, self.source_step_id}:
+            raise ValidationError(
+                {
+                    "source_output_io_definition": _(
+                        "The selected output does not belong to the producer step."
+                    ),
+                },
+            )
+        if (
+            source_output.validator_id is not None
+            and source_output.validator_id != source_step.validator_id
+        ):
+            raise ValidationError(
+                {
+                    "source_output_io_definition": _(
+                        "The selected output does not belong to the producer validator."
+                    ),
+                },
+            )
+
+        expected_path = f"{source_step.step_key}.{source_output.contract_key}"
+        if self.source_data_path and self.source_data_path != expected_path:
+            raise ValidationError(
+                {
+                    "source_data_path": _(
+                        "The portable artifact reference does not match the "
+                        "selected producer and output."
+                    ),
+                },
+            )
+        self.source_data_path = expected_path
+
     def save(self, *args, **kwargs):
-        """Fence binding changes while a Mutable run uses the workflow."""
+        """Normalize artifact relations and fence workflow-definition changes."""
+
+        if self.source_scope == BindingSourceScope.UPSTREAM_ARTIFACT:
+            if (
+                (not self.source_step_id or not self.source_output_io_definition_id)
+                and self.workflow_step_id
+                and self.source_data_path
+            ):
+                from validibot.validations.services.artifact_bindings import (
+                    resolve_artifact_reference,
+                )
+
+                resolved_source_step, resolved_source_output = (
+                    resolve_artifact_reference(
+                        workflow=self.workflow_step.workflow,
+                        reference=self.source_data_path,
+                    )
+                )
+                self.source_step = resolved_source_step
+                self.source_output_io_definition = resolved_source_output
+            source_step = self.source_step
+            source_output = self.source_output_io_definition
+            if source_step is not None and source_output is not None:
+                self.source_data_path = (
+                    f"{source_step.step_key}.{source_output.contract_key}"
+                )
+        else:
+            self.source_step = None
+            self.source_output_io_definition = None
+
+        update_fields = kwargs.get("update_fields")
+        if update_fields is not None:
+            kwargs["update_fields"] = set(update_fields) | {
+                "source_data_path",
+                "source_output_io_definition",
+                "source_step",
+            }
 
         from validibot.workflows.services.editing_policy import (
             guard_workflow_definition_mutation,

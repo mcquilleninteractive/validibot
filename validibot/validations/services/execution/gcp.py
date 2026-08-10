@@ -314,6 +314,8 @@ class CloudRunJobsExecutionBackend(ExecutionBackend):
                 return self._execute_schematron(request)
             if validator_type == "PORTFOLIO_MANAGER":
                 return self._execute_portfolio_manager(request)
+            if validator_type == "PDF":
+                return self._execute_pdf(request)
             return ExecutionResponse(
                 execution_id="",
                 is_complete=True,
@@ -425,6 +427,22 @@ class CloudRunJobsExecutionBackend(ExecutionBackend):
         )
 
         result = launch_portfolio_manager_validation(
+            run=request.run,
+            validator=request.validator,
+            submission=request.submission,
+            ruleset=request.step.ruleset,
+            step=request.step,
+            **self._launcher_kwargs(request.validator_type),
+        )
+        return self._launch_result_to_response(result)
+
+    def _execute_pdf(self, request: ExecutionRequest) -> ExecutionResponse:
+        """Launch the isolated PDF package backend."""
+        from validibot.validations.services.cloud_run.launcher import (
+            launch_pdf_validation,
+        )
+
+        result = launch_pdf_validation(
             run=request.run,
             validator=request.validator,
             submission=request.submission,

@@ -255,7 +255,38 @@ def test_step_owned_artifact_port_survives_export_import():
     src_org, src_user = _org_and_user()
     validator = _tabular_validator()
     workflow = WorkflowFactory(org=src_org, user=src_user)
-    step = WorkflowStepFactory(workflow=workflow, validator=validator)
+    producer = WorkflowStepFactory(
+        workflow=workflow,
+        validator=validator,
+        step_key="build_model",
+        order=10,
+    )
+    producer_output = StepIODefinitionFactory(
+        workflow_step=producer,
+        validator=None,
+        contract_key="generated_model",
+        native_name="generated-model",
+        direction=StepIODirection.OUTPUT,
+        data_type=CatalogValueType.ARTIFACT_REF,
+        io_medium=StepIOMedium.ARTIFACT,
+        artifact_kind=ArtifactKind.FILE,
+        media_type="application/vnd.energyplus.epjson",
+        data_format="energyplus_epjson",
+        accepted_data_formats=["energyplus_epjson"],
+        accepted_media_types=["application/vnd.energyplus.epjson"],
+        allowed_source_scopes=[],
+        default_source_strategy=DefaultSourceStrategy.NONE,
+        envelope_channel=EnvelopeChannel.OUTPUT_ARTIFACTS,
+        role="generated-model",
+        min_items=1,
+        max_items=1,
+    )
+    step = WorkflowStepFactory(
+        workflow=workflow,
+        validator=validator,
+        step_key="validate_model",
+        order=20,
+    )
     io_definition = StepIODefinitionFactory(
         workflow_step=step,
         validator=None,
@@ -281,10 +312,15 @@ def test_step_owned_artifact_port_survives_export_import():
         io_definition=io_definition,
         source_scope=BindingSourceScope.UPSTREAM_ARTIFACT,
         source_data_path="build_model.generated_model",
+        source_step=producer,
+        source_output_io_definition=producer_output,
     )
 
     definition, files = export_definition(workflow)
-    exported_io_definition = definition["steps"][0]["step_io_definitions"][0]
+    exported_consumer = next(
+        item for item in definition["steps"] if item["step_key"] == "validate_model"
+    )
+    exported_io_definition = exported_consumer["step_io_definitions"][0]
     assert exported_io_definition["io_medium"] == StepIOMedium.ARTIFACT
     assert exported_io_definition["envelope_channel"] == EnvelopeChannel.INPUT_FILES
     assert exported_io_definition["allowed_source_scopes"] == [
@@ -294,7 +330,8 @@ def test_step_owned_artifact_port_survives_export_import():
     dst_org, dst_user = _org_and_user()
     result = import_definition(definition, files=files, org=dst_org, user=dst_user)
 
-    imported_step = result.workflow.steps.get()
+    imported_step = result.workflow.steps.get(step_key="validate_model")
+    imported_producer = result.workflow.steps.get(step_key="build_model")
     imported_io_definition = imported_step.step_io_definitions.get(
         contract_key="generated_model",
     )
@@ -309,6 +346,10 @@ def test_step_owned_artifact_port_survives_export_import():
     assert imported_binding.io_definition_id == imported_io_definition.pk
     assert imported_binding.source_scope == BindingSourceScope.UPSTREAM_ARTIFACT
     assert imported_binding.source_data_path == "build_model.generated_model"
+    assert imported_binding.source_step_id == imported_producer.pk
+    assert (
+        imported_binding.source_output_io_definition.contract_key == "generated_model"
+    )
 
 
 def test_import_binds_workflow_to_importing_orgs_default_project():

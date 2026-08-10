@@ -22,6 +22,8 @@ from validibot_shared.energyplus.envelopes import EnergyPlusInputs
 from validibot_shared.fmu.envelopes import FMUInputEnvelope
 from validibot_shared.fmu.envelopes import FMUInputs
 from validibot_shared.fmu.envelopes import FMUSimulationConfig
+from validibot_shared.pdf import PdfInputEnvelope
+from validibot_shared.pdf import PdfInputs
 from validibot_shared.portfolio_manager import PortfolioManagerInputs
 from validibot_shared.portfolio_manager import build_portfolio_manager_input_envelope
 from validibot_shared.portfolio_manager import mime_type_for_portfolio_manager_filename
@@ -878,18 +880,27 @@ def _resolve_resource_file_artifact_port_items(
 
 
 def _resolve_upstream_artifact_ref(*, run, step, port, binding) -> dict:
-    """Resolve and type-check an upstream artifact reference."""
+    """Resolve the relational producer edge to this run's exact artifact."""
 
-    from validibot.validations.services.path_resolution import resolve_step_input
-    from validibot.validations.services.run_context import RunContextBuilder
+    from validibot.validations.models import Artifact
+    from validibot.validations.services.artifacts import build_artifact_ref
 
-    context = RunContextBuilder(run, step).build()
-    resolved = resolve_step_input(
-        binding,
-        upstream_steps=context.upstream_steps,
-    )
-    if resolved.resolved and isinstance(resolved.value, dict):
-        return resolved.value
+    source_step = binding.source_step
+    source_output = binding.source_output_io_definition
+    if source_step is None or source_output is None:
+        msg = f"Artifact port '{port.contract_key}' has no relational producer."
+        raise ValueError(msg)
+    if source_step.workflow_id != step.workflow_id or source_step.order >= step.order:
+        msg = "Artifact producer must be an earlier step in the same workflow."
+        raise ValueError(msg)
+    artifact = Artifact.objects.filter(
+        validation_run=run,
+        workflow_step=source_step,
+        contract_key=source_output.contract_key,
+        item_key="",
+    ).first()
+    if artifact is not None:
+        return build_artifact_ref(artifact).model_dump(mode="json")
 
     msg = (
         f"Artifact port '{port.contract_key}' could not resolve upstream "
@@ -1025,12 +1036,7 @@ def _resolve_submission_file_identity(
         port.contract_key,
         f"{port.contract_key}_uri",
     ]
-    if port.contract_key in {
-        "primary_model",
-        "data_graph",
-        "xml_document",
-        "portfolio_manager_report",
-    }:
+    if binding.source_data_path == "primary":
         candidates.append("primary_file_uri")
 
     del step_config  # Stored config may contain URIs, never immutable identities.
@@ -1345,6 +1351,17 @@ def _build_portfolio_manager_input_file_item(
         size_bytes=file.size_bytes,
         sha256=file.sha256,
         storage_version=file.storage_version,
+    )
+
+
+def _build_pdf_input_file_item(port, file: FileIdentity) -> InputFileItem:
+    """Build the immutable PDF document item from its declared input port."""
+    return InputFileItem(
+        name=_filename_from_uri(file.uri) or "document.pdf",
+        mime_type=SupportedMimeType.APPLICATION_PDF,
+        role=port.role or "pdf-document",
+        port_key=port.contract_key,
+        **file.envelope_fields(),
     )
 
 
@@ -1879,7 +1896,7 @@ def build_input_envelope(
                 msg = f"Step {step.id} has no immutable primary file for Schematron"
                 raise ValueError(msg)
 
-        envelope = build_schematron_input_envelope(
+        schematron_envelope = build_schematron_input_envelope(
             run_id=str(run.id),
             validator=validator,
             org_id=str(run.org.id),
@@ -1903,8 +1920,75 @@ def build_input_envelope(
             skip_callback=skip_callback,
         )
         if xml_document_item is not None:
-            envelope.input_files = [xml_document_item]
-        return envelope
+            schematron_envelope.input_files = [xml_document_item]
+        return schematron_envelope
+
+    if validator.validation_type == ValidationType.PDF:
+        resolved_pdf = _resolve_input_file_artifact_port_item(
+            run=run,
+            step=step,
+            step_config=step_config,
+            input_file_uris=input_file_uris,
+            contract_key="pdf_document",
+            item_builder=_build_pdf_input_file_item,
+        )
+        pdf_item = None
+        if resolved_pdf is not None:
+            pdf_item, _source_scope = resolved_pdf
+            pdf_file = FileIdentity.from_envelope_item(pdf_item)
+        else:
+            pdf_file = (input_file_uris or {}).get("primary_file_uri")
+            if pdf_file is None:
+                msg = f"Step {step.id} has no immutable PDF input"
+                raise ValueError(msg)
+            pdf_item = InputFileItem(
+                name=_filename_from_uri(pdf_file.uri) or "document.pdf",
+                mime_type=SupportedMimeType.APPLICATION_PDF,
+                role="pdf-document",
+                port_key="pdf_document",
+                **pdf_file.envelope_fields(),
+            )
+
+        pdf_inputs = PdfInputs.model_validate(
+            {
+                "profile": (step.config or {}).get("profile", "inventory_v1"),
+                "emit_extracted_files_bundle": bool(
+                    (step.config or {}).get("emit_extracted_files_bundle", False)
+                ),
+                "selected_xml": (step.config or {}).get("selected_xml"),
+            }
+        )
+        context = ExecutionContext.model_validate(
+            {
+                "callback_id": callback_id,
+                "callback_nonce": callback_nonce,
+                "callback_nonce_commitment": callback_nonce_commitment,
+                "callback_url": callback_url,
+                "execution_bundle_uri": execution_bundle_uri,
+                "execution_attempt_id": execution_attempt_id,
+                "step_run_id": step_run_id,
+                "attempt_contract_version": ATTEMPT_CONTRACT_VERSION,
+                "expected_output_uri": expected_output_uri,
+                "skip_callback": skip_callback,
+            }
+        )
+        return PdfInputEnvelope(
+            run_id=str(run.id),
+            validator=ValidatorInfo(
+                id=str(validator.id),
+                type=ValidatorType.PDF,
+                version=str(validator.version),
+            ),
+            org=OrganizationInfo(id=str(run.org.id), name=run.org.name),
+            workflow=WorkflowInfo(
+                id=str(run.workflow.id),
+                step_id=str(step.id),
+                step_name=step.name,
+            ),
+            input_files=[pdf_item],
+            inputs=pdf_inputs,
+            context=context,
+        )
 
     if validator.validation_type == ValidationType.PORTFOLIO_MANAGER:
         portfolio_submission_file: FileIdentity | None

@@ -12,12 +12,22 @@ import hashlib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from typing import Any
+from typing import TypedDict
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 FILE_IDENTITY_CHUNK_SIZE = 1024 * 1024
 LOCAL_STORAGE_VERSION_PREFIX = "sha256:"
+
+
+class FileIdentityEnvelopeFields(TypedDict):
+    """Keyword fields shared by strict input and resource envelope items."""
+
+    uri: str
+    size_bytes: int
+    sha256: str
+    storage_version: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,7 +59,7 @@ class FileIdentity:
             storage_version=str(artifact_ref.get("storage_version") or ""),
         )
 
-    def envelope_fields(self) -> dict[str, int | str]:
+    def envelope_fields(self) -> FileIdentityEnvelopeFields:
         """Return the shared fields used by every file-bearing item."""
         return {
             "uri": self.uri,
@@ -91,6 +101,7 @@ __all__ = [
     "FILE_IDENTITY_CHUNK_SIZE",
     "LOCAL_STORAGE_VERSION_PREFIX",
     "FileIdentity",
+    "FileIdentityEnvelopeFields",
     "local_bytes_identity",
     "local_file_identity",
 ]
