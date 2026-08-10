@@ -19,7 +19,7 @@
 
 # Base image pinned by digest (OSSF Scorecard Pinned-Dependencies); Dependabot's
 # docker ecosystem bumps the digest+tag together so patches still flow.
-FROM python:3.13-slim@sha256:6771159cd4fa5d9bba1258caf0b82e6b73458c694d178ad97c5e925c2d0e1a91 AS base
+FROM python:3.13-slim@sha256:9662417aace5ae7b8e2609cce472b72a8958e134ba372808abe9cc1a0c0125e6 AS base
 
 WORKDIR /app
 
