@@ -10,22 +10,15 @@ repos:
     rev: v5.0.0
     hooks:
       - id: trailing-whitespace
-        # Mermaid is copied byte-for-byte from the integrity-pinned npm
-        # package. Its minified bundle contains whitespace inside embedded
-        # shader/template source, so rewriting it makes the generated asset
-        # perpetually differ from a fresh `npm run build:docs-assets`.
-        exclude: '^docs/dev_docs/javascripts/vendor/mermaid\.min\.js$'
       - id: end-of-file-fixer
       - id: check-json
         exclude: '^\.vscode/'
       - id: check-toml
       - id: check-xml
       - id: check-yaml
-        # mkdocs configs use pymdownx's `!!python/name:` YAML tag (for the
-        # mermaid custom fence), while the integration Compose override uses
-        # Compose's `!reset` merge tag. PyYAML cannot construct either custom
-        # tag, so their domain-specific parsers remain authoritative.
-        exclude: '^(mkdocs.*\.yml|compose/local/docker-compose\.integration\.yml)$'
+        # The integration Compose override uses Compose's `!reset` merge tag,
+        # which PyYAML cannot construct. Compose's parser remains authoritative.
+        exclude: '^compose/local/docker-compose\.integration\.yml$'
       - id: debug-statements
       - id: check-builtin-literals
       - id: check-case-conflict

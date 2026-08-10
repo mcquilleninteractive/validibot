@@ -1,0 +1,106 @@
+<svg xmlns="http://www.w3.org/2000/svg"
+     viewBox="0 0 1450 800"
+     role="img"
+     aria-labelledby="workflow-lifecycle-title workflow-lifecycle-description">
+  <title id="workflow-lifecycle-title">Workflow execution and data lifecycle</title>
+  <desc id="workflow-lifecycle-description">
+    A submission exposes payload and context values, resolves initial signals,
+    and prepares each step's inputs. Input assertions run before the validator;
+    outputs, output assertions, and signal promotions follow. Completed values
+    become available to later steps, and the cycle repeats from input
+    resolution for the next workflow step.
+  </desc>
+  <defs>
+    <style>
+      .background { fill: #f8fafc; }
+      .node { fill: #ffffff; stroke: #7890b4; stroke-width: 2; }
+      .node-input { fill: #eaf2ff; stroke: #2563eb; stroke-width: 2; }
+      .node-validation { fill: #fff8e6; stroke: #d97706; stroke-width: 2; }
+      .node-output { fill: #ecfdf3; stroke: #15803d; stroke-width: 2; }
+      .title { fill: #172033; font: 700 28px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .subtitle { fill: #526079; font: 16px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .label { fill: #172033; font: 700 15px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; text-anchor: middle; }
+      .detail { fill: #526079; font: 13px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; text-anchor: middle; }
+      .phase { font: 700 14px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; text-anchor: middle; }
+      .phase-input { fill: #1d4ed8; }
+      .phase-validation { fill: #b45309; }
+      .phase-output { fill: #166534; }
+      .edge-label { fill: #526079; font: 13px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .note-heading { fill: #5b21b6; font: 700 14px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .note-detail { fill: #526079; font: 13px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .edge { fill: none; stroke: #526b94; stroke-width: 2.2; marker-end: url(#arrow); }
+      .edge-loop { fill: none; stroke: #7c3aed; stroke-width: 2.2; stroke-dasharray: 8 6; marker-end: url(#arrow-purple); }
+    </style>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#526b94"/>
+    </marker>
+    <marker id="arrow-purple" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#7c3aed"/>
+    </marker>
+  </defs>
+
+  <rect class="background" width="1450" height="800" rx="20"/>
+  <text class="title" x="48" y="48">Workflow execution lifecycle</text>
+  <text class="subtitle" x="48" y="76">Values become available in stages as each workflow step resolves, validates, and promotes data.</text>
+
+  <text class="phase phase-input" x="720" y="118">INPUT PREPARATION</text>
+  <text class="phase phase-validation" x="1245" y="392">VALIDATION</text>
+  <text class="phase phase-output" x="455" y="392">OUTPUT AND PROMOTION</text>
+
+  <rect class="node-input" x="45" y="150" width="245" height="110" rx="14"/>
+  <text class="label" x="167.5" y="190">1 · Submission arrives</text>
+  <text class="detail" x="167.5" y="218">start the workflow run</text>
+
+  <rect class="node-input" x="325" y="150" width="245" height="110" rx="14"/>
+  <text class="label" x="447.5" y="185">2 · Expose run values</text>
+  <text class="detail" x="447.5" y="214">p.* · submission.* · c.*</text>
+
+  <rect class="node-input" x="605" y="150" width="245" height="110" rx="14"/>
+  <text class="label" x="727.5" y="185">3 · Resolve initial signals</text>
+  <text class="detail" x="727.5" y="214">WorkflowSignalMapping → s.*</text>
+
+  <rect class="node-input" x="885" y="150" width="245" height="110" rx="14"/>
+  <text class="label" x="1007.5" y="185">4 · Resolve step inputs</text>
+  <text class="detail" x="1007.5" y="214">bindings and parser facts → i.*</text>
+
+  <rect class="node-validation" x="1165" y="150" width="245" height="110" rx="14"/>
+  <text class="label" x="1287.5" y="185">5 · Input assertions</text>
+  <text class="detail" x="1287.5" y="214">evaluate before execution</text>
+
+  <rect class="node-validation" x="1165" y="450" width="245" height="110" rx="14"/>
+  <text class="label" x="1287.5" y="490">6 · Run validator</text>
+  <text class="detail" x="1287.5" y="518">execute the current step</text>
+
+  <rect class="node-output" x="885" y="450" width="245" height="110" rx="14"/>
+  <text class="label" x="1007.5" y="485">7 · Persist outputs</text>
+  <text class="detail" x="1007.5" y="514">o.* values and artifacts</text>
+
+  <rect class="node-output" x="605" y="450" width="245" height="110" rx="14"/>
+  <text class="label" x="727.5" y="485">8 · Output assertions</text>
+  <text class="detail" x="727.5" y="514">evaluate with current o.*</text>
+
+  <rect class="node-output" x="325" y="450" width="245" height="110" rx="14"/>
+  <text class="label" x="447.5" y="480">9 · Promote signals</text>
+  <text class="detail" x="447.5" y="509">selected values become s.*</text>
+
+  <rect class="node" x="45" y="450" width="245" height="110" rx="14"/>
+  <text class="label" x="167.5" y="480">10 · Expose step values</text>
+  <text class="detail" x="167.5" y="509">steps.&lt;key&gt;.* for later steps</text>
+
+  <path class="edge" d="M 290 205 H 325"/>
+  <path class="edge" d="M 570 205 H 605"/>
+  <path class="edge" d="M 850 205 H 885"/>
+  <path class="edge" d="M 1130 205 H 1165"/>
+  <path class="edge" d="M 1287.5 260 V 450"/>
+  <path class="edge" d="M 1165 505 H 1130"/>
+  <path class="edge" d="M 885 505 H 850"/>
+  <path class="edge" d="M 605 505 H 570"/>
+  <path class="edge" d="M 325 505 H 290"/>
+
+  <path class="edge-loop" d="M 167.5 560 V 690 H 1007.5 V 260"/>
+  <text class="edge-label" x="510" y="718">next workflow step · return to input resolution</text>
+
+  <rect x="45" y="628" width="400" height="70" rx="10" fill="#f5f0ff" stroke="#7c3aed" stroke-width="1.5"/>
+  <text class="note-heading" x="65" y="658">Temporal rule</text>
+  <text class="note-detail" x="65" y="681">A value exists only after its producing stage completes.</text>
+</svg>

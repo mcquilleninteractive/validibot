@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg"
+     viewBox="0 0 1450 900"
+     role="img"
+     aria-labelledby="docker-flow-title docker-flow-description">
+  <title id="docker-flow-title">Docker validator execution flow</title>
+  <desc id="docker-flow-description">
+    The Celery worker writes an input envelope to local storage, starts a
+    validator container synchronously through Docker, and passes the input URI.
+    The container reads the input, runs validation, and writes an output
+    envelope. After the container exits, the worker reads and processes the
+    result.
+  </desc>
+  <defs>
+    <style>
+      .background { fill: #f8fafc; }
+      .participant { fill: #ffffff; stroke: #2563eb; stroke-width: 2; }
+      .participant-storage { fill: #fff8e6; stroke: #d99a23; stroke-width: 2; }
+      .participant-container { fill: #ecfdf3; stroke: #15803d; stroke-width: 2; }
+      .title { fill: #172033; font: 700 28px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .subtitle { fill: #526079; font: 16px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .label { fill: #172033; font: 700 17px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; text-anchor: middle; }
+      .detail { fill: #526079; font: 14px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; text-anchor: middle; }
+      .message { fill: #283752; font: 15px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; text-anchor: middle; }
+      .lifeline { stroke: #9aaac2; stroke-width: 1.5; stroke-dasharray: 7 7; }
+      .edge { fill: none; stroke: #526b94; stroke-width: 2; marker-end: url(#arrow); }
+      .edge-return { fill: none; stroke: #526b94; stroke-width: 2; stroke-dasharray: 7 5; marker-end: url(#arrow); }
+      .self { fill: none; stroke: #526b94; stroke-width: 2; marker-end: url(#arrow); }
+    </style>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#526b94"/>
+    </marker>
+  </defs>
+
+  <rect class="background" width="1450" height="900" rx="20"/>
+  <text class="title" x="48" y="48">Docker Compose validator flow</text>
+  <text class="subtitle" x="48" y="76">The Celery worker waits for one local container and reads its result directly.</text>
+
+  <rect class="participant" x="55" y="105" width="250" height="88" rx="13"/>
+  <text class="label" x="180" y="141">Celery worker</text>
+  <text class="detail" x="180" y="168">synchronous runner</text>
+
+  <rect class="participant-storage" x="415" y="105" width="250" height="88" rx="13"/>
+  <text class="label" x="540" y="141">Local storage</text>
+  <text class="detail" x="540" y="168">file:// attempt directory</text>
+
+  <rect class="participant" x="775" y="105" width="250" height="88" rx="13"/>
+  <text class="label" x="900" y="141">Docker daemon</text>
+  <text class="detail" x="900" y="168">container lifecycle</text>
+
+  <rect class="participant-container" x="1135" y="105" width="260" height="88" rx="13"/>
+  <text class="label" x="1265" y="141">Validator container</text>
+  <text class="detail" x="1265" y="168">isolated execution</text>
+
+  <line class="lifeline" x1="180" y1="193" x2="180" y2="840"/>
+  <line class="lifeline" x1="540" y1="193" x2="540" y2="840"/>
+  <line class="lifeline" x1="900" y1="193" x2="900" y2="840"/>
+  <line class="lifeline" x1="1265" y1="193" x2="1265" y2="840"/>
+
+  <text class="message" x="360" y="233">Write input.json</text>
+  <path class="edge" d="M 180 247 H 540"/>
+
+  <text class="message" x="540" y="294">Run validator container synchronously</text>
+  <path class="edge" d="M 180 308 H 900"/>
+
+  <text class="message" x="1082.5" y="355">Start with VALIDIBOT_INPUT_URI</text>
+  <path class="edge" d="M 900 369 H 1265"/>
+
+  <text class="message" x="902.5" y="416">Read input.json</text>
+  <path class="edge" d="M 1265 430 H 540"/>
+
+  <text class="message" x="1120" y="478">Run validation</text>
+  <path class="self" d="M 1265 491 H 1385 V 526 H 1275"/>
+
+  <text class="message" x="902.5" y="573">Write output.json</text>
+  <path class="edge" d="M 1265 587 H 540"/>
+
+  <text class="message" x="1082.5" y="634">Container exits successfully</text>
+  <path class="edge-return" d="M 1265 648 H 900"/>
+
+  <text class="message" x="540" y="695">Container completed</text>
+  <path class="edge-return" d="M 900 709 H 180"/>
+
+  <text class="message" x="360" y="756">Read output.json</text>
+  <path class="edge" d="M 180 770 H 540"/>
+
+  <text class="message" x="335" y="816">Process validation result</text>
+  <path class="self" d="M 180 829 H 320 V 850 H 190"/>
+</svg>

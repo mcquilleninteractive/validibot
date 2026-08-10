@@ -1,15 +1,5 @@
 {% extends "base.html" %}
 
-{% block scripts %}
-  {#
-    Load the lockfile-pinned, locally vendored Mermaid runtime before
-    Zensical's bundle. Zensical detects window.mermaid and therefore does not
-    fall back to fetching executable code from a public CDN.
-  #}
-  <script src="{{ 'javascripts/vendor/mermaid.min.js' | url }}"></script>
-  {{ super() }}
-{% endblock scripts %}
-
 {% block announce %}
   <div class="announce-bar">
     <a href="https://validibot.com" class="back-link">

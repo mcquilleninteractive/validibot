@@ -189,15 +189,6 @@ requirements beyond normal attribution.
 - **License:** 0BSD
 - **Type:** Frontend runtime dependency
 
-### mermaid
-
-- **Version:** 11.16.0
-- **License:** MIT
-- **Type:** Developer-documentation runtime, exact npm dev-dependency
-- **Notes:** The browser bundle and upstream license are copied into
-  `docs/dev_docs/javascripts/vendor/` and served from the Validibot origin.
-  Mermaid is not fetched from a public CDN at runtime.
-
 ### documentation fonts
 
 - **Versions:** Inter 5.3.0, JetBrains Mono 5.3.0, Space Grotesk 5.3.0

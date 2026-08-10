@@ -38,25 +38,7 @@ Validibot is composed of several repositories that work together:
 
 How they fit together:
 
-```mermaid
-flowchart LR
-    subgraph this["validibot (this repo, AGPL)"]
-        django["Django app<br/>workflows · validators · findings · REST API"]
-        mcpsrv["mcp/ — FastMCP server<br/>for AI agents"]
-    end
-
-    shared["validibot-shared<br/>(PyPI library)"]
-    backends["validibot-validator-backends<br/>(advanced validator containers)"]
-    cli["validibot-cli"]
-    commercial["validibot-pro / -enterprise<br/>(commercial activation layers)"]
-
-    cli -- "REST" --> django
-    mcpsrv -- "REST" --> django
-    django -- "dispatches advanced runs to" --> backends
-    django -- "uses" --> shared
-    backends -- "use" --> shared
-    commercial -. "unlock gated features" .-> django
-```
+![How the Validibot repositories fit together](docs/dev_docs/images/diagrams/repository-architecture-overview.svg)
 
 The full, annotated version of this diagram lives in the
 [developer docs](https://dev.validibot.com/).

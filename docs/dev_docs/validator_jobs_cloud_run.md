@@ -27,23 +27,7 @@ In environments with a custom public domain (production), `SITE_URL` points at t
 
 ## Flow overview
 
-```mermaid
-sequenceDiagram
-    participant Web as web (APP_ROLE=web)
-    participant Worker as worker (APP_ROLE=worker)
-    participant Queue as Provider Cloud Tasks queue
-    participant Service as Private validator Service
-
-    Web->>Worker: Application task
-    Worker->>Worker: Resolve and snapshot exact deployment
-    Worker->>Queue: Create deterministic attempt task
-    Queue->>Service: OIDC HTTP request (dedicated invoker)
-    Service->>Service: Fresh one-shot child + attempt GCS token
-    Service->>Worker: Renew token if attempt remains active
-    Service->>Worker: Callback with exact result generation
-    Service-->>Queue: Transport response
-    Worker->>Worker: Verify ID token + persist results
-```
+![Cloud Run validator service request flow](images/diagrams/cloud-run-validator-flow.svg)
 
 IAM roles involved:
 
@@ -443,24 +427,7 @@ For Docker Compose deployments (single-server, VPS, on-premise), validators run 
 
 ### How it works
 
-```mermaid
-sequenceDiagram
-    participant Worker as Celery Worker
-    participant Storage as Local Storage
-    participant Docker as Docker Daemon
-    participant Container as Validator Container
-
-    Worker->>Storage: Write input.json (file://)
-    Worker->>Docker: Run container (sync)
-    Docker->>Container: Start with VALIDIBOT_INPUT_URI
-    Container->>Storage: Read input.json
-    Container->>Container: Run validation
-    Container->>Storage: Write output.json
-    Container-->>Docker: Exit (code 0)
-    Docker-->>Worker: Container completed
-    Worker->>Storage: Read output.json
-    Worker->>Worker: Process results
-```
+![Docker Compose validator execution flow](images/diagrams/docker-validator-flow.svg)
 
 Key differences from GCP mode:
 

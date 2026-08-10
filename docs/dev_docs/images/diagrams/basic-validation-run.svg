@@ -1,0 +1,124 @@
+<svg xmlns="http://www.w3.org/2000/svg"
+     viewBox="0 0 1680 1080"
+     role="img"
+     aria-labelledby="basic-run-title basic-run-description">
+  <title id="basic-run-title">Basic validation run sequence</title>
+  <desc id="basic-run-description">
+    A client starts a workflow run through the API. The validation facade
+    creates the run and asks the step orchestrator to execute it. For every
+    workflow step, the orchestrator resolves configuration, obtains the
+    validator from the registry, and validates the submission. It records each
+    step summary, aggregates the final status, and returns the result while the
+    client polls the run-detail endpoint until completion.
+  </desc>
+  <defs>
+    <style>
+      .background { fill: #f8fafc; }
+      .participant { fill: #ffffff; stroke: #2563eb; stroke-width: 2; }
+      .participant-core { fill: #eaf2ff; stroke: #2563eb; stroke-width: 2; }
+      .participant-validator { fill: #ecfdf3; stroke: #15803d; stroke-width: 2; }
+      .title { fill: #172033; font: 700 28px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .subtitle { fill: #526079; font: 16px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .label { fill: #172033; font: 700 16px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; text-anchor: middle; }
+      .detail { fill: #526079; font: 13px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; text-anchor: middle; }
+      .message { fill: #283752; font: 14px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; text-anchor: middle; }
+      .message-small { fill: #283752; font: 13px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; text-anchor: middle; }
+      .lifeline { stroke: #9aaac2; stroke-width: 1.5; stroke-dasharray: 7 7; }
+      .edge { fill: none; stroke: #526b94; stroke-width: 2; marker-end: url(#arrow); }
+      .edge-return { fill: none; stroke: #526b94; stroke-width: 2; stroke-dasharray: 7 5; marker-end: url(#arrow); }
+      .self { fill: none; stroke: #526b94; stroke-width: 2; marker-end: url(#arrow); }
+      .loop { fill: #fffdf5; stroke: #d99a23; stroke-width: 1.7; }
+      .loop-label { fill: #92400e; font: 700 14px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .note { fill: #f5f0ff; stroke: #7c3aed; stroke-width: 1.5; }
+      .note-text { fill: #5b21b6; font: 14px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; text-anchor: middle; }
+    </style>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#526b94"/>
+    </marker>
+  </defs>
+
+  <rect class="background" width="1680" height="1080" rx="20"/>
+  <text class="title" x="48" y="48">Basic validation run</text>
+  <text class="subtitle" x="48" y="76">The API launches a durable run; the orchestrator executes its workflow steps in order.</text>
+
+  <rect class="participant" x="35" y="105" width="220" height="88" rx="13"/>
+  <text class="label" x="145" y="141">Client</text>
+  <text class="detail" x="145" y="168">API consumer</text>
+
+  <rect class="participant" x="310" y="105" width="220" height="88" rx="13"/>
+  <text class="label" x="420" y="141">Workflow API</text>
+  <text class="detail" x="420" y="168">WorkflowViewSet</text>
+
+  <rect class="participant-core" x="585" y="105" width="220" height="88" rx="13"/>
+  <text class="label" x="695" y="141">Run facade</text>
+  <text class="detail" x="695" y="168">ValidationRunService</text>
+
+  <rect class="participant-core" x="860" y="105" width="220" height="88" rx="13"/>
+  <text class="label" x="970" y="141">Step orchestrator</text>
+  <text class="detail" x="970" y="168">ordered execution</text>
+
+  <rect class="participant" x="1135" y="105" width="220" height="88" rx="13"/>
+  <text class="label" x="1245" y="141">Validator registry</text>
+  <text class="detail" x="1245" y="168">type → class</text>
+
+  <rect class="participant-validator" x="1410" y="105" width="235" height="88" rx="13"/>
+  <text class="label" x="1527.5" y="141">Validator</text>
+  <text class="detail" x="1527.5" y="168">BaseValidator</text>
+
+  <line class="lifeline" x1="145" y1="193" x2="145" y2="1015"/>
+  <line class="lifeline" x1="420" y1="193" x2="420" y2="1015"/>
+  <line class="lifeline" x1="695" y1="193" x2="695" y2="1015"/>
+  <line class="lifeline" x1="970" y1="193" x2="970" y2="1015"/>
+  <line class="lifeline" x1="1245" y1="193" x2="1245" y2="1015"/>
+  <line class="lifeline" x1="1527.5" y1="193" x2="1527.5" y2="1015"/>
+
+  <text class="message" x="282.5" y="229">POST …/workflows/{id}/runs/</text>
+  <path class="edge" d="M 145 243 H 420"/>
+
+  <text class="message" x="557.5" y="280">launch(request, workflow, submission)</text>
+  <path class="edge" d="M 420 294 H 695"/>
+
+  <text class="message" x="815" y="331">Create ValidationRun</text>
+  <path class="self" d="M 695 344 H 825 V 374 H 705"/>
+
+  <text class="message" x="832.5" y="412">execute_workflow_steps(run_id, user_id)</text>
+  <path class="edge" d="M 695 426 H 970"/>
+
+  <text class="message" x="1110" y="463">Mark run RUNNING and load ordered steps</text>
+  <path class="self" d="M 970 476 H 1110 V 506 H 980"/>
+
+  <rect class="loop" x="825" y="525" width="805" height="310" rx="13"/>
+  <rect x="825" y="525" width="195" height="34" rx="13" fill="#ffefd0"/>
+  <text class="loop-label" x="844" y="548">FOR EACH WORKFLOW STEP</text>
+
+  <text class="message" x="1110" y="590">Resolve validator, ruleset, and configuration</text>
+  <path class="self" d="M 970 603 H 1110 V 633 H 980"/>
+
+  <text class="message" x="1107.5" y="670">get(validation_type)</text>
+  <path class="edge" d="M 970 684 H 1245"/>
+
+  <text class="message-small" x="1107.5" y="715">validator class</text>
+  <path class="edge-return" d="M 1245 729 H 970"/>
+
+  <text class="message" x="1248.75" y="760">validate(submission, ruleset, config)</text>
+  <path class="edge" d="M 970 774 H 1527.5"/>
+
+  <text class="message-small" x="1248.75" y="806">ValidationResult · passed · issues · statistics</text>
+  <path class="edge-return" d="M 1527.5 820 H 970"/>
+
+  <text class="message" x="1110" y="872">Append step summary; stop on first failure</text>
+  <path class="self" d="M 970 885 H 1110 V 915 H 980"/>
+
+  <text class="message" x="1110" y="947">Aggregate summary and update terminal run status</text>
+  <path class="self" d="M 970 960 H 1110 V 990 H 980"/>
+
+  <text class="message-small" x="832.5" y="1020">ValidationRunTaskResult</text>
+  <path class="edge-return" d="M 970 1032 H 695"/>
+
+  <text class="message-small" x="282.5" y="359">201 Created or 202 Accepted</text>
+  <path class="edge-return" d="M 420 373 H 145"/>
+
+  <rect class="note" x="35" y="445" width="470" height="82" rx="11"/>
+  <text class="note-text" x="270" y="477">The client polls the run-detail endpoint</text>
+  <text class="note-text" x="270" y="501">until the status becomes terminal.</text>
+</svg>

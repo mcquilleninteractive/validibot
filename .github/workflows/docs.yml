@@ -67,15 +67,14 @@ jobs:
       - name: Check relative links in markdown docs
         run: python scripts/check_doc_links.py
 
-      - name: Verify self-hosted documentation libraries
+      - name: Verify local documentation assets
         run: |
           npm ci
           npm run build:docs-assets
           python -m unittest tests/test_docs_supply_chain.py
           git diff --exit-code -- \
             docs/dev_docs/fonts/ \
-            docs/dev_docs/images/favicon.png \
-            docs/dev_docs/javascripts/vendor/
+            docs/dev_docs/images/favicon.png
 
       # Install zensical from a fully hash-pinned requirements file so the
       # docs build is reproducible and tamper-evident (OSSF Scorecard

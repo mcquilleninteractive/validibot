@@ -1,10 +1,9 @@
 /**
  * Vendor browser libraries required by the developer documentation.
  *
- * Production documentation must never fetch executable library code from a
- * public CDN. npm's lockfile pins the exact package and integrity digest; this
- * script copies only reviewed browser artifacts and their licenses into the
- * MkDocs/Zensical source tree so the generated site serves them itself.
+ * npm's lockfile pins the exact packages and integrity digests. This script
+ * copies the reviewed font files, their licenses, and the application favicon
+ * into the MkDocs/Zensical source tree so the generated site is self-contained.
  */
 
 import {
@@ -18,39 +17,6 @@ import { fileURLToPath } from "node:url";
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const projectPackage = JSON.parse(
     readFileSync(resolve(repositoryRoot, "package.json"), "utf8"),
-);
-const mermaidPackage = JSON.parse(
-    readFileSync(
-        resolve(repositoryRoot, "node_modules/mermaid/package.json"),
-        "utf8",
-    ),
-);
-const expectedVersion = projectPackage.devDependencies.mermaid;
-
-if (!/^\d+\.\d+\.\d+$/.test(expectedVersion)) {
-    throw new Error(
-        `Mermaid must use an exact version, received: ${expectedVersion}`,
-    );
-}
-if (mermaidPackage.version !== expectedVersion) {
-    throw new Error(
-        "Installed Mermaid version does not match package.json. "
-        + "Run npm ci before building documentation assets.",
-    );
-}
-
-const vendorDirectory = resolve(
-    repositoryRoot,
-    "docs/dev_docs/javascripts/vendor",
-);
-mkdirSync(vendorDirectory, { recursive: true });
-copyFileSync(
-    resolve(repositoryRoot, "node_modules/mermaid/dist/mermaid.min.js"),
-    resolve(vendorDirectory, "mermaid.min.js"),
-);
-copyFileSync(
-    resolve(repositoryRoot, "node_modules/mermaid/LICENSE"),
-    resolve(vendorDirectory, "MERMAID-LICENSE.txt"),
 );
 
 const fontDirectory = resolve(repositoryRoot, "docs/dev_docs/fonts");
@@ -126,5 +92,5 @@ copyFileSync(
 );
 
 console.log(
-    `Vendored Mermaid ${expectedVersion}, fonts, and favicon for developer documentation.`,
+    "Vendored fonts and favicon for developer documentation.",
 );

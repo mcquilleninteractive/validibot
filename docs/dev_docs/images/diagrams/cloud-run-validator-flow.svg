@@ -1,0 +1,94 @@
+<svg xmlns="http://www.w3.org/2000/svg"
+     viewBox="0 0 1500 860"
+     role="img"
+     aria-labelledby="cloud-run-flow-title cloud-run-flow-description">
+  <title id="cloud-run-flow-title">Cloud Run validator service request flow</title>
+  <desc id="cloud-run-flow-description">
+    The web service sends an application task to the worker. The worker
+    snapshots the deployment and creates a deterministic provider queue task.
+    The queue invokes the private validator service with OIDC. The service runs
+    a one-shot child, may renew its attempt token, and sends the authoritative
+    callback to the worker, which verifies and persists the results.
+  </desc>
+  <defs>
+    <style>
+      .background { fill: #f8fafc; }
+      .participant { fill: #ffffff; stroke: #2563eb; stroke-width: 2; }
+      .participant-service { fill: #ecfdf3; stroke: #15803d; stroke-width: 2; }
+      .title { fill: #172033; font: 700 28px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .subtitle { fill: #526079; font: 16px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .label { fill: #172033; font: 700 17px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; text-anchor: middle; }
+      .detail { fill: #526079; font: 14px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; text-anchor: middle; }
+      .message { fill: #283752; font: 15px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; text-anchor: middle; }
+      .note { fill: #6b4f1d; font: 14px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .lifeline { stroke: #9aaac2; stroke-width: 1.5; stroke-dasharray: 7 7; }
+      .edge { fill: none; stroke: #526b94; stroke-width: 2; marker-end: url(#arrow); }
+      .edge-return { fill: none; stroke: #526b94; stroke-width: 2; stroke-dasharray: 7 5; marker-end: url(#arrow); }
+      .self { fill: none; stroke: #526b94; stroke-width: 2; marker-end: url(#arrow); }
+      .callback { fill: none; stroke: #15803d; stroke-width: 2.4; marker-end: url(#arrow-green); }
+      .callout { fill: #fff8e6; stroke: #d99a23; stroke-width: 1.5; }
+    </style>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#526b94"/>
+    </marker>
+    <marker id="arrow-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#15803d"/>
+    </marker>
+  </defs>
+
+  <rect class="background" width="1500" height="860" rx="20"/>
+  <text class="title" x="48" y="48">Cloud Run validator service flow</text>
+  <text class="subtitle" x="48" y="76">Provider transport is asynchronous; the authenticated callback is authoritative.</text>
+
+  <rect class="participant" x="65" y="105" width="250" height="88" rx="13"/>
+  <text class="label" x="190" y="141">Web</text>
+  <text class="detail" x="190" y="168">APP_ROLE=web</text>
+
+  <rect class="participant" x="430" y="105" width="250" height="88" rx="13"/>
+  <text class="label" x="555" y="141">Worker</text>
+  <text class="detail" x="555" y="168">APP_ROLE=worker</text>
+
+  <rect class="participant" x="795" y="105" width="250" height="88" rx="13"/>
+  <text class="label" x="920" y="141">Provider queue</text>
+  <text class="detail" x="920" y="168">Cloud Tasks</text>
+
+  <rect class="participant-service" x="1160" y="105" width="275" height="88" rx="13"/>
+  <text class="label" x="1297.5" y="141">Validator service</text>
+  <text class="detail" x="1297.5" y="168">private Cloud Run service</text>
+
+  <line class="lifeline" x1="190" y1="193" x2="190" y2="805"/>
+  <line class="lifeline" x1="555" y1="193" x2="555" y2="805"/>
+  <line class="lifeline" x1="920" y1="193" x2="920" y2="805"/>
+  <line class="lifeline" x1="1297.5" y1="193" x2="1297.5" y2="805"/>
+
+  <text class="message" x="372.5" y="232">Application task</text>
+  <path class="edge" d="M 190 246 H 555"/>
+
+  <text class="message" x="710" y="294">Resolve and snapshot exact deployment</text>
+  <path class="self" d="M 555 307 H 700 V 339 H 565"/>
+
+  <text class="message" x="737.5" y="382">Create deterministic attempt task</text>
+  <path class="edge" d="M 555 396 H 920"/>
+
+  <text class="message" x="1108.75" y="439">OIDC-authenticated HTTP request</text>
+  <path class="edge" d="M 920 453 H 1297.5"/>
+
+  <text class="message" x="1160" y="505">Start fresh one-shot child and scoped attempt token</text>
+  <path class="self" d="M 1297.5 518 H 1418 V 550 H 1307.5"/>
+
+  <text class="message" x="926" y="592">Renew token while attempt remains active</text>
+  <path class="edge" d="M 1297.5 606 H 555"/>
+
+  <text class="message" x="926" y="649">Callback with exact result generation</text>
+  <path class="callback" d="M 1297.5 663 H 555"/>
+
+  <text class="message" x="1108.75" y="706">Transport response</text>
+  <path class="edge-return" d="M 1297.5 720 H 920"/>
+
+  <text class="message" x="710" y="760">Verify identity and persist results</text>
+  <path class="self" d="M 555 773 H 700 V 798 H 565"/>
+
+  <rect class="callout" x="65" y="737" width="320" height="70" rx="10"/>
+  <text class="note" x="85" y="766">The client-facing web service never invokes</text>
+  <text class="note" x="85" y="789">private validators directly.</text>
+</svg>

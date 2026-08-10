@@ -1,10 +1,9 @@
-"""Guard the developer-documentation browser supply chain.
+"""Guard the developer-documentation browser-asset supply chain.
 
-Zensical normally loads Mermaid from a public CDN when it discovers a Mermaid
-diagram. Production CSP intentionally blocks that behavior. These tests keep
-the locally pinned runtime, its license, the template load order, and the
-no-CDN policy from silently drifting during dependency or documentation
-upgrades.
+Documentation diagrams are inert, checked-in SVG files, while fonts come from
+exact npm pins and are served locally. These tests keep the static-diagram,
+font, and no-CDN contracts from silently drifting during documentation or
+dependency upgrades.
 """
 
 import json
@@ -12,11 +11,20 @@ import re
 import unittest
 from pathlib import Path
 
+from defusedxml import ElementTree as SafeElementTree
+
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 PACKAGE_JSON = REPOSITORY_ROOT / "package.json"
 DOCS_ROOT = REPOSITORY_ROOT / "docs" / "dev_docs"
-TEMPLATE = DOCS_ROOT / "overrides" / "main.html"
-VENDOR_DIRECTORY = DOCS_ROOT / "javascripts" / "vendor"
+DIAGRAM_DIRECTORY = DOCS_ROOT / "images" / "diagrams"
+STATIC_DIAGRAMS = (
+    "basic-validation-run.svg",
+    "cloud-run-validator-flow.svg",
+    "docker-validator-flow.svg",
+    "repository-architecture-overview.svg",
+    "repository-architecture.svg",
+    "workflow-execution-lifecycle.svg",
+)
 CDN_LIBRARY_HOST_PATTERN = re.compile(
     rb"(?:unpkg\.com|cdn\.jsdelivr\.net|cdnjs\.cloudflare\.com"
     rb"|fonts\.googleapis\.com|fonts\.gstatic\.com)",
@@ -25,23 +33,60 @@ CDN_LIBRARY_HOST_PATTERN = re.compile(
 
 
 class DeveloperDocsSupplyChainTests(unittest.TestCase):
-    """Enforce local, lockfile-pinned documentation browser libraries."""
+    """Enforce inert diagrams and locally served documentation assets."""
 
-    def test_mermaid_dependency_uses_an_exact_version(self) -> None:
-        """An exact npm pin makes the reviewed artifact reproducible."""
+    def test_diagrams_require_no_browser_runtime(self) -> None:
+        """Static diagrams must not reintroduce an executable renderer."""
         package = json.loads(PACKAGE_JSON.read_text(encoding="utf-8"))
-        version = package["devDependencies"]["mermaid"]
-        self.assertRegex(version, r"^\d+\.\d+\.\d+$")
-
-    def test_mermaid_runtime_and_license_are_vendored(self) -> None:
-        """A fresh clone must build docs without downloading runtime code."""
-        runtime = VENDOR_DIRECTORY / "mermaid.min.js"
-        license_file = VENDOR_DIRECTORY / "MERMAID-LICENSE.txt"
-        self.assertGreater(runtime.stat().st_size, 1_000_000)
-        self.assertIn(
-            "MIT License",
-            license_file.read_text(encoding="utf-8"),
+        self.assertNotIn("mermaid", package["devDependencies"])
+        self.assertFalse(
+            (DOCS_ROOT / "javascripts" / "vendor" / "mermaid.min.js").exists(),
         )
+
+        markdown_sources = [REPOSITORY_ROOT / "README.md", *DOCS_ROOT.rglob("*.md")]
+        for path in markdown_sources:
+            self.assertNotIn("```mermaid", path.read_text(encoding="utf-8"))
+
+    def test_static_diagrams_are_accessible_and_self_contained(self) -> None:
+        """Every diagram must be accessible without scripts or remote assets."""
+        self.assertEqual(
+            sorted(path.name for path in DIAGRAM_DIRECTORY.glob("*.svg")),
+            list(STATIC_DIAGRAMS),
+        )
+
+        svg_namespace = "{http://www.w3.org/2000/svg}"
+        for name in STATIC_DIAGRAMS:
+            path = DIAGRAM_DIRECTORY / name
+            root = SafeElementTree.parse(path).getroot()
+            self.assertEqual(root.tag, f"{svg_namespace}svg")
+            self.assertEqual(root.attrib.get("role"), "img")
+            self.assertTrue(root.attrib.get("viewBox"))
+
+            labelled_by = set(root.attrib.get("aria-labelledby", "").split())
+            children_by_id = {
+                child.attrib["id"]: child for child in root if "id" in child.attrib
+            }
+            self.assertEqual(len(labelled_by), 2)
+            self.assertTrue(labelled_by.issubset(children_by_id))
+            self.assertTrue(
+                any(child.tag == f"{svg_namespace}title" for child in root),
+            )
+            self.assertTrue(
+                any(child.tag == f"{svg_namespace}desc" for child in root),
+            )
+            self.assertFalse(
+                any(node.tag == f"{svg_namespace}script" for node in root.iter()),
+            )
+            for node in root.iter():
+                for attribute in (
+                    "href",
+                    "{http://www.w3.org/1999/xlink}href",
+                ):
+                    self.assertFalse(
+                        node.attrib.get(attribute, "").startswith(
+                            ("http://", "https://")
+                        ),
+                    )
 
     def test_fonts_are_exactly_pinned_and_vendored(self) -> None:
         """Docs typography must not depend on mutable Google Fonts responses."""
@@ -78,13 +123,6 @@ class DeveloperDocsSupplyChainTests(unittest.TestCase):
         )
         self.assertIn("font: false", configuration)
         self.assertIn("- stylesheets/fonts.css", configuration)
-
-    def test_local_mermaid_loads_before_zensical_bundle(self) -> None:
-        """Zensical must see window.mermaid before considering its CDN fallback."""
-        template = TEMPLATE.read_text(encoding="utf-8")
-        local_runtime = "javascripts/vendor/mermaid.min.js"
-        self.assertIn(local_runtime, template)
-        self.assertLess(template.index(local_runtime), template.index("super()"))
 
     def test_docs_source_has_no_public_cdn_library_hosts(self) -> None:
         """Executable docs libraries must be served by Validibot itself."""

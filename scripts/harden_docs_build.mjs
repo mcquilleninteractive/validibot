@@ -1,11 +1,10 @@
 /**
- * Remove public-CDN library fallbacks from generated developer documentation.
+ * Remove public-CDN references from generated developer documentation.
  *
- * Zensical currently embeds a lazy Mermaid fallback URL in its compiled theme
- * bundle. The checked-in override preloads our own pinned copy, and this
- * post-build guard also rewrites the dormant fallback to the same local asset.
- * It then fails closed if any known public library-CDN hostname remains in an
- * executable generated asset.
+ * Documentation diagrams are static SVG files and fonts are copied from exact
+ * npm pins. This post-build guard neutralizes any dormant public-library URL
+ * emitted by documentation tooling and then fails closed if a known public
+ * CDN hostname remains in an executable generated asset.
  */
 
 import {
@@ -19,9 +18,6 @@ import { fileURLToPath } from "node:url";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const siteRoot = resolve(repositoryRoot, "docs_build/dev");
-const externalMermaidUrl =
-    "https://unpkg.com/mermaid@11/dist/mermaid.min.js";
-const localMermaidUrl = "/javascripts/vendor/mermaid.min.js";
 const blockedLibraryRoot = "/__self_host_required__/";
 const executableExtensions = new Set([".html", ".js", ".mjs", ".css"]);
 const forbiddenCdnHosts = [
@@ -53,7 +49,6 @@ for (const path of executableFiles) {
     const original = readFileSync(path, "utf8");
     let hardened = original;
     const rewrites = [
-        [externalMermaidUrl, localMermaidUrl],
         ["https://unpkg.com/", `${blockedLibraryRoot}unpkg/`],
         ["https://cdn.jsdelivr.net/", `${blockedLibraryRoot}jsdelivr/`],
         ["https://cdnjs.cloudflare.com/", `${blockedLibraryRoot}cdnjs/`],

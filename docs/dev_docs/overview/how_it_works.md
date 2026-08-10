@@ -278,37 +278,7 @@ class JsonSchemaValidator(BaseValidator):
 
 ### Sequence Diagram: Basic Validation Run
 
-```mermaid
-sequenceDiagram
-    actor Client
-    participant API as WorkflowViewSet.start_validation()
-    participant Facade as ValidationRunService (facade)
-    participant Orch as StepOrchestrator
-    participant Registry as Validator Registry
-    participant Val as BaseValidator
-
-    Client->>API: POST /orgs/{org}/workflows/{id}/runs/
-    API->>Facade: launch(request, workflow, submission)
-    Facade->>Facade: ValidationRun.objects.create(...)
-    Facade->>Orch: execute_workflow_steps(run_id, user_id)
-    API-->>Client: 201 Created or 202 Accepted (if still running)
-
-    Orch->>Orch: mark run RUNNING\nlog start event
-    Orch->>Orch: load ordered workflow steps
-
-    loop For each workflow step
-        Orch->>Orch: resolve validator, ruleset, config
-        Orch->>Registry: get(validation_type)
-        Registry-->>Orch: validator class
-        Orch->>Val: validate(submission, ruleset, config)
-        Val-->>Orch: ValidationResult (passed, issues, stats)
-        Orch->>Orch: append step summary\nstop loop on first failure
-    end
-
-    Orch->>Orch: aggregate summary\nupdate ValidationRun status
-    Orch-->>Facade: ValidationRunTaskResult
-    note over Client,Orch: Client polls run detail\nendpoint until status terminal
-```
+![Basic validation run sequence](../images/diagrams/basic-validation-run.svg)
 
 ### Phase 4: Result Aggregation
 

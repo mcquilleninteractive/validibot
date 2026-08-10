@@ -147,19 +147,7 @@ cross-step data.
 
 ## Execution lifecycle
 
-```mermaid
-flowchart TD
-    A["Submission arrives"] --> B["Expose p.*, submission.*, and c.*"]
-    B --> C["Resolve WorkflowSignalMapping rows into initial s.*"]
-    C --> D["Resolve the next step's bindings and parser facts into i.*"]
-    D --> E["Evaluate input-stage assertions"]
-    E --> F["Run the validator"]
-    F --> G["Persist value outputs in o.* and artifact outputs separately"]
-    G --> H["Evaluate output-stage assertions"]
-    H --> I["Apply value-port input/output promotions to s.*"]
-    I --> J["Expose completed values through steps.<key>.* to later steps"]
-    J --> D
-```
+![Workflow execution and data lifecycle](../images/diagrams/workflow-execution-lifecycle.svg)
 
 Initial signal mappings are available from the beginning of the run. Promoted
 signals are temporal: an input promotion exists after input resolution, and an
