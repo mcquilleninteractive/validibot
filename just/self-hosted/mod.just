@@ -35,7 +35,7 @@
 # Quick start:
 #   1. Copy .envs.example/.production/.self-hosted/.django to .envs/.production/.self-hosted/.django
 #   2. Copy .envs.example/.production/.self-hosted/.postgres to .envs/.production/.self-hosted/.postgres
-#   3. Optional: copy .envs.example/.production/.self-hosted/.build for Pro/Enterprise
+#   3. Copy .envs.example/.production/.self-hosted/.build to .envs/.production/.self-hosted/.build
 #   4. Edit the environment files with your settings
 #   5. just self-hosted check-env
 #   6. just self-hosted bootstrap
@@ -111,12 +111,24 @@ _mcp-profile-env:
 [private]
 _load-build-env:
     #!/usr/bin/env bash
+    overrides=""
+    for variable_name in \
+        ENABLE_MCP_SERVER MCP_HOST_PORT VALIDATOR_CONTAINER_SOCKET \
+        VALIDIBOT_COMMERCIAL_PACKAGE VALIDIBOT_COMMERCIAL_NETRC; do
+        if [ "${!variable_name+x}" = x ]; then
+            printf -v override 'export %s=%q\n' "$variable_name" "${!variable_name}"
+            overrides+="$override"
+        fi
+    done
     if [ -f .envs/.production/.self-hosted/.build ]; then
         echo "set -a"
         # shellcheck disable=SC1091
         echo "source .envs/.production/.self-hosted/.build"
         echo "set +a"
     fi
+    # Explicit recipe environment overrides the shared file, matching Docker
+    # Compose's shell-over-env-file precedence and the documented CLI contract.
+    printf '%s' "$overrides"
     echo 'export VALIDIBOT_VERSION="${VALIDIBOT_VERSION:-{{validibot_version}}}"'
     echo 'export VALIDIBOT_REVISION="${VALIDIBOT_REVISION:-{{git_sha}}}"'
 
@@ -621,6 +633,7 @@ check-env:
     DJANGO_ENV_FILE="{{django_env_file}}"
     POSTGRES_ENV_FILE="{{postgres_env_file}}"
     BUILD_ENV_FILE="{{build_env_file}}"
+    MCP_ENV_FILE=".envs/.production/.self-hosted/.mcp"
 
     for env_file in "$DJANGO_ENV_FILE" "$POSTGRES_ENV_FILE"; do
         if [ ! -f "$env_file" ]; then
@@ -682,28 +695,109 @@ check-env:
         echo ""
         echo "Checking optional Docker build settings..."
 
-        COMMERCIAL_PACKAGE=$(grep -E '^VALIDIBOT_COMMERCIAL_PACKAGE=' "$BUILD_ENV_FILE" | cut -d= -f2- || true)
-        PRIVATE_INDEX_URL=$(grep -E '^VALIDIBOT_PRIVATE_INDEX_URL=' "$BUILD_ENV_FILE" | cut -d= -f2- || true)
+        # Parse shell quoting once while retaining the documented precedence:
+        # explicit recipe environment, then .build, then recipe defaults.
+        overrides=""
+        for variable_name in \
+            ENABLE_MCP_SERVER MCP_HOST_PORT VALIDATOR_CONTAINER_SOCKET \
+            VALIDIBOT_COMMERCIAL_PACKAGE VALIDIBOT_COMMERCIAL_NETRC; do
+            if [ "${!variable_name+x}" = x ]; then
+                printf -v override 'export %s=%q\n' "$variable_name" "${!variable_name}"
+                overrides+="$override"
+            fi
+        done
+        set -a
+        # shellcheck disable=SC1090
+        source "$BUILD_ENV_FILE"
+        set +a
+        eval "$overrides"
+
+        COMMERCIAL_PACKAGE=${VALIDIBOT_COMMERCIAL_PACKAGE:-}
+        COMMERCIAL_NETRC=${VALIDIBOT_COMMERCIAL_NETRC:-}
 
         if [ -n "$COMMERCIAL_PACKAGE" ]; then
-            case "$COMMERCIAL_PACKAGE" in
-                validibot-pro|validibot-enterprise)
-                    echo "  OK: VALIDIBOT_COMMERCIAL_PACKAGE=$COMMERCIAL_PACKAGE"
-                    ;;
-                *)
-                    echo "  ERROR: Unsupported VALIDIBOT_COMMERCIAL_PACKAGE=$COMMERCIAL_PACKAGE"
-                    PLACEHOLDER_MATCHES=$((PLACEHOLDER_MATCHES + 1))
-                    ;;
-            esac
+            if [[ "$COMMERCIAL_PACKAGE" =~ ^validibot-(pro|enterprise)==[A-Za-z0-9][A-Za-z0-9._!+-]*$ ]] || \
+               [[ "$COMMERCIAL_PACKAGE" =~ ^https://pypi\.validibot\.com/packages/validibot_(pro|enterprise)-[^/]+\.whl#sha256=[0-9a-f]{64}$ ]]; then
+                echo "  OK: VALIDIBOT_COMMERCIAL_PACKAGE is an exact trusted reference"
+            else
+                echo "  ERROR: VALIDIBOT_COMMERCIAL_PACKAGE must be version-pinned or a trusted hash-pinned wheel"
+                PLACEHOLDER_MATCHES=$((PLACEHOLDER_MATCHES + 1))
+            fi
 
-            if [ -z "$PRIVATE_INDEX_URL" ]; then
-                echo "  ERROR: VALIDIBOT_PRIVATE_INDEX_URL is required when installing a commercial package"
+            if [ -z "$COMMERCIAL_NETRC" ] || [ ! -f "$COMMERCIAL_NETRC" ]; then
+                echo "  ERROR: VALIDIBOT_COMMERCIAL_NETRC must name an existing credential file"
                 PLACEHOLDER_MATCHES=$((PLACEHOLDER_MATCHES + 1))
             else
-                echo "  OK: VALIDIBOT_PRIVATE_INDEX_URL is set"
+                if NETRC_MODE=$(stat -c '%a' "$COMMERCIAL_NETRC" 2>/dev/null); then
+                    :
+                else
+                    NETRC_MODE=$(stat -f '%Lp' "$COMMERCIAL_NETRC")
+                fi
+                case "$NETRC_MODE" in
+                    ?00|??00)
+                        echo "  OK: VALIDIBOT_COMMERCIAL_NETRC exists with private permissions"
+                        ;;
+                    *)
+                        echo "  ERROR: VALIDIBOT_COMMERCIAL_NETRC must not be accessible by group or other users"
+                        PLACEHOLDER_MATCHES=$((PLACEHOLDER_MATCHES + 1))
+                        ;;
+                esac
             fi
         fi
     fi
+
+    echo ""
+    echo "Checking validator container socket..."
+    VALIDATOR_CONTAINER_SOCKET="${VALIDATOR_CONTAINER_SOCKET:-${XDG_RUNTIME_DIR:-/run/user/1000}/docker.sock}"
+    if [ ! -S "$VALIDATOR_CONTAINER_SOCKET" ]; then
+        echo "  ERROR: Docker-compatible socket not found: $VALIDATOR_CONTAINER_SOCKET"
+        echo "         Start rootless Docker, or set VALIDATOR_CONTAINER_SOCKET"
+        echo "         explicitly to a supported compatibility socket."
+        PLACEHOLDER_MATCHES=$((PLACEHOLDER_MATCHES + 1))
+    elif [ "$VALIDATOR_CONTAINER_SOCKET" = "/var/run/docker.sock" ]; then
+        echo "  WARNING: Explicit rootful Docker socket selected"
+        echo "           Rootless Docker is the secure default for fresh installs."
+    else
+        echo "  OK: Docker-compatible socket exists: $VALIDATOR_CONTAINER_SOCKET"
+    fi
+
+    case "${ENABLE_MCP_SERVER:-false}" in
+        true|True|TRUE|1|yes|Yes|YES)
+            echo ""
+            echo "Checking MCP public transport settings..."
+            if [ ! -f "$MCP_ENV_FILE" ]; then
+                echo "  ERROR: MCP is enabled but $MCP_ENV_FILE is missing"
+                PLACEHOLDER_MATCHES=$((PLACEHOLDER_MATCHES + 1))
+            else
+                MCP_BASE_URL=$(grep -E '^VALIDIBOT_MCP_BASE_URL=' "$MCP_ENV_FILE" | tail -1 | cut -d= -f2- || true)
+                DJANGO_MCP_BASE_URL=$(grep -E '^VALIDIBOT_MCP_BASE_URL=' "$DJANGO_ENV_FILE" | tail -1 | cut -d= -f2- || true)
+
+                case "$MCP_BASE_URL" in
+                    https://*)
+                        echo "  OK: MCP public base URL requires HTTPS"
+                        ;;
+                    *)
+                        echo "  ERROR: VALIDIBOT_MCP_BASE_URL in .mcp must start with https://"
+                        PLACEHOLDER_MATCHES=$((PLACEHOLDER_MATCHES + 1))
+                        ;;
+                esac
+
+                if [ -z "$DJANGO_MCP_BASE_URL" ] || [ "$DJANGO_MCP_BASE_URL" != "$MCP_BASE_URL" ]; then
+                    echo "  ERROR: VALIDIBOT_MCP_BASE_URL must match in .django and .mcp"
+                    PLACEHOLDER_MATCHES=$((PLACEHOLDER_MATCHES + 1))
+                else
+                    echo "  OK: Django and MCP use the same public base URL"
+                fi
+
+                if grep -Eq 'replace-me|replace-with' "$MCP_ENV_FILE"; then
+                    echo "  ERROR: Placeholder values still exist in $MCP_ENV_FILE"
+                    PLACEHOLDER_MATCHES=$((PLACEHOLDER_MATCHES + 1))
+                fi
+            fi
+            ;;
+        *)
+            ;;
+    esac
 
     echo ""
     if [ "$MISSING" -gt 0 ] || [ "$PLACEHOLDER_MATCHES" -gt 0 ]; then
@@ -903,10 +997,11 @@ check-dns:
 #
 # where the argument is one of:
 #   - validibot-pro==0.5.1 (exact-pinned name+version)
-#   - https://...@pypi.validibot.com/.../*.whl#sha256=... (full URL)
+#   - https://pypi.validibot.com/.../*.whl#sha256=... (full URL)
 #
 # Ranges (>=, ~=, ^) are rejected. The recipe reads
-# VALIDIBOT_PRIVATE_INDEX_URL from the environment.
+# VALIDIBOT_COMMERCIAL_NETRC from the environment and mounts it only as a
+# BuildKit secret.
 #
 # Phase 0 status: stub. The wheel-validation logic and BuildKit secret
 # wiring land in a later phase.

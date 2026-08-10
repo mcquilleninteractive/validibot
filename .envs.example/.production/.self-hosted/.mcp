@@ -16,10 +16,11 @@
 VALIDIBOT_API_BASE_URL=http://web:8000
 
 # The public URL of this MCP server, used for RFC 9728 metadata and as
-# the default OAuth audience root. Set this to whatever hostname your
-# reverse proxy terminates TLS at. Keep it identical to
-# VALIDIBOT_MCP_BASE_URL in `.django` so the OIDC audience + redirect URI
-# line up on both sides.
+# the default OAuth audience root. HTTPS is mandatory for self-hosted
+# production. Bundled Caddy can terminate a distinct hostname such as the one
+# below; an external proxy forwards to the loopback-only host port. Keep it
+# identical to VALIDIBOT_MCP_BASE_URL in `.django` so the OIDC audience and
+# redirect URI line up on both sides.
 VALIDIBOT_MCP_BASE_URL=https://mcp.your-domain.example
 
 # Upstream OAuth authorization server. In most self-hosted deployments

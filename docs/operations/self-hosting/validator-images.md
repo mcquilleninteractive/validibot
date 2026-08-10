@@ -158,13 +158,13 @@ S3-compatible storage remains unsupported until its conditional and version
 semantics are capability-tested. See
 [Security Hardening](security-hardening.md) for the architectural rationale.
 
-## Optional hardening
+## Container-engine hardening
 
-Documented but not required:
-
-- **rootless Docker** — the supported hardened path. Point
-  `VALIDATOR_CONTAINER_SOCKET` at the deployment user's rootless socket and
-  confirm `VB322` before running the EnergyPlus integration acceptance test.
+- **rootless Docker** — the supported default for fresh self-hosted installs.
+  `VALIDATOR_CONTAINER_SOCKET` resolves to the deployment user's rootless
+  socket; confirm `VB322` before running the EnergyPlus integration acceptance
+  test. Existing rootful deployments remain compatible through an explicit
+  `/var/run/docker.sock` override.
 - **rootless Podman** — a Docker-API compatibility path, not yet a drop-in
   supported replacement. Qualify each Podman release with the full advanced
   validator acceptance suite before production use.

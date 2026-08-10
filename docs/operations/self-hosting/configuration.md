@@ -97,7 +97,7 @@ Empty for community deployments.
 | `GCP_KMS_SIGNING_KEY_VERSION` | Explicit active KMS version. Required with `GCP_KMS_SIGNING_KEY`; rotate it only after registering the candidate public key. |
 | `JWKS_PUBLIC_PATH` | Path to the public JWKS. Pro only. Served at `/.well-known/jwks.json` for credentials issued by this instance. |
 | `IDP_OIDC_MCP_RESOURCE_AUDIENCE` | MCP OAuth audience claim. Defaults to `{VALIDIBOT_MCP_BASE_URL}/mcp`. |
-| `VALIDIBOT_MCP_BASE_URL` | Base URL for the MCP server. Defaults to `http://localhost:8001` for self-hosted. |
+| `VALIDIBOT_MCP_BASE_URL` | Public HTTPS origin for the MCP server, such as `https://mcp.example.com`. Self-hosted production has no plaintext public default. |
 | `MCP_SERVICE_KEY` | Service-to-service auth key for the MCP server calling the Validibot REST API. Self-hosted only. |
 | `MCP_OIDC_AUDIENCE` | Cloud Run OIDC audience (GCP only — self-hosted uses `MCP_SERVICE_KEY`). |
 | `ENABLE_MCP_SERVER` | `true` to include the MCP container under the `mcp` Compose profile. Build-time gate; runtime is also gated by the `mcp_server` Pro feature. |
@@ -128,16 +128,18 @@ Off by default for self-hosted.
 | `VALIDIBOT_IMAGE_TAG` | Validibot image tag. `latest` for evaluation, exact version (e.g. `0.8.0`) for production. |
 | `VALIDIBOT_IMAGE_REGISTRY` | Image registry namespace used by deployment tooling. Published Validibot packages use `ghcr.io/mcquilleninteractive`; no Docker Hub mirror is maintained. |
 | `VALIDIBOT_COMMERCIAL_PACKAGE` | For Pro: `validibot-pro==<version>`. Empty for community. |
-| `VALIDIBOT_PRIVATE_INDEX_URL` | For Pro: `https://<email>:<token>@pypi.validibot.com/simple/`. Empty for community. |
-| `VALIDATOR_CONTAINER_SOCKET` | Host path to the Docker-compatible API socket mounted into the worker. Defaults to `/var/run/docker.sock`; use `/run/user/<numeric-uid>/docker.sock` for rootless Docker. |
+| `VALIDIBOT_COMMERCIAL_NETRC` | Absolute path to a mode-0600 netrc containing the Pro package credentials. Empty for community. The file is mounted as a BuildKit secret and is not stored in image metadata. |
+| `VALIDATOR_CONTAINER_SOCKET` | Host path to the Docker-compatible API socket mounted into the worker. Fresh installs default to `${XDG_RUNTIME_DIR:-/run/user/1000}/docker.sock`; set an exact `/run/user/<numeric-uid>/docker.sock` path when needed. `/var/run/docker.sock` is the explicit rootful compatibility option. |
+| `MCP_HOST_PORT` | Host-loopback port used by an external reverse proxy or local diagnostics. Defaults to `8001`; the bind address is fixed to `127.0.0.1` in Compose. |
 
-For Pro, the private index URL embeds your license credentials. Treat `.build` as a secret file (mode 0700, not in version control).
+For Pro, credentials live only in the netrc referenced by `.build`. Keep that
+netrc at mode 0600 and out of version control; `.build` contains its path and
+the credential-free package reference and remains gitignored.
 
 ## `.mcp` — MCP server settings (Pro feature)
 
 | Setting | Purpose |
 |---|---|
-| `MCP_PORT` | Port the MCP container listens on. Default: `8001`. |
 | `VALIDIBOT_LOG_LEVEL` | `INFO` for production. `DEBUG` for troubleshooting. |
 | `VALIDIBOT_API_BASE_URL` | Internal or public URL of the Django API that MCP forwards tool calls to. |
 | `VALIDIBOT_MCP_BASE_URL` | Public MCP URL used for metadata, redirects, and the default token audience. Keep it aligned with Django's value. |
@@ -146,6 +148,10 @@ For Pro, the private index URL embeds your license credentials. Treat `.build` a
 | `VALIDIBOT_MCP_SERVICE_KEY` | Shared MCP-to-Django key for self-hosting. Use the same generated value as `MCP_SERVICE_KEY` in `.django`. |
 | `VALIDIBOT_MCP_ENABLED` | Runtime kill switch. `false` makes every tool call return 503. |
 | `VALIDIBOT_OAUTH_AUTHORIZATION_ENDPOINT`, `VALIDIBOT_OAUTH_TOKEN_ENDPOINT`, `VALIDIBOT_OAUTH_REVOCATION_ENDPOINT`, `VALIDIBOT_OAUTH_JWKS_URL` | Optional complete-URL overrides if a compatible provider is routed differently. Validibot's standard paths are derived locally, without a startup discovery request. |
+
+The MCP container always listens on port `8080` inside the private Compose
+network. `MCP_HOST_PORT` controls only the loopback publication used by a host
+reverse proxy; public clients must connect through an HTTPS origin.
 
 ## Deployment targets
 

@@ -279,7 +279,8 @@ VALIDIBOT_MCP_SERVICE_KEY=replace-with-a-long-random-string
 #     && base64 < oidc-key.pem | tr -d '\n'
 #IDP_OIDC_PRIVATE_KEY_B64=
 #
-# VALIDIBOT_MCP_BASE_URL — public URL of the MCP server. The OIDC
+# VALIDIBOT_MCP_BASE_URL — public HTTPS URL of the MCP server. Bundled Caddy
+# reads this value to terminate TLS for the MCP hostname. The OIDC
 # audience and confidential redirect URI default to {BASE}/mcp and
 # {BASE}/auth/callback respectively, so setting this one var lines up
 # both Django and the MCP container.

@@ -476,21 +476,138 @@ class ComposeFileShapeTests(SimpleTestCase):
         assert ".envs/.production/.self-hosted/" in text
 
     def test_worker_uses_configurable_container_engine_socket(self):
-        """Only the worker should receive the selected engine API socket.
+        """Only the worker should receive the rootless-default engine socket.
 
-        This lets operators choose rootful or rootless Docker without changing
-        application code, while avoiding unnecessary daemon authority in the
-        public web service.
+        Rootless Docker meaningfully reduces the worker's host authority. The
+        target path remains stable for docker-py, and an explicit host-path
+        override still supports existing rootful deployments.
         """
         compose_path = REPO_ROOT / "docker-compose.production.yml"
         compose_data = yaml.safe_load(compose_path.read_text(encoding="utf-8"))
         services = compose_data["services"]
         expected_mount = (
-            "${VALIDATOR_CONTAINER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock"
+            "${VALIDATOR_CONTAINER_SOCKET:-${XDG_RUNTIME_DIR:-/run/user/1000}"
+            "/docker.sock}:/var/run/docker.sock"
         )
 
         assert expected_mount in services["worker"]["volumes"]
         assert expected_mount not in services["web"]["volumes"]
+
+    def test_mcp_host_publication_is_loopback_only(self):
+        """Plain MCP HTTP must be reachable only by software on the host.
+
+        Public clients use TLS at Caddy or an operator-managed reverse proxy;
+        publishing port 8001 on every interface would bypass that boundary.
+        """
+        compose_path = REPO_ROOT / "docker-compose.production.yml"
+        compose_data = yaml.safe_load(compose_path.read_text(encoding="utf-8"))
+        mcp_ports = compose_data["services"]["mcp"]["ports"]
+
+        assert mcp_ports == [
+            {
+                "target": 8080,
+                "published": "${MCP_HOST_PORT:-8001}",
+                "host_ip": "127.0.0.1",
+                "protocol": "tcp",
+            }
+        ]
+
+    def test_bundled_caddy_terminates_the_mcp_public_origin(self):
+        """The bundled proxy must provide a TLS path to private MCP HTTP.
+
+        Caddy reaches the service over the Compose network, so enabling TLS
+        never requires widening the host's loopback-only MCP publication.
+        """
+        caddyfile = (KIT_ROOT / "caddy" / "Caddyfile").read_text(encoding="utf-8")
+
+        assert "{$VALIDIBOT_MCP_BASE_URL:http://127.0.0.1:65535}" in caddyfile
+        assert "reverse_proxy mcp:8080" in caddyfile
+
+    def test_bundled_caddy_does_not_blank_env_file_origins(self):
+        """Compose must not override Caddy's configured origins with blanks.
+
+        Service-level environment values outrank `env_file`; an empty
+        interpolation would therefore erase `SITE_URL` and prevent automatic
+        TLS even though the operator configured Django correctly.
+        """
+        compose_path = REPO_ROOT / "docker-compose.production.yml"
+        compose_data = yaml.safe_load(compose_path.read_text(encoding="utf-8"))
+        caddy = compose_data["services"]["caddy"]
+
+        assert caddy["env_file"] == [".envs/.production/.self-hosted/.django"]
+        assert "environment" not in caddy
+
+
+class SelfHostedSecurityDefaultTests(SimpleTestCase):
+    """Guard deployment defaults that are resolved outside application code."""
+
+    def test_build_template_defaults_to_the_rootless_docker_socket(self):
+        """Fresh installs must opt out explicitly if they retain rootful Docker."""
+        build_env = (ENVS_EXAMPLE_ROOT / ".build").read_text(encoding="utf-8")
+        effective_lines = [
+            line
+            for line in build_env.splitlines()
+            if line and not line.lstrip().startswith("#")
+        ]
+
+        assert (
+            "VALIDATOR_CONTAINER_SOCKET=${XDG_RUNTIME_DIR:-/run/user/1000}/docker.sock"
+            in effective_lines
+        )
+        assert "VALIDATOR_CONTAINER_SOCKET=/var/run/docker.sock" not in effective_lines
+
+    def test_self_hosted_preflight_checks_socket_and_mcp_transport(self):
+        """Deployment must fail early on a missing socket or plaintext MCP URL.
+
+        Compose mount errors and OAuth audience mismatches are otherwise
+        discovered only after containers start, which makes secure defaults
+        look like unrelated application failures to operators.
+        """
+        recipes = (REPO_ROOT / "just" / "self-hosted" / "mod.just").read_text(
+            encoding="utf-8"
+        )
+
+        assert '[ ! -S "$VALIDATOR_CONTAINER_SOCKET" ]' in recipes
+        assert "MCP public base URL requires HTTPS" in recipes
+        assert "VALIDIBOT_MCP_BASE_URL must match in .django and .mcp" in recipes
+
+    def test_self_hosted_preflight_uses_current_commercial_package_contract(self):
+        """MCP-capable Pro installs must pass the same secure input contract.
+
+        Credentials belong in a BuildKit-mounted netrc, while the image build
+        receives only an exact package reference. Reintroducing an index URL
+        would serialize secrets into durable Docker metadata.
+        """
+        recipes = (REPO_ROOT / "just" / "self-hosted" / "mod.just").read_text(
+            encoding="utf-8"
+        )
+
+        assert "VALIDIBOT_COMMERCIAL_NETRC" in recipes
+        assert "VALIDIBOT_PRIVATE_INDEX_URL" not in recipes
+        assert "validibot-(pro|enterprise)==" in recipes
+        assert "sha256=[0-9a-f]{64}" in recipes
+        assert "must not be accessible by group or other users" in recipes
+
+    def test_build_env_loader_preserves_explicit_recipe_overrides(self):
+        """Inline security and profile choices must outrank shared defaults.
+
+        This matches Docker Compose precedence and makes documented one-off
+        commands deterministic even when `.build` contains different values.
+        """
+        recipes = (REPO_ROOT / "just" / "self-hosted" / "mod.just").read_text(
+            encoding="utf-8"
+        )
+        loader = recipes[
+            recipes.index("_load-build-env:") : recipes.index("# Start all services")
+        ]
+
+        for variable_name in (
+            "ENABLE_MCP_SERVER",
+            "MCP_HOST_PORT",
+            "VALIDATOR_CONTAINER_SOCKET",
+        ):
+            assert variable_name in loader
+        assert "printf '%s' \"$overrides\"" in loader
 
 
 class JustRecipeParityTests(SimpleTestCase):

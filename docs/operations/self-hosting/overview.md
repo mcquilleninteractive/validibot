@@ -178,6 +178,12 @@ If you bring your own proxy, configure it to forward to the `web`
 container on port 8000 and set `DJANGO_SECURE_PROXY_SSL_HEADER` plus
 `DJANGO_CSRF_TRUSTED_ORIGINS` appropriately in your `.django` file.
 
+When MCP is enabled, configure a second HTTPS hostname and keep its public base
+URL identical in `.django` and `.mcp`. Bundled Caddy automatically proxies that
+hostname to `mcp:8080`; an external host proxy should use
+`127.0.0.1:8001`. The Compose stack never publishes MCP plaintext beyond host
+loopback.
+
 ## Provider quickstarts
 
 The canonical deployment is "single Linux VM with Docker Compose."

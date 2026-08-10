@@ -125,10 +125,11 @@ services:
     volumes:
       - validibot_storage:/app/storage
       - ./.envs/.production/.self-hosted/keys:/run/validibot-keys:ro
-      # Only the worker needs the Docker-compatible API socket. The host path
-      # can point at rootful Docker (default) or a rootless Docker/Podman
-      # user socket; docker-py always sees the stable path on the right.
-      - ${VALIDATOR_CONTAINER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
+      # Only the worker needs the Docker-compatible API socket. Fresh installs
+      # default to Docker's rootless per-user socket. Operators who deliberately
+      # retain rootful Docker can override the host path in .build; docker-py
+      # always sees the stable path on the right.
+      - ${VALIDATOR_CONTAINER_SOCKET:-${XDG_RUNTIME_DIR:-/run/user/1000}/docker.sock}:/var/run/docker.sock
     env_file:
       - .envs/.production/.self-hosted/.django
       - .envs/.production/.self-hosted/.postgres
@@ -218,9 +219,9 @@ services:
     # To enable:
     #   COMPOSE_PROFILES=caddy just self-hosted deploy
     #
-    # Caddy auto-issues a Let's Encrypt cert for the hostname declared
-    # in deploy/self-hosted/caddy/Caddyfile. That hostname must
-    # already resolve to this host's public IP (run
+    # Caddy auto-issues Let's Encrypt certificates for SITE_URL and, when
+    # configured, VALIDIBOT_MCP_BASE_URL. Those hostnames must already resolve
+    # to this host's public IP (run
     # ./deploy/self-hosted/scripts/check-dns to verify before first
     # boot). See ADR-2026-04-27 section 21 for the rationale behind
     # off-by-default + opt-in.
@@ -238,11 +239,10 @@ services:
       - ./deploy/self-hosted/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
-    environment:
-      # The Caddyfile reads SITE_URL to know which hostname to terminate
-      # TLS for. Pulled from the same .django env file as the rest of
-      # the stack.
-      - SITE_URL=${SITE_URL:-}
+    # The Caddyfile reads SITE_URL and the optional
+    # VALIDIBOT_MCP_BASE_URL from the same deployment configuration as the
+    # application. Do not add empty ``environment`` overrides here: Compose
+    # gives them precedence over values loaded from env_file.
     env_file:
       - .envs/.production/.self-hosted/.django
     restart: unless-stopped
@@ -276,8 +276,14 @@ services:
       - validibot
     env_file:
       - .envs/.production/.self-hosted/.mcp
+    # The host publication is a maintenance/debugging ingress for a reverse
+    # proxy on this VM, not a public plaintext endpoint. Bundled Caddy reaches
+    # ``mcp:8080`` directly over the private Compose network.
     ports:
-      - "8001:8080"
+      - target: 8080
+        published: "${MCP_HOST_PORT:-8001}"
+        host_ip: 127.0.0.1
+        protocol: tcp
     healthcheck:
       test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 8080), 2).close()"]
       interval: 10s

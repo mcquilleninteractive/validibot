@@ -54,14 +54,16 @@ Then set:
 
 ```bash
 VALIDIBOT_COMMERCIAL_PACKAGE=validibot-pro==<version>
-VALIDIBOT_PRIVATE_INDEX_URL=https://<license-credentials>@pypi.validibot.com/simple/
+VALIDIBOT_COMMERCIAL_NETRC=/absolute/path/to/commercial.netrc
 ```
 
 `VALIDIBOT_COMMERCIAL_PACKAGE` must be an exact package reference. Use either
-an exact version like `validibot-pro==0.1.0` together with
-`VALIDIBOT_PRIVATE_INDEX_URL=https://<license-credentials>@pypi.validibot.com/simple/`,
-or a quoted exact wheel URL on `pypi.validibot.com` such as
-`"https://<license-credentials>@pypi.validibot.com/packages/validibot_pro-0.1.0-py3-none-any.whl#sha256=<hash>"`.
+an exact version like `validibot-pro==0.1.0`, or a quoted exact wheel URL on
+`pypi.validibot.com` such as
+`"https://pypi.validibot.com/packages/validibot_pro-0.1.0-py3-none-any.whl#sha256=<hash>"`.
+Put the package login and key in the referenced mode-0600 netrc. BuildKit
+mounts that file only for the install step, keeping credentials out of build
+arguments and image metadata.
 Floating names like `validibot-pro` are intentionally rejected during Docker
 builds.
 

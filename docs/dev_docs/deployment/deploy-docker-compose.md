@@ -81,25 +81,17 @@ you opt in:
 
    ```bash
    VALIDIBOT_COMMERCIAL_PACKAGE=validibot-pro==<version>
-   VALIDIBOT_PRIVATE_INDEX_URL=https://<license-credentials>@pypi.validibot.com/simple/
+   VALIDIBOT_COMMERCIAL_NETRC=/absolute/path/to/commercial.netrc
    ```
 
    Use `validibot-enterprise==<version>` instead if you purchased Enterprise.
    You can also use a quoted exact wheel URL on `pypi.validibot.com` that
    includes `#sha256=<hash>` instead of a package name and version.
 
-   !!! warning "Credentials in build args are visible in image metadata"
-       These values are passed to `docker build` as build args and end up
-       in the final image's `docker history`. If you push the built image
-       to a private registry only you control, that is usually acceptable.
-       If you push to a shared registry, or you export the image via
-       `docker save` and share the archive, the embedded PyPI credentials
-       are recoverable. Rotate the index credentials regularly, and do
-       not share built images outside your own trust boundary.
-
-       A BuildKit-secrets-based alternative that avoids this exposure is
-       on the roadmap — see the "Build security" issue in the private
-       project tracker for the migration plan.
+   Put the `pypi.validibot.com` login and package key in the referenced
+   mode-0600 netrc. Compose mounts the credential only into the package-install
+   step as a BuildKit secret; it does not become a build argument or image
+   layer.
 
    Then point Django at the Pro-activating settings module by setting
    `DJANGO_SETTINGS_MODULE` in your `.envs/.production/.self-hosted/.django`:

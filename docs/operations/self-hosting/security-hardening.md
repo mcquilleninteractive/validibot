@@ -38,6 +38,14 @@ If you bring your own proxy:
 - set `DJANGO_SECURE_SSL_REDIRECT=true`;
 - enable HSTS via `DJANGO_SECURE_HSTS_*` settings.
 
+When MCP is enabled, give it a distinct HTTPS origin such as
+`https://mcp.example.com`. The production Compose file publishes MCP only on
+`127.0.0.1:8001`; an external host proxy forwards that loopback port, while the
+bundled Caddy service reaches `mcp:8080` over the private Compose network.
+Never publish the MCP HTTP port directly to an untrusted network. Keep
+`VALIDIBOT_MCP_BASE_URL` identical in `.django` and `.mcp` so OAuth issuance,
+redirects, and audience verification describe the same TLS-protected resource.
+
 ### 2. Use strong generated secrets
 
 ```bash
@@ -93,16 +101,17 @@ needs network access.
 Per-validator network capabilities and allowlists are future work. Until that
 policy exists, network access is a deployment-wide operator choice.
 
-### 7. Use rootless Docker where feasible
+### 7. Keep the rootless Docker default
 
 The default Docker daemon runs as root, which means its API socket carries
 root-equivalent host authority. Rootless Docker runs the daemon and validator
 containers inside an unprivileged user's namespace. That meaningfully reduces
 the consequence of a worker or container-runtime escape.
 
-Rootless is recommended defence in depth, not a requirement. That choice
-matches the self-hosted threat model: operators run known backends on their own
-networks, while uploaded files can still be hostile.
+Fresh self-hosted installs select the deployment user's standard rootless
+socket, `${XDG_RUNTIME_DIR:-/run/user/1000}/docker.sock`. Rootless remains
+defence in depth rather than a complete sandbox: operators run known backends
+on their own networks, while uploaded files can still be hostile.
 
 To select a rootless Docker daemon:
 
@@ -112,19 +121,32 @@ To select a rootless Docker daemon:
    Enable user-service lingering if the daemon must survive logout.
 2. Find that user's numeric UID with `id -u`. Confirm its socket exists, for
    example `/run/user/1000/docker.sock`.
-3. Set the host socket in `.envs/.production/.self-hosted/.build`:
+3. Confirm `.envs/.production/.self-hosted/.build` resolves the host socket:
 
    ```dotenv
-   VALIDATOR_CONTAINER_SOCKET=/run/user/1000/docker.sock
+   VALIDATOR_CONTAINER_SOCKET=${XDG_RUNTIME_DIR:-/run/user/1000}/docker.sock
    ```
+
+   If the deployment user is not UID 1000 and `XDG_RUNTIME_DIR` is unavailable,
+   set the exact `/run/user/<uid>/docker.sock` path instead.
 
 4. Run `just self-hosted deploy`, then `just self-hosted doctor --verbose`.
    `VB320` reports the engine version and `VB322` must report a rootless
    engine.
+5. Confirm `docker info --format '{{.CgroupVersion}} {{.CgroupDriver}}'`
+   reports cgroup v2 with the systemd driver. Rootless Docker can enforce the
+   validator CPU, memory, and process limits only when cgroup v2 delegation is
+   available; do not treat a host that silently ignores those limits as
+   hardened.
 
 The Compose mount keeps `/var/run/docker.sock` as the path *inside* the worker,
 so the application needs no special rootless code. Only the host-side socket
 path changes.
+
+Existing rootful installations remain supported, but must make that
+compatibility choice explicit with
+`VALIDATOR_CONTAINER_SOCKET=/var/run/docker.sock`. `check-env` reports the
+rootful selection, and doctor check `VB322` records the effective daemon mode.
 
 Rootless networking can behave differently around privileged ports, firewall
 rules, and source-IP preservation. Before using the bundled Caddy profile,
@@ -191,7 +213,7 @@ these controls automatically. Risk-averse operators should explicitly:
 - use `VALIDATOR_BACKEND_IMAGE_POLICY=digest`, or `signed-digest` after
   configuring cosign verification;
 - leave `VALIDATOR_NETWORK` unset;
-- use rootless Docker and confirm `VB322`;
+- keep the rootless socket default and confirm `VB322`;
 - keep telemetry integrations unset;
 - allow only operator-reviewed validator images.
 
@@ -222,6 +244,7 @@ Recommended firewall configuration:
 | `6379/tcp` | none | Redis |
 | `5555/tcp` | none | Flower (if enabled) |
 | `8000/tcp` | none (proxied via Caddy/your proxy) | Web |
+| `8001/tcp` | loopback only (proxied through TLS) | MCP, when enabled |
 
 DigitalOcean's Cloud Firewall is documented in [providers/digitalocean.md](providers/digitalocean.md) with these rules. Other providers: configure equivalently.
 

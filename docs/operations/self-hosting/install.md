@@ -34,7 +34,8 @@ On a fresh VM, complete these host-prep steps before cloning the repo:
 
 - install Docker Engine and the Compose plugin;
 - install `just`;
-- create a non-root `validibot` operator user with Docker access;
+- create a non-root `validibot` operator user and install rootless Docker for
+  that user;
 - mount durable storage at `/srv/validibot` for production installs;
 - configure Docker's data root to `/srv/validibot/docker` before the first Compose run if you are using that mounted volume layout.
 
@@ -84,7 +85,11 @@ python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().d
 openssl rand -base64 48
 ```
 
-Also edit `.postgres` and `.build` from the same template.
+Also edit `.postgres` and `.build` from the same template. The `.build`
+template selects the deployment user's rootless Docker socket. If you retain a
+rootful daemon for compatibility, opt in explicitly with
+`VALIDATOR_CONTAINER_SOCKET=/var/run/docker.sock` and review the host-authority
+tradeoff in [Security Hardening](security-hardening.md).
 
 ### 4. Validate config and DNS
 
@@ -144,6 +149,11 @@ just self-hosted check-dns
 
 If you bring your own proxy, configure it to forward to the `web` container on port 8000 and set `DJANGO_SECURE_PROXY_SSL_HEADER` plus `DJANGO_CSRF_TRUSTED_ORIGINS` appropriately in your `.django` file.
 
+For MCP, configure a distinct HTTPS hostname. Bundled Caddy reads
+`VALIDIBOT_MCP_BASE_URL` from `.django` and proxies that origin to the private
+`mcp:8080` service. An external proxy should forward to
+`http://127.0.0.1:8001`; do not expose that plaintext port publicly.
+
 ## Provider quickstarts
 
 The canonical deployment is "single Linux VM with Docker Compose." Provider-specific tutorials map that generic shape to real infrastructure:
@@ -159,8 +169,24 @@ If you've bought a Pro license:
 
    ```bash
    VALIDIBOT_COMMERCIAL_PACKAGE=validibot-pro==<version>
-   VALIDIBOT_PRIVATE_INDEX_URL=https://<email>:<token>@pypi.validibot.com/simple/
+   VALIDIBOT_COMMERCIAL_NETRC=/home/validibot/.config/validibot/commercial.netrc
    ```
+
+   Create that netrc from the credentials in the purchase email and restrict
+   it to the deployment user:
+
+   ```netrc
+   machine pypi.validibot.com
+     login <email>
+     password <package-key>
+   ```
+
+   ```bash
+   chmod 600 /home/validibot/.config/validibot/commercial.netrc
+   ```
+
+   Compose mounts the file only into the commercial package installation step;
+   credentials do not become build arguments or image metadata.
 
 2. Edit `.envs/.production/.self-hosted/.django`:
 

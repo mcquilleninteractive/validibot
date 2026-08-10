@@ -43,16 +43,23 @@ VALIDIBOT_COMMERCIAL_NETRC=
 #   false  — omit MCP (default)
 ENABLE_MCP_SERVER=false
 
+# Host port used only by a reverse proxy or diagnostics running on this VM.
+# docker-compose.production.yml fixes the host bind to 127.0.0.1 so the MCP
+# server cannot be exposed as public plaintext by an environment-file typo.
+MCP_HOST_PORT=8001
+
 
 # -- 3. Validator container engine ------------------------------------------
 #
 # Host path to the Docker-compatible API socket mounted into the worker.
-# Keep the default for standard Docker Engine:
-VALIDATOR_CONTAINER_SOCKET=/var/run/docker.sock
+# Fresh installs default to the rootless Docker socket for the deployment
+# user. XDG_RUNTIME_DIR is normally /run/user/<numeric-uid>; the fallback
+# matches the canonical first non-root Linux user. Set an explicit path when
+# the deployment user has a different UID or runtime directory.
+VALIDATOR_CONTAINER_SOCKET=${XDG_RUNTIME_DIR:-/run/user/1000}/docker.sock
 #
-# For rootless Docker, use the socket owned by the deployment user. Replace
-# 1000 with that user's numeric UID (run ``id -u`` on the host):
-#   VALIDATOR_CONTAINER_SOCKET=/run/user/1000/docker.sock
+# Rootful Docker remains supported as an explicit compatibility choice:
+#   VALIDATOR_CONTAINER_SOCKET=/var/run/docker.sock
 #
 # Rootless Podman's Docker-compatible API commonly uses:
 #   VALIDATOR_CONTAINER_SOCKET=/run/user/1000/podman/podman.sock

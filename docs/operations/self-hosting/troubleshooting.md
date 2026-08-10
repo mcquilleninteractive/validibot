@@ -11,8 +11,8 @@ The doctor command's check IDs are documented at [doctor-check-ids.md](doctor-ch
 - `VB201 storage root not writable` — inspect the path doctor prints inside the `web` container; on the default stack it should be `/app/storage/private` backed by the `validibot_storage` Docker volume.
 - `VB411 backups configured but no restore test recorded` — run a restore drill (see [restore.md](restore.md)).
 - `VB320 Docker version below minimum` — upgrade Docker Engine.
-- `VB322 rootful container engine` — supported, with rootless Docker available
-  as optional hardening.
+- `VB322 rootful container engine` — supported only as an explicit
+  compatibility posture; fresh installs default to rootless Docker.
 
 `doctor --json` gives machine-readable output that's easy to grep or pipe.
 
@@ -46,14 +46,15 @@ For a pre-bootstrap or disposable install, destroy the accidentally created volu
 
 ```bash
 docker compose -f docker-compose.production.yml -p validibot down -v
-sudo systemctl stop docker.socket docker.service
-sudo mkdir -p /srv/validibot/docker
-sudo tee /etc/docker/daemon.json > /dev/null <<'EOF'
+systemctl --user stop docker
+sudo install -d -o "$(id -un)" -g "$(id -gn)" /srv/validibot/docker
+install -d -m 0700 ~/.config/docker
+tee ~/.config/docker/daemon.json > /dev/null <<'EOF'
 {
   "data-root": "/srv/validibot/docker"
 }
 EOF
-sudo systemctl start docker.service docker.socket
+systemctl --user start docker
 docker info --format '{{.DockerRootDir}}'
 ```
 
@@ -67,9 +68,9 @@ The worker is up but not processing tasks. Likely causes:
 
 1. **Container-engine socket unreachable from worker container.** The worker
    dispatches advanced validators through the Docker API. Check
-   `just self-hosted doctor` for `VB302` (API availability). If you selected
-   rootless Docker, confirm `VALIDATOR_CONTAINER_SOCKET` names an existing
-   host socket owned by the deployment user.
+   `just self-hosted doctor` for `VB302` (API availability). Confirm
+   `VALIDATOR_CONTAINER_SOCKET` names the deployment user's existing rootless
+   socket, normally `$XDG_RUNTIME_DIR/docker.sock`.
 2. **Validator image not built or present.** Run `just self-hosted validators`. If an image is missing, build it with `just self-hosted validator-build <name>` or trigger the relevant validator-image deployment path.
 3. **Validator manifest missing.** Less common; usually shows up in worker logs as a `ValidatorNotFound` error.
 4. **Storage permissions wrong.** The worker can't materialise the per-attempt workspace. Check `VB201`.

@@ -6,10 +6,10 @@
 #
 #   COMPOSE_PROFILES=caddy just self-hosted deploy
 #
-# Caddy automatically issues a Let's Encrypt certificate for the
-# hostname declared in the SITE_URL env variable, which the Compose
-# service passes through from .envs/.production/.self-hosted/.django.
-# That hostname must already resolve to this VM's public IP — run
+# Caddy automatically issues Let's Encrypt certificates for SITE_URL and,
+# when configured, VALIDIBOT_MCP_BASE_URL. The Compose service reads both from
+# .envs/.production/.self-hosted/.django. Each configured hostname must already
+# resolve to this VM's public IP — run
 # ``./deploy/self-hosted/scripts/check-dns`` to verify before starting
 # Caddy.
 #
@@ -24,41 +24,52 @@
 #   - redirect port 80 traffic to HTTPS automatically
 #   - proxy all requests to the web container on port 8000
 {$SITE_URL} {
-    # Proxy to the Django web container. Compose puts both Caddy and
-    # ``web`` on the validibot bridge network, so the hostname ``web``
-    # resolves to the web service.
-    reverse_proxy web:8000
+	# Proxy to the Django web container. Compose puts both Caddy and
+	# ``web`` on the validibot bridge network, so the hostname ``web``
+	# resolves to the web service.
+	reverse_proxy web:8000
 
-    # Trust the X-Forwarded-* headers Caddy itself sets, so Django
-    # honours the original client IP for rate limiting and audit logs.
-    # Caddy sets these by default; this is just here as a reminder for
-    # operators reading the file.
+	# Trust the X-Forwarded-* headers Caddy itself sets, so Django
+	# honours the original client IP for rate limiting and audit logs.
+	# Caddy sets these by default; this is just here as a reminder for
+	# operators reading the file.
 
-    # Optional: tighten security headers.
-    header {
-        # HSTS: tell browsers to use HTTPS for this hostname for 1 year.
-        # Remove if you're still testing certificate issuance and don't
-        # want browsers to cache the HSTS policy.
-        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+	# Optional: tighten security headers.
+	header {
+		# HSTS: tell browsers to use HTTPS for this hostname for 1 year.
+		# Remove if you're still testing certificate issuance and don't
+		# want browsers to cache the HSTS policy.
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
 
-        # Defense-in-depth — Django sets these too, but Caddy is the
-        # outer envelope.
-        X-Content-Type-Options "nosniff"
-        Referrer-Policy "strict-origin-when-cross-origin"
+		# Defense-in-depth — Django sets these too, but Caddy is the
+		# outer envelope.
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
 
-        # Hide the Caddy server header.
-        -Server
-    }
+		# Hide the Caddy server header.
+		-Server
+	}
 
-    # Health check endpoint exposed by Django. Caddy uses this for its
-    # own healthcheck, but operators can also curl it directly.
-    handle /health/ {
-        reverse_proxy web:8000
-    }
+	# Health check endpoint exposed by Django. Caddy uses this for its
+	# own healthcheck, but operators can also curl it directly.
+	handle /health/ {
+		reverse_proxy web:8000
+	}
 }
 
-# If you operate multiple Validibot hostnames behind the same Caddy
-# instance (e.g. app.example.com + mcp.example.com), duplicate the
-# block above with the second hostname and the appropriate
-# reverse_proxy target. Out of scope for the canonical single-VM
-# deployment.
+# The MCP service is optional. When VALIDIBOT_MCP_BASE_URL is absent, this
+# block binds only an unexported loopback sentinel inside the Caddy container.
+# When MCP is enabled, set a distinct HTTPS origin such as
+# https://mcp.example.com in both .django and .mcp. Caddy then terminates its
+# public TLS and proxies to MCP over the private Compose network; port 8001
+# remains host-loopback-only.
+{$VALIDIBOT_MCP_BASE_URL:http://127.0.0.1:65535} {
+	reverse_proxy mcp:8080
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+}

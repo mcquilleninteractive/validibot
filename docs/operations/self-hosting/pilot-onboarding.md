@@ -28,7 +28,7 @@ If the customer is using DigitalOcean specifically, also pre-read the [DigitalOc
   $EDITOR .envs/.production/.self-hosted/.django  # SITE_URL, DJANGO_ALLOWED_HOSTS, secrets
   $EDITOR .envs/.production/.self-hosted/.postgres  # POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB
   ```
-- [ ] If Pro: also edit `.envs/.production/.self-hosted/.build` to set `VALIDIBOT_COMMERCIAL_PACKAGE` and `VALIDIBOT_PRIVATE_INDEX_URL` from the purchase email
+- [ ] If Pro: also edit `.envs/.production/.self-hosted/.build` to set `VALIDIBOT_COMMERCIAL_PACKAGE` and `VALIDIBOT_COMMERCIAL_NETRC` from the purchase email
 - [ ] Run `just self-hosted check-env` — exits 0
 - [ ] Run `just self-hosted bootstrap`
 - [ ] Visit `https://<their-site-url>/` in a browser — login page loads

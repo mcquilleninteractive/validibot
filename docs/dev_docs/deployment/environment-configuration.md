@@ -125,7 +125,8 @@ The `.build` file plays three roles, all loaded from the same file:
     - `VALIDIBOT_COMMERCIAL_PACKAGE` — must be an exact version like
       `validibot-pro==0.5.0` or a quoted exact wheel URL on
       `pypi.validibot.com` that includes `#sha256=<hash>`
-    - `VALIDIBOT_PRIVATE_INDEX_URL`
+    - `VALIDIBOT_COMMERCIAL_NETRC` — absolute path to a mode-0600 netrc;
+      Compose mounts it only as a BuildKit secret
 
 2. **Recipe/deploy/runtime knobs.** The `just local up` /
    `just local-pro up` / `just local-cloud up` recipes (and the
@@ -224,7 +225,7 @@ The quick version of "where does each variable go":
 | `VALIDIBOT_OAUTH_CLIENT_SECRET` | `.mcp` | Paired OAuth client secret; same generated value as `IDP_OIDC_MCP_SERVER_CLIENT_SECRET`, stored in the MCP secret file |
 | `VALIDIBOT_OAUTH_AUTHORIZATION_SERVER_URL` | `.mcp` | Canonical Django/OIDC issuer base URL; required by the standalone MCP server |
 | `VALIDIBOT_OAUTH_AUTHORIZATION_ENDPOINT`, `VALIDIBOT_OAUTH_TOKEN_ENDPOINT`, `VALIDIBOT_OAUTH_REVOCATION_ENDPOINT`, `VALIDIBOT_OAUTH_JWKS_URL` | `.mcp` | Optional complete-URL overrides for non-standard compatible OIDC routing; normal Validibot deployments derive these locally from the issuer URL |
-| `VALIDIBOT_COMMERCIAL_PACKAGE`, `VALIDIBOT_PRIVATE_INDEX_URL` | `.build` | Docker build-time args (docker-compose only) |
+| `VALIDIBOT_COMMERCIAL_PACKAGE`, `VALIDIBOT_COMMERCIAL_NETRC` | `.build` | Exact package reference plus a BuildKit-mounted credential file (Docker Compose only) |
 | `ENABLE_MCP_SERVER` | `.build` | Recipe-level knob; decides whether `just gcp deploy-all` and the compose MCP profile activate MCP |
 | `DRF_NUM_PROXIES` | `.django` | Trusted-proxy count for client-IP resolution in DRF throttles; must equal the inbound proxy hop count or IP rate-limits can be spoofed (too high) / over-applied (too low). Community default 1; hosted cloud 2 (behind the LB). See [reverse-proxy.md](reverse-proxy.md). |
 | `VALIDIBOT_MCP_API_BASE_URL` | `.build` (GCP) | Stamped onto MCP as `VALIDIBOT_API_BASE_URL` and onto Django as `MCP_OIDC_AUDIENCE` |

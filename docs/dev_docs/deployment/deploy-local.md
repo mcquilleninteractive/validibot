@@ -94,13 +94,16 @@ Then edit `.envs/.local/.build` and set:
 
 ```bash
 VALIDIBOT_COMMERCIAL_PACKAGE=validibot-pro==<version>
-VALIDIBOT_PRIVATE_INDEX_URL=https://<license-credentials>@pypi.validibot.com/simple/
+VALIDIBOT_COMMERCIAL_NETRC=/absolute/path/to/commercial.netrc
 ```
 
 Use `validibot-enterprise==<version>` instead of `validibot-pro==<version>` if
 you purchased Enterprise. You can also use a quoted exact wheel URL on
 `pypi.validibot.com` that includes `#sha256=<hash>` instead of a package name
 and version.
+
+The netrc must contain the `pypi.validibot.com` login and package key and have
+mode 0600. Compose mounts it only into the package-install build step.
 
 Then point Django at the Pro-activating settings module by setting
 `DJANGO_SETTINGS_MODULE` in `.envs/.local/.django`:

@@ -267,10 +267,11 @@ and BuildKit secrets.
 queried
 **Trigger:** Doctor inspects the daemon information returned through the
 worker's Docker-compatible API socket.
-**Fix:** Rootful is supported for operator-reviewed validator backends.
-For optional hardening, configure rootless Docker, set
-`VALIDATOR_CONTAINER_SOCKET` in `.envs/.production/.self-hosted/.build`,
-redeploy, and rerun doctor. The result must change to `ok`.
+**Fix:** Rootful is supported for operator-reviewed validator backends only as
+an explicit compatibility choice. Fresh installs default to rootless Docker.
+Confirm `VALIDATOR_CONTAINER_SOCKET` resolves to the deployment user's
+`$XDG_RUNTIME_DIR/docker.sock`, redeploy, and rerun doctor. The result must
+change to `ok`.
 
 ---
 

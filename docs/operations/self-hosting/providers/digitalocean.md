@@ -286,27 +286,42 @@ sudo chmod a+r /etc/apt/keyrings/docker.gpg
 echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu ${VERSION_CODENAME} stable" \
   | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
 sudo apt update
-sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+sudo apt install -y \
+  docker-ce docker-ce-cli containerd.io docker-buildx-plugin \
+  docker-compose-plugin docker-ce-rootless-extras \
+  uidmap dbus-user-session libcap2-bin
 
-# Put Docker's named volumes on the attached DigitalOcean Volume before
-# the first docker compose run. Do this while the install is still fresh.
-sudo systemctl stop docker.socket docker.service
-sudo mkdir -p /srv/validibot/docker
-sudo tee /etc/docker/daemon.json > /dev/null <<'EOF'
+# Fresh installs use Docker's rootless daemon under the validibot operator
+# account. Disable the unused rootful daemon before any Compose state exists.
+sudo systemctl disable --now docker.socket docker.service
+sudo loginctl enable-linger validibot
+
+# Put rootless Docker's named volumes on the attached DigitalOcean Volume
+# before the first docker compose run.
+sudo install -d -o validibot -g validibot /srv/validibot/docker
+install -d -m 0700 ~/.config/docker
+tee ~/.config/docker/daemon.json > /dev/null <<'EOF'
 {
   "data-root": "/srv/validibot/docker"
 }
 EOF
-sudo systemctl start docker.service docker.socket
 
-# Now that the docker group exists, allow the validibot operator user to
-# run Docker commands. Log out/in after this so the new group is active.
-sudo usermod -aG docker validibot
-exit
-ssh validibot@<droplet-ip>
+dockerd-rootless-setuptool.sh install
+systemctl --user enable --now docker
+docker context use rootless
+
+# The bundled Caddy profile publishes 80/443. Grant only rootlesskit the
+# ability to bind privileged ports, then restart the user daemon.
+sudo setcap cap_net_bind_service=ep "$(command -v rootlesskit)"
+systemctl --user restart docker
 
 docker info --format '{{.DockerRootDir}}'
 # Should print: /srv/validibot/docker
+docker info --format '{{json .SecurityOptions}}'
+# Must include: name=rootless
+docker info --format '{{.CgroupVersion}} {{.CgroupDriver}}'
+# Must print: 2 systemd (validator resource limits depend on cgroup delegation)
+test -S "${XDG_RUNTIME_DIR}/docker.sock"
 
 # Install just (used to drive all subsequent operations). This pins the
 # version instead of using GitHub's moving "latest" redirect.
@@ -321,17 +336,29 @@ sudo chown -R validibot:validibot /srv/validibot/repo
 cd /srv/validibot/repo
 ```
 
-Do not run `docker compose` until `docker info --format '{{.DockerRootDir}}'` prints `/srv/validibot/docker`. If Docker creates named volumes under the boot disk first, you need to migrate them deliberately before relying on Droplet rebuild survival. See [Troubleshooting → I ran Compose before relocating Docker's data root](../troubleshooting.md#i-ran-compose-before-relocating-dockers-data-root).
+Do not run `docker compose` until the data-root check prints
+`/srv/validibot/docker`, `SecurityOptions` includes `name=rootless`, the cgroup
+check prints `2 systemd`, and the per-user socket exists. If Docker creates
+named volumes under the boot disk first, you need to migrate them deliberately
+before relying on Droplet rebuild survival. See [Troubleshooting → I ran
+Compose before relocating Docker's data
+root](../troubleshooting.md#i-ran-compose-before-relocating-dockers-data-root).
+
+Existing installations may retain rootful Docker during a planned migration.
+Set `VALIDATOR_CONTAINER_SOCKET=/var/run/docker.sock` explicitly in `.build`
+and keep using the rootful Docker context; this is a compatibility posture, not
+the fresh-install default.
 
 ## Step 7: Configure environment files
 
-Validibot uses three env files for self-hosted deployments — all under `.envs/.production/.self-hosted/`:
+Validibot uses four env files for self-hosted deployments — all under `.envs/.production/.self-hosted/`:
 
 | File | Purpose |
 |---|---|
 | `.django` | Django runtime config — secrets, allowed hosts, email, storage paths, MFA key. |
 | `.postgres` | Postgres credentials. |
-| `.build` | Build-time config — image tags, optional Pro package URL. |
+| `.build` | Build/host config — rootless socket, MCP host port, image tags, optional exact Pro package reference. |
+| `.mcp` | MCP runtime and OAuth settings (used only when the Pro MCP service is enabled). |
 
 Copy the templates and edit them:
 
@@ -650,14 +677,31 @@ See [Validator Images](../validator-images.md) for image-naming conventions, bui
 
 ## Step 14: (optional) Activate Pro
 
-If you've bought a Pro license, you'll have received a private package URL and a wheel reference. Activation is two config changes plus a redeploy — no data migration, no separate install:
+If you've bought a Pro license, you'll have received a package login, key, and
+exact package reference. Activation is two config changes plus a redeploy — no
+data migration, no separate install:
 
 1. Edit `.envs/.production/.self-hosted/.build`:
 
    ```bash
    VALIDIBOT_COMMERCIAL_PACKAGE=validibot-pro==<version>
-   VALIDIBOT_PRIVATE_INDEX_URL=https://<email>:<token>@pypi.validibot.com/simple/
+   VALIDIBOT_COMMERCIAL_NETRC=/home/validibot/.config/validibot/commercial.netrc
    ```
+
+   Store the credentials from the purchase email in that mode-0600 file:
+
+   ```netrc
+   machine pypi.validibot.com
+     login <email>
+     password <package-key>
+   ```
+
+   ```bash
+   chmod 600 /home/validibot/.config/validibot/commercial.netrc
+   ```
+
+   Compose exposes it only to the package-install build step as a BuildKit
+   secret; it is not copied into the image.
 
 2. Edit `.envs/.production/.self-hosted/.django`:
 
@@ -674,7 +718,10 @@ If you've bought a Pro license, you'll have received a private package URL and a
 
 Pro migrations are additive — they create new tables (teams, guests, signed credentials, MCP, advanced analytics) but never reshape community tables. Existing data, users, workflows, and runs are preserved.
 
-Treat the private package URL as a credential: keep it out of shell history, logs, and source control. Valid access is required when installing or upgrading the commercial package; the license email explains renewal and credential rotation.
+Treat the package key as a credential: keep the netrc out of logs, support
+bundles, and source control. Valid access is required when installing or
+upgrading the commercial package; the license email explains renewal and
+credential rotation.
 
 ## Troubleshooting
 
@@ -689,7 +736,12 @@ just self-hosted logs-service postgres
 Most common causes:
 
 - **Database connection refused:** `POSTGRES_*` env vars don't match, or Postgres hasn't finished initialising yet. Wait 10 seconds and retry. If using Managed Postgres, confirm trusted-source rules include the Droplet.
-- **Permission denied on `/var/run/docker.sock`:** the `validibot` user isn't in the `docker` group. `groups validibot` should include `docker`. If not, `usermod -aG docker validibot` and log out/in.
+- **Docker-compatible socket unavailable:** confirm
+  `systemctl --user status docker`, verify
+  `test -S "$XDG_RUNTIME_DIR/docker.sock"`, and check that `.build` selects the
+  same socket. `just self-hosted doctor --verbose` should report `VB322` as
+  rootless. The worker intentionally sees that mount as
+  `/var/run/docker.sock` internally.
 - **Permission denied on `/app/storage/private`:** confirm Docker's root directory is `/srv/validibot/docker`, then inspect the storage volume from the web container: `docker compose -f docker-compose.production.yml -p validibot exec web ls -ld /app/storage /app/storage/private`. If ownership is wrong, repair it inside the container as root: `docker compose -f docker-compose.production.yml -p validibot exec -u root web chown -R django:django /app/storage`.
 
 ### TLS / Let's Encrypt errors
