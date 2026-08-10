@@ -56,6 +56,8 @@ class ThermValidator(SimpleValidator):
         submission: Submission,
     ) -> ValidationIssue | None:
         """Accept XML (THMX) and BINARY (THMZ) submissions."""
+        if self._resolved_therm_file() is not None:
+            return None
         if submission.file_type not in (
             SubmissionFileType.XML,
             SubmissionFileType.BINARY,
@@ -71,16 +73,24 @@ class ThermValidator(SimpleValidator):
         return None
 
     def parse_content(self, submission: Submission) -> ThermModel:
-        """Parse the THMX/THMZ submission into a ThermModel."""
-        if submission.file_type == SubmissionFileType.BINARY:
+        """Parse the resolved THMX/THMZ bytes into a ``ThermModel``."""
+        resolved_file = self._resolved_therm_file()
+        if resolved_file is not None:
+            content = resolved_file.content
+            if not content:
+                msg = "Resolved THERM model is empty."
+                raise ValueError(msg)
+            filename = resolved_file.name
+        elif submission.file_type == SubmissionFileType.BINARY:
             content = self._read_binary_content(submission)
+            filename = getattr(submission, "original_filename", None)
         else:
             content = submission.get_content()
             if not content:
                 msg = "Empty submission content."
                 raise ValueError(msg)
+            filename = getattr(submission, "original_filename", None)
 
-        filename = getattr(submission, "original_filename", None)
         return parse_therm_file(content, filename=filename)
 
     def run_domain_checks(
@@ -103,6 +113,13 @@ class ThermValidator(SimpleValidator):
     def extract_output_values(self, parsed: ThermModel) -> dict[str, Any]:
         """Extract output values from the parsed ThermModel."""
         return extract_output_values(parsed)
+
+    def _resolved_therm_file(self):
+        """Return the runtime-resolved model, independent of its original source."""
+        run_context = getattr(self, "run_context", None)
+        if run_context is None:
+            return None
+        return (run_context.resolved_file_inputs or {}).get("therm_model")
 
     @staticmethod
     def _read_binary_content(submission: Submission) -> bytes:

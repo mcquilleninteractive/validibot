@@ -15,7 +15,6 @@ from typing import TYPE_CHECKING
 from typing import Any
 
 from django.core.exceptions import ValidationError
-from django.db import transaction
 from django.db.models import Q
 
 from validibot.validations.constants import ArtifactKind
@@ -262,7 +261,6 @@ def resolve_artifact_reference(
     return source_step, matches[0]
 
 
-@transaction.atomic
 def set_artifact_input_binding(
     *,
     consumer_step: WorkflowStep,
@@ -270,11 +268,60 @@ def set_artifact_input_binding(
     source_scope: str,
     artifact_reference: str = "",
     source_data_path: str = "",
+    expected_revision: str | None = None,
 ) -> StepInputBinding:
-    """Create or update one file input binding through the shared contract."""
+    """Create or update one file input binding under the workflow write lock.
+
+    ``expected_revision`` is supplied by authoring forms. ``None`` means that
+    the caller is not performing an optimistic-concurrency check; an empty
+    string means the form was opened before a binding existed. Checking the
+    revision after acquiring the workflow lock closes the otherwise subtle
+    gap between form validation and persistence.
+    """
+    from validibot.workflows.services.editing_policy import (
+        guard_workflow_definition_mutation,
+    )
+
+    with guard_workflow_definition_mutation(consumer_step.workflow_id):
+        return _set_artifact_input_binding(
+            consumer_step=consumer_step,
+            consumer_port=consumer_port,
+            source_scope=source_scope,
+            artifact_reference=artifact_reference,
+            source_data_path=source_data_path,
+            expected_revision=expected_revision,
+        )
+
+
+def _set_artifact_input_binding(
+    *,
+    consumer_step: WorkflowStep,
+    consumer_port: StepIODefinition,
+    source_scope: str,
+    artifact_reference: str = "",
+    source_data_path: str = "",
+    expected_revision: str | None = None,
+) -> StepInputBinding:
+    """Persist one binding while the owning workflow lock is held."""
     from validibot.validations.models import StepInputBinding
 
     validate_source_scope(consumer_port, source_scope)
+    existing = (
+        StepInputBinding.objects.select_for_update()
+        .filter(
+            workflow_step=consumer_step,
+            io_definition=consumer_port,
+        )
+        .first()
+    )
+    if expected_revision is not None:
+        current_revision = existing.modified.isoformat() if existing else ""
+        if current_revision != expected_revision:
+            raise ValidationError(
+                "This file source changed in another editor. Reload the step "
+                "and try again."
+            )
+
     defaults: dict[str, Any] = {
         "source_scope": source_scope,
         "default_value": None,
@@ -308,11 +355,16 @@ def set_artifact_input_binding(
     else:
         defaults["source_data_path"] = source_data_path
 
-    binding, _created = StepInputBinding.objects.update_or_create(
-        workflow_step=consumer_step,
-        io_definition=consumer_port,
-        defaults=defaults,
-    )
+    if existing is None:
+        binding = StepInputBinding(
+            workflow_step=consumer_step,
+            io_definition=consumer_port,
+            **defaults,
+        )
+    else:
+        binding = existing
+        for field_name, value in defaults.items():
+            setattr(binding, field_name, value)
     binding.full_clean()
     binding.save()
     return binding

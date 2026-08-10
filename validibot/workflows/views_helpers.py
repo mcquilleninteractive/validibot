@@ -9,6 +9,7 @@ from uuid import uuid4
 from django import forms
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.db import transaction
 from django.http import Http404
 from django.http import HttpRequest
 from django.urls import reverse
@@ -1571,6 +1572,7 @@ def _sync_step_file_port_bindings(step: WorkflowStep, form: forms.Form) -> None:
                     else ""
                 )
             ),
+            expected_revision=update.get("expected_revision"),
         )
 
 
@@ -2000,6 +2002,7 @@ def _compute_insert_order(
     return max_order + 10
 
 
+@transaction.atomic
 def save_workflow_step(
     workflow: Workflow,
     validator: Validator,
@@ -2009,7 +2012,12 @@ def save_workflow_step(
     insert_after_step: int | None = None,
 ) -> WorkflowStep:
     """
-    Persist a workflow step using the supplied form data and validator.
+    Persist a workflow step and all dependent rows as one database change.
+
+    The normal editing view already holds the workflow-definition lock. This
+    transaction also protects service callers, imports, management commands,
+    and tests from retaining a partly-saved step when a later resource or file
+    binding fails validation.
     """
     is_new = step is None
     step = step or WorkflowStep(workflow=workflow)

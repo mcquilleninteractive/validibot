@@ -5,7 +5,6 @@ and activation toggle views. Also defines the MAX_STEP_COUNT constant
 used across multiple workflow view modules.
 """
 
-import json
 import logging
 from http import HTTPStatus
 from typing import TYPE_CHECKING
@@ -724,7 +723,7 @@ class WorkflowJsonView(WorkflowObjectMixin, TemplateView):
         workflow = self.get_object()
         serializer = WorkflowFullSerializer(workflow, context={"request": self.request})
         context["workflow"] = workflow
-        context["json_data"] = json.dumps(serializer.data, indent=2, ensure_ascii=False)
+        context["json_data"] = serializer.data
         return context
 
 

@@ -40,7 +40,6 @@ from validibot_shared.validations.envelopes import ValidatorInfo
 from validibot_shared.validations.envelopes import ValidatorType
 from validibot_shared.validations.envelopes import WorkflowInfo
 
-from validibot.validations.constants import FMU_MODEL_RESOURCE
 from validibot.validations.constants import PORTFOLIO_MANAGER_MAX_SUBMISSION_BYTES
 from validibot.validations.constants import BindingSourceScope
 from validibot.validations.constants import EnvelopeChannel
@@ -50,6 +49,7 @@ from validibot.validations.constants import ValidationType
 from validibot.validations.services import artifact_ports
 from validibot.validations.services.file_identity import FileIdentity
 from validibot.validations.services.file_identity import local_file_identity
+from validibot.validations.services.resolved_files import resolve_file_inputs
 
 logger = logging.getLogger(__name__)
 
@@ -454,6 +454,7 @@ def _resolve_energyplus_file_port_items(
             if binding.source_scope == BindingSourceScope.WORKFLOW_RESOURCE:
                 try:
                     resolved_resources = _resolve_workflow_resource_port(
+                        run=run,
                         step=step,
                         port=port,
                         binding=binding,
@@ -557,39 +558,32 @@ def _resolve_energyplus_file_port_items(
 
 def _resolve_workflow_resource_port(
     *,
+    run,
     step,
     port,
     binding,
     resource_uri_overrides: dict[str, FileIdentity] | None,
 ) -> list[ResourceFileItem]:
-    """Resolve a workflow-resource artifact port to resource_files items."""
+    """Resolve a workflow-resource port through the shared file descriptor."""
 
-    expected_type = binding.source_data_path or port.resource_type or port.data_format
-    resource_rows = list(
-        step.step_resources.select_related("validator_resource_file"),
+    resolved = resolve_file_inputs(
+        run=run,
+        step=step,
+        load_content=False,
+        resource_identity_overrides=resource_uri_overrides,
+        contract_keys={port.contract_key},
+    ).get(port.contract_key)
+    if resolved is None:
+        return []
+    item = ResourceFileItem(
+        id=resolved.resource_id,
+        name=resolved.name,
+        type=resolved.resource_type,
+        port_key=resolved.contract_key,
+        **resolved.identity.envelope_fields(),
     )
-    matches = [
-        row for row in resource_rows if _step_resource_metadata(row)[1] == expected_type
-    ]
-    artifact_ports.validate_cardinality(
-        port=port,
-        count=len(matches),
-        source_description=(
-            f"workflow resource type '{expected_type}' on step {step.id}"
-        ),
-    )
-
-    items = [
-        _build_step_resource_item(
-            step_resource=row,
-            resource_uri_overrides=resource_uri_overrides,
-        )
-        for row in matches
-    ]
-    for item in items:
-        item.port_key = port.contract_key
-        artifact_ports.validate_resource_file_item(port=port, item=item)
-    return items
+    artifact_ports.validate_resource_file_item(port=port, item=item)
+    return [item]
 
 
 def _resolve_artifact_or_submission_file_identity_with_trace(
@@ -601,76 +595,40 @@ def _resolve_artifact_or_submission_file_identity_with_trace(
     port,
     binding,
 ) -> tuple[FileIdentity, dict]:
-    """Resolve submitted/upstream artifact ports and return an audit snapshot."""
+    """Delegate source resolution and return an envelope-safe audit snapshot."""
 
-    if binding.source_scope == BindingSourceScope.SUBMISSION_FILE:
-        try:
-            identity = _resolve_submission_file_identity(
-                step_config=step_config,
-                input_file_uris=input_file_uris,
-                port=port,
-                binding=binding,
-            )
-            artifact_ports.validate_file_uri(port=port, uri=identity.uri)
-        except ValueError as exc:
-            _record_and_raise_artifact_resolution_error(
-                run=run,
-                port=port,
-                binding=binding,
-                error_message=str(exc),
-            )
+    del step_config  # File identity comes from bindings and attempt materialization.
+    try:
+        resolved = resolve_file_inputs(
+            run=run,
+            step=step,
+            load_content=False,
+            materialized_file_identities=input_file_uris,
+            contract_keys={port.contract_key},
+        )[port.contract_key]
+    except (KeyError, ValueError) as exc:
+        _record_and_raise_artifact_resolution_error(
+            run=run,
+            port=port,
+            binding=binding,
+            error_message=str(exc),
+        )
 
-        return identity, {
-            "source": BindingSourceScope.SUBMISSION_FILE,
-            "port_key": port.contract_key,
-            "role": port.role or "",
-            **identity.envelope_fields(),
-        }
-
-    if binding.source_scope == BindingSourceScope.UPSTREAM_ARTIFACT:
-        try:
-            artifact_ref = _resolve_upstream_artifact_ref(
-                run=run,
-                step=step,
-                port=port,
-                binding=binding,
-            )
-            _validate_upstream_artifact_ref(
-                run=run,
-                port=port,
-                artifact_ref=artifact_ref,
-            )
-            uri = _uri_from_artifact_ref(port=port, artifact_ref=artifact_ref)
-            artifact_ports.validate_file_uri(port=port, uri=uri)
-            artifact_ports.validate_artifact_ref(port=port, artifact_ref=artifact_ref)
-            identity = FileIdentity.from_artifact_ref(artifact_ref)
-        except ValueError as exc:
-            _record_and_raise_artifact_resolution_error(
-                run=run,
-                port=port,
-                binding=binding,
-                error_message=str(exc),
-            )
-
-        return identity, {
-            "source": BindingSourceScope.UPSTREAM_ARTIFACT,
-            "port_key": port.contract_key,
-            "source_data_path": binding.source_data_path,
-            "artifact": artifact_ref,
-        }
-
-    msg = (
-        f"Artifact port '{port.contract_key}' source scope "
-        f"'{binding.source_scope}' is not materializable for artifact input "
-        "files yet."
-    )
-    _record_and_raise_artifact_resolution_error(
-        run=run,
-        port=port,
-        binding=binding,
-        error_message=msg,
-    )
-    raise AssertionError("unreachable")
+    snapshot = {
+        "source": resolved.source_scope,
+        "port_key": resolved.contract_key,
+        "role": resolved.role,
+        **resolved.identity.envelope_fields(),
+    }
+    if resolved.artifact_id:
+        snapshot.update(
+            {
+                "artifact_id": resolved.artifact_id,
+                "producer_step_key": resolved.producer_step_key,
+                "producer_output_key": resolved.producer_output_key,
+            }
+        )
+    return resolved.identity, snapshot
 
 
 def _resolve_input_file_artifact_port_item(
@@ -852,6 +810,7 @@ def _resolve_resource_file_artifact_port_items(
 
     try:
         items = _resolve_workflow_resource_port(
+            run=run,
             step=step,
             port=port,
             binding=binding,
@@ -877,76 +836,6 @@ def _resolve_resource_file_artifact_port_items(
         value_snapshot=[_resource_file_item_snapshot(item) for item in items],
     )
     return items
-
-
-def _resolve_upstream_artifact_ref(*, run, step, port, binding) -> dict:
-    """Resolve the relational producer edge to this run's exact artifact."""
-
-    from validibot.validations.models import Artifact
-    from validibot.validations.services.artifacts import build_artifact_ref
-
-    source_step = binding.source_step
-    source_output = binding.source_output_io_definition
-    if source_step is None or source_output is None:
-        msg = f"Artifact port '{port.contract_key}' has no relational producer."
-        raise ValueError(msg)
-    if source_step.workflow_id != step.workflow_id or source_step.order >= step.order:
-        msg = "Artifact producer must be an earlier step in the same workflow."
-        raise ValueError(msg)
-    artifact = Artifact.objects.filter(
-        validation_run=run,
-        workflow_step=source_step,
-        contract_key=source_output.contract_key,
-        item_key="",
-    ).first()
-    if artifact is not None:
-        return build_artifact_ref(artifact).model_dump(mode="json")
-
-    msg = (
-        f"Artifact port '{port.contract_key}' could not resolve upstream "
-        f"artifact '{binding.source_data_path}'."
-    )
-    raise ValueError(msg)
-
-
-def _uri_from_artifact_ref(*, port, artifact_ref: dict) -> str:
-    """Return the storage URI from an artifact ref or raise a port error."""
-
-    uri = str(artifact_ref.get("uri") or "")
-    if uri:
-        return uri
-
-    msg = (
-        f"Artifact port '{port.contract_key}' resolved an artifact "
-        "without a storage URI."
-    )
-    raise ValueError(msg)
-
-
-def _validate_upstream_artifact_ref(*, run, port, artifact_ref: dict) -> None:
-    """Fail closed when an upstream artifact reference cannot belong to this run."""
-
-    run_id = str(artifact_ref.get("run_id") or "")
-    if run_id and run_id != str(run.id):
-        msg = (
-            f"Artifact port '{port.contract_key}' resolved artifact from run "
-            f"{run_id}, but the current run is {run.id}."
-        )
-        raise ValueError(msg)
-
-    producer_step_key = str(artifact_ref.get("producer_step_key") or "")
-    if producer_step_key:
-        current_step_run = run.current_step_run
-        upstream_keys = {
-            step.step_key
-            for step in run.workflow.steps.filter(order__lt=current_step_run.step_order)
-        }
-        if producer_step_key not in upstream_keys:
-            msg = (
-                f"Artifact port '{port.contract_key}' resolved artifact from "
-                f"non-upstream step '{producer_step_key}'."
-            )
-            raise ValueError(msg)
 
 
 def _resource_file_item_snapshot(item: ResourceFileItem) -> dict:
@@ -1019,37 +908,6 @@ def _record_and_raise_artifact_resolution_error(
         error_message=error_message,
     )
     raise ValueError(error_message)
-
-
-def _resolve_submission_file_identity(
-    *,
-    step_config: dict,
-    input_file_uris: dict[str, FileIdentity] | None,
-    port,
-    binding,
-) -> FileIdentity:
-    """Resolve a submitted file only when runtime supplied exact identity."""
-
-    candidates = [
-        binding.source_data_path,
-        port.role,
-        port.contract_key,
-        f"{port.contract_key}_uri",
-    ]
-    if binding.source_data_path == "primary":
-        candidates.append("primary_file_uri")
-
-    del step_config  # Stored config may contain URIs, never immutable identities.
-    for key in candidates:
-        if key and (input_file_uris or {}).get(key):
-            return input_file_uris[key]
-
-    msg = (
-        f"Required artifact port '{port.contract_key}' could not resolve a "
-        "submitted file identity from runtime materialization keys "
-        f"{', '.join(k for k in candidates if k)}."
-    )
-    raise ValueError(msg)
 
 
 def _build_fmu_input_file_item(
@@ -1148,21 +1006,38 @@ def _resolve_fmu_file_port_item(
             error_message=msg,
         )
 
-    try:
-        if binding.source_scope == BindingSourceScope.WORKFLOW_RESOURCE:
-            item, value_snapshot = _resolve_fmu_workflow_resource_port(
-                step=step,
+    system_file_identities = None
+    fmu_model = getattr(validator, "fmu_model", None)
+    if binding.source_scope == BindingSourceScope.SYSTEM:
+        if not fmu_model:
+            msg = f"Validator {validator.id} has no FMU model attached"
+            _record_and_raise_artifact_resolution_error(
+                run=run,
                 port=port,
                 binding=binding,
-                input_file_uris=input_file_uris,
-                resource_uri_overrides=resource_uri_overrides,
+                error_message=msg,
             )
-        else:
-            item, value_snapshot = _resolve_fmu_system_port(
-                validator=validator,
-                port=port,
-                input_file_uris=input_file_uris,
-            )
+        system_file_identities = {
+            port.contract_key: (input_file_uris or {}).get("fmu_model_uri")
+            or _stored_fmu_model_identity(fmu_model),
+        }
+
+    try:
+        resolved = resolve_file_inputs(
+            run=run,
+            step=step,
+            load_content=False,
+            materialized_file_identities=input_file_uris,
+            resource_identity_overrides=resource_uri_overrides,
+            system_file_identities=system_file_identities,
+            contract_keys={port.contract_key},
+        )[port.contract_key]
+        item = _build_fmu_input_file_item(
+            resolved.contract_key,
+            resolved.identity,
+            role=resolved.role or "fmu",
+        )
+        artifact_ports.validate_input_file_item(port=port, item=item)
     except ValueError as exc:
         _record_and_raise_artifact_resolution_error(
             run=run,
@@ -1171,6 +1046,14 @@ def _resolve_fmu_file_port_item(
             error_message=str(exc),
         )
 
+    value_snapshot = {
+        "source": resolved.source_scope,
+        "port_key": resolved.contract_key,
+        "resource_id": resolved.resource_id,
+        "type": resolved.resource_type,
+        "fmu_model_id": str(fmu_model.id) if fmu_model is not None else "",
+        **resolved.identity.envelope_fields(),
+    }
     _record_artifact_input_trace(
         run=run,
         port=port,
@@ -1180,86 +1063,6 @@ def _resolve_fmu_file_port_item(
         value_snapshot=value_snapshot,
     )
     return item, value_snapshot
-
-
-def _resolve_fmu_workflow_resource_port(
-    *,
-    step,
-    port,
-    binding,
-    input_file_uris: dict[str, FileIdentity] | None,
-    resource_uri_overrides: dict[str, FileIdentity] | None,
-) -> tuple[InputFileItem, dict]:
-    """Resolve a step-owned FMU resource through the declared file port."""
-
-    from validibot.workflows.models import WorkflowStepResource
-
-    expected_type = binding.source_data_path or port.resource_type or FMU_MODEL_RESOURCE
-    resource_rows = list(
-        step.step_resources.select_related("validator_resource_file").filter(
-            role=WorkflowStepResource.FMU_MODEL,
-        ),
-    )
-    matches = [
-        row for row in resource_rows if _step_resource_metadata(row)[1] == expected_type
-    ]
-    artifact_ports.validate_cardinality(
-        port=port,
-        count=len(matches),
-        source_description=f"FMU model resource on step {step.id}",
-    )
-
-    identity = (input_file_uris or {}).get("fmu_model_uri")
-    resource = _build_step_resource_item(
-        step_resource=matches[0],
-        resource_uri_overrides=resource_uri_overrides,
-        identity_override=identity,
-    )
-    identity = FileIdentity.from_envelope_item(resource)
-    item = _build_fmu_input_file_item(
-        port.contract_key,
-        identity,
-        role=port.role or "fmu",
-    )
-    artifact_ports.validate_input_file_item(port=port, item=item)
-    return item, {
-        "source": BindingSourceScope.WORKFLOW_RESOURCE,
-        "id": resource.id,
-        "type": resource.type,
-        "port_key": port.contract_key,
-        **identity.envelope_fields(),
-    }
-
-
-def _resolve_fmu_system_port(
-    *,
-    validator,
-    port,
-    input_file_uris: dict[str, FileIdentity] | None,
-) -> tuple[InputFileItem, dict]:
-    """Resolve a library FMU validator's attached model through the file port."""
-
-    fmu_model = getattr(validator, "fmu_model", None)
-    if not fmu_model:
-        msg = f"Validator {validator.id} has no FMU model attached"
-        raise ValueError(msg)
-
-    identity = (input_file_uris or {}).get(
-        "fmu_model_uri",
-    ) or _stored_fmu_model_identity(fmu_model)
-
-    item = _build_fmu_input_file_item(
-        port.contract_key,
-        identity,
-        role=port.role or "fmu",
-    )
-    artifact_ports.validate_input_file_item(port=port, item=item)
-    return item, {
-        "source": BindingSourceScope.SYSTEM,
-        "fmu_model_id": str(fmu_model.id),
-        "port_key": port.contract_key,
-        **identity.envelope_fields(),
-    }
 
 
 def _stored_fmu_model_identity(fmu_model) -> FileIdentity:

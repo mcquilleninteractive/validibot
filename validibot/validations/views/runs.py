@@ -1,6 +1,5 @@
 """Validation run viewing: list, detail, JSON export, delete, and guest access."""
 
-import json
 import logging
 
 from django.apps import apps
@@ -321,7 +320,7 @@ class ValidationRunJsonView(ValidationRunAccessMixin, DetailView):
         from validibot.validations.serializers import ValidationRunSerializer
 
         serializer = ValidationRunSerializer(context["run"])
-        context["json_data"] = json.dumps(serializer.data, indent=2, default=str)
+        context["json_data"] = serializer.data
         return context
 
     def get_breadcrumbs(self):

@@ -1939,12 +1939,14 @@ class WorkflowStepTypeForm(forms.Form):
 class ArtifactInputBindingsFormMixin(forms.Form):
     """Add reusable source controls for declared singleton file inputs.
 
-    Validator-specific forms opt in by inheriting this mixin. Port declarations
-    remain the source of truth; the mixin only renders and validates the
-    workflow author's source choice.
+    Every validator step form receives these controls through
+    :class:`BaseStepConfigForm`. Port declarations remain the source of truth;
+    a specialised form only needs to opt out, or narrow the choices for a port
+    whose storage is selected elsewhere in that form.
     """
 
     workflow: Workflow | None
+    artifact_input_bindings_enabled = True
     artifact_input_contract_keys: tuple[str, ...] | None = None
 
     def __init__(
@@ -1961,13 +1963,11 @@ class ArtifactInputBindingsFormMixin(forms.Form):
         """Create domain-labelled source and earlier-output fields per port."""
         from validibot.validations.models import StepInputBinding
         from validibot.validations.models import StepIODefinition
-        from validibot.validations.services.artifact_bindings import (
-            compatible_artifact_choices,
-        )
 
         validator = getattr(self, "validator", None)
-        if validator is None:
+        if validator is None or not self.artifact_input_bindings_enabled:
             self.artifact_input_ports = {}
+            self.file_port_bindings_enabled = False
             return
         ports = StepIODefinition.objects.filter(
             validator=validator,
@@ -1978,6 +1978,9 @@ class ArtifactInputBindingsFormMixin(forms.Form):
         if self.artifact_input_contract_keys is not None:
             ports = ports.filter(contract_key__in=self.artifact_input_contract_keys)
         self.artifact_input_ports = {port.contract_key: port for port in ports}
+        # Keep the existing template capability flag while the EnergyPlus
+        # editor moves from its private implementation to this shared one.
+        self.file_port_bindings_enabled = bool(self.artifact_input_ports)
         self.artifact_default_sources = {}
 
         step = getattr(self, "step", None)
@@ -1996,19 +1999,11 @@ class ArtifactInputBindingsFormMixin(forms.Form):
             }
         self.artifact_input_binding_map = binding_map
 
-        source_labels = {
-            BindingSourceScope.SUBMISSION_FILE: _("Submitted file"),
-            BindingSourceScope.UPSTREAM_ARTIFACT: _("Earlier step output"),
-            BindingSourceScope.WORKFLOW_RESOURCE: _("Workflow resource"),
-        }
         for port in self.artifact_input_ports.values():
             source_name = f"{port.contract_key}_source"
             output_name = f"{port.contract_key}_upstream_artifact"
-            source_choices = [
-                (scope, source_labels[scope])
-                for scope in (port.allowed_source_scopes or [])
-                if scope in source_labels
-            ]
+            revision_name = f"{port.contract_key}_binding_revision"
+            source_choices = self.artifact_source_choices_for_port(port)
             self.fields[source_name] = forms.ChoiceField(
                 label=port.label or _("File source"),
                 required=False,
@@ -2016,41 +2011,151 @@ class ArtifactInputBindingsFormMixin(forms.Form):
                 widget=forms.RadioSelect,
                 help_text=port.description or _("Choose where this file comes from."),
             )
+            if len(source_choices) == 1:
+                # A resource-only port still needs an explicit binding, but a
+                # one-option radio group asks the author to make no decision.
+                self.fields[source_name].widget = forms.HiddenInput()
 
             workflow = self.workflow
-            choices = (
-                compatible_artifact_choices(
-                    consumer_step=step,
-                    consumer_port=port,
-                    workflow=workflow,
-                    proposed_order=self.proposed_order,
+            if BindingSourceScope.UPSTREAM_ARTIFACT in {
+                value for value, _label in source_choices
+            }:
+                self.fields[output_name] = forms.ChoiceField(
+                    label=_("Earlier step output"),
+                    required=False,
+                    choices=self.upstream_artifact_field_choices(
+                        consumer_step=step,
+                        consumer_port=port,
+                        workflow=workflow,
+                        proposed_order=self.proposed_order,
+                    ),
+                    help_text=_("Only compatible files from earlier steps are shown."),
                 )
-                if workflow is not None
-                else []
-            )
-            self.fields[output_name] = forms.ChoiceField(
-                label=_("Earlier step output"),
-                required=False,
-                choices=[
-                    ("", _("— Select an earlier output —")),
-                    *((choice.reference, choice.label) for choice in choices),
-                ],
-                help_text=_("Only compatible files from earlier steps are shown."),
-            )
 
             binding = binding_map.get(port.pk)
+            self.fields[revision_name] = forms.CharField(
+                required=False,
+                widget=forms.HiddenInput,
+                initial=binding.modified.isoformat() if binding else "",
+            )
             allowed_scopes = [value for value, _label in source_choices]
-            initial_scope = getattr(binding, "source_scope", "")
-            if initial_scope not in allowed_scopes:
-                initial_scope = (
-                    BindingSourceScope.SUBMISSION_FILE
-                    if BindingSourceScope.SUBMISSION_FILE in allowed_scopes
-                    else next(iter(allowed_scopes), "")
-                )
+            initial_scope = self.artifact_default_source_for_port(
+                port,
+                binding=binding,
+                allowed_scopes=allowed_scopes,
+            )
             self.fields[source_name].initial = initial_scope
             self.artifact_default_sources[port.contract_key] = initial_scope
-            if binding and binding.source_scope == BindingSourceScope.UPSTREAM_ARTIFACT:
+            if (
+                output_name in self.fields
+                and binding
+                and binding.source_scope == BindingSourceScope.UPSTREAM_ARTIFACT
+            ):
                 self.fields[output_name].initial = binding.source_data_path
+
+    @staticmethod
+    def declared_artifact_source_choices(port) -> list[tuple[str, Any]]:
+        """Return author-facing choices for materializable declared scopes."""
+        source_labels = {
+            BindingSourceScope.SUBMISSION_FILE: _("Submitted file"),
+            BindingSourceScope.UPSTREAM_ARTIFACT: _("Earlier step output"),
+            BindingSourceScope.WORKFLOW_RESOURCE: _("Workflow resource"),
+            BindingSourceScope.SYSTEM: _("System resource"),
+        }
+        return [
+            (scope, source_labels[scope])
+            for scope in (port.allowed_source_scopes or [])
+            if scope in source_labels
+        ]
+
+    def artifact_source_choices_for_port(self, port) -> list[tuple[str, Any]]:
+        """Return choices for one port, allowing a validator form to narrow them."""
+        return self.artifact_source_choices_for_context(
+            port,
+            validator=getattr(self, "validator", None),
+        )
+
+    @classmethod
+    def artifact_source_choices_for_context(
+        cls,
+        port,
+        *,
+        validator=None,
+    ) -> list[tuple[str, Any]]:
+        """Return source choices without requiring a complete step form instance."""
+        return cls.declared_artifact_source_choices(port)
+
+    @staticmethod
+    def upstream_artifact_field_choices(
+        *,
+        consumer_step,
+        consumer_port,
+        workflow,
+        proposed_order: int | None = None,
+    ) -> list[tuple[str, Any]]:
+        """Build the shared earlier-output choices for a singleton file port."""
+        from validibot.validations.services.artifact_bindings import (
+            compatible_artifact_choices,
+        )
+
+        choices = (
+            compatible_artifact_choices(
+                consumer_step=consumer_step,
+                consumer_port=consumer_port,
+                workflow=workflow,
+                proposed_order=proposed_order,
+            )
+            if workflow is not None
+            else []
+        )
+        return [
+            ("", _("— Select an earlier output —")),
+            *((choice.reference, choice.label) for choice in choices),
+        ]
+
+    def artifact_default_source_for_port(
+        self,
+        port,
+        *,
+        binding,
+        allowed_scopes: list[str],
+    ) -> str:
+        """Choose the saved scope, submitted file, or first declared source."""
+        current_scope = getattr(binding, "source_scope", "")
+        if current_scope in allowed_scopes:
+            return current_scope
+        if BindingSourceScope.SUBMISSION_FILE in allowed_scopes:
+            return BindingSourceScope.SUBMISSION_FILE
+        return next(iter(allowed_scopes), "")
+
+    def artifact_input_layout_fields(self) -> list[str]:
+        """Return visible dynamic fields in stable port order for Crispy layouts."""
+        field_names: list[str] = []
+        for port in getattr(self, "artifact_input_ports", {}).values():
+            for field_name in (
+                f"{port.contract_key}_source",
+                f"{port.contract_key}_upstream_artifact",
+            ):
+                field = self.fields.get(field_name)
+                if field is not None and not field.widget.is_hidden:
+                    field_names.append(field_name)
+        return field_names
+
+    @staticmethod
+    def artifact_source_data_path(port, source_scope: str) -> str:
+        """Return the stable runtime path used by a non-upstream file binding."""
+        if source_scope in {
+            BindingSourceScope.WORKFLOW_RESOURCE,
+            BindingSourceScope.SYSTEM,
+        }:
+            return port.resource_type or port.data_format or port.contract_key
+        if source_scope == BindingSourceScope.SUBMISSION_FILE:
+            from validibot.workflows.services.submitted_file_ports import (
+                submitted_file_source_path,
+            )
+
+            return submitted_file_source_path(port)
+        return ""
 
     def clean(self):
         """Require one compatible upstream choice when that source is selected."""
@@ -2058,17 +2163,31 @@ class ArtifactInputBindingsFormMixin(forms.Form):
         for port in getattr(self, "artifact_input_ports", {}).values():
             source_name = f"{port.contract_key}_source"
             output_name = f"{port.contract_key}_upstream_artifact"
+            revision_name = f"{port.contract_key}_binding_revision"
             source = cleaned.get(source_name) or self.artifact_default_sources.get(
                 port.contract_key,
                 "",
             )
             cleaned[source_name] = source
-            if source == BindingSourceScope.UPSTREAM_ARTIFACT and not cleaned.get(
-                output_name
+            if (
+                source == BindingSourceScope.UPSTREAM_ARTIFACT
+                and output_name in self.fields
+                and not cleaned.get(output_name)
             ):
                 self.add_error(
                     output_name,
                     _("Choose the file produced by an earlier step."),
+                )
+            binding = self.artifact_input_binding_map.get(port.pk)
+            current_revision = binding.modified.isoformat() if binding else ""
+            posted_revision = cleaned.get(revision_name) or ""
+            if current_revision != posted_revision:
+                self.add_error(
+                    source_name,
+                    _(
+                        "This file source changed in another editor. Reload "
+                        "the step and try again."
+                    ),
                 )
         return cleaned
 
@@ -2085,16 +2204,10 @@ class ArtifactInputBindingsFormMixin(forms.Form):
                     f"{port.contract_key}_upstream_artifact",
                     "",
                 )
-            if source == BindingSourceScope.WORKFLOW_RESOURCE:
-                source_data_path = port.resource_type or port.data_format
-            elif source == BindingSourceScope.SUBMISSION_FILE:
-                from validibot.workflows.services.submitted_file_ports import (
-                    submitted_file_source_path,
-                )
-
-                source_data_path = submitted_file_source_path(port)
-            else:
-                source_data_path = ""
+            source_data_path = self.artifact_source_data_path(port, source)
+            if not source_data_path and source != BindingSourceScope.UPSTREAM_ARTIFACT:
+                binding = self.artifact_input_binding_map.get(port.pk)
+                source_data_path = getattr(binding, "source_data_path", "")
             updates.append(
                 {
                     "io_definition": port,
@@ -2102,12 +2215,18 @@ class ArtifactInputBindingsFormMixin(forms.Form):
                     "source_data_path": source_data_path,
                     "artifact_reference": artifact_reference,
                     "is_required": port.min_items > 0,
+                    "expected_revision": self.cleaned_data.get(
+                        f"{port.contract_key}_binding_revision",
+                        "",
+                    ),
                 }
             )
         return updates
 
 
-class BaseStepConfigForm(forms.Form):
+class BaseStepConfigForm(ArtifactInputBindingsFormMixin, forms.Form):
+    """Base editor with declared singleton file inputs enabled by default."""
+
     show_display_schema = False
     supports_execution_profile = False
     name = forms.CharField(
@@ -2191,7 +2310,7 @@ class BaseStepConfigForm(forms.Form):
         self.org = org
         self.validator = validator
         self.proposed_order = proposed_order
-        super().__init__(*args, **kwargs)
+        super().__init__(*args, proposed_order=proposed_order, **kwargs)
         if not self.show_display_schema:
             self.fields.pop("display_schema", None)
         if not (
@@ -2202,6 +2321,10 @@ class BaseStepConfigForm(forms.Form):
         self.helper = FormHelper()
         self.helper.form_tag = False
         self.helper.disable_csrf = True
+        # Dynamic source choices can legitimately be hidden (for example, an
+        # FMU supplied only by the validator library). Crispy must still emit
+        # those values and the optimistic-concurrency revisions in the form.
+        self.helper.render_hidden_fields = True
         self.initial_from_step(step)
 
     def initial_from_step(self, step) -> None:
@@ -2308,6 +2431,29 @@ class FMUValidatorStepConfigForm(BaseStepConfigForm):
         ),
     )
 
+    @classmethod
+    def artifact_source_choices_for_context(
+        cls,
+        port,
+        *,
+        validator=None,
+    ) -> list[tuple[str, Any]]:
+        """Expose the one FMU source that matches the selected validator mode."""
+        choices = super().artifact_source_choices_for_context(
+            port,
+            validator=validator,
+        )
+        if port.contract_key != "fmu_model":
+            return choices
+        # A system validator stores the author-uploaded FMU on the workflow
+        # step. A library validator owns an immutable approved FMU itself.
+        desired_scope = (
+            BindingSourceScope.WORKFLOW_RESOURCE
+            if getattr(validator, "is_system", False)
+            else BindingSourceScope.SYSTEM
+        )
+        return [choice for choice in choices if choice[0] == desired_scope]
+
     def __init__(self, *args, step=None, org=None, validator=None, **kwargs):
         super().__init__(*args, step=step, org=org, validator=validator, **kwargs)
         self.fields.pop("display_schema", None)
@@ -2334,6 +2480,7 @@ class FMUValidatorStepConfigForm(BaseStepConfigForm):
                 "description",
                 "show_success_messages",
                 "execution_profile",
+                *self.artifact_input_layout_fields(),
                 "notes",
             )
             return
@@ -2367,6 +2514,7 @@ class FMUValidatorStepConfigForm(BaseStepConfigForm):
             "description",
             "show_success_messages",
             "execution_profile",
+            *self.artifact_input_layout_fields(),
             "fmu_file",
             "remove_fmu",
             Div(
@@ -2390,7 +2538,7 @@ class FMUValidatorStepConfigForm(BaseStepConfigForm):
         )
 
 
-class JsonSchemaStepConfigForm(ArtifactInputBindingsFormMixin, BaseStepConfigForm):
+class JsonSchemaStepConfigForm(BaseStepConfigForm):
     show_display_schema = True
     schema_type = forms.ChoiceField(
         label=_("Schema version"),
@@ -2507,7 +2655,7 @@ class JsonSchemaStepConfigForm(ArtifactInputBindingsFormMixin, BaseStepConfigFor
         return cleaned
 
 
-class XmlSchemaStepConfigForm(ArtifactInputBindingsFormMixin, BaseStepConfigForm):
+class XmlSchemaStepConfigForm(BaseStepConfigForm):
     show_display_schema = True
     schema_type = forms.ChoiceField(
         label=_("Schema type"),
@@ -2792,6 +2940,7 @@ class ShaclStepConfigForm(ShaclConfigMixin, BaseStepConfigForm):
                 "display_schema",
                 "show_success_messages",
                 "execution_profile",
+                *self.artifact_input_layout_fields(),
                 "notes",
                 css_class=APP_FORM_SECTION_CLASS,
             ),
@@ -3088,32 +3237,6 @@ class EnergyPlusStepConfigForm(BaseStepConfigForm):
         ),
     )
 
-    # ── File-port source fields ───────────────────────────────────
-    # These are enabled only when the selected EnergyPlus validator has
-    # artifact input ports synced into StepIODefinition.
-    primary_model_source = forms.ChoiceField(
-        label=_("Model file"),
-        required=False,
-        choices=[],
-        help_text=_("Choose where the EnergyPlus model file comes from."),
-    )
-    primary_model_upstream_artifact = forms.ChoiceField(
-        label=_("Earlier step output"),
-        required=False,
-        choices=[],
-    )
-    weather_file_source = forms.ChoiceField(
-        label=_("Weather file"),
-        required=False,
-        choices=[],
-        help_text=_("Choose where the EnergyPlus weather file comes from."),
-    )
-    weather_file_upstream_artifact = forms.ChoiceField(
-        label=_("Earlier step output"),
-        required=False,
-        choices=[],
-    )
-
     # ── Shared fields ─────────────────────────────────────────────
     weather_file = forms.ChoiceField(
         label=_("Workflow resource"),
@@ -3211,10 +3334,7 @@ class EnergyPlusStepConfigForm(BaseStepConfigForm):
 
         # Populate weather file choices from ValidatorResourceFile
         self._populate_weather_file_choices(org, validator)
-        self.file_input_ports = self._get_file_input_ports(validator)
-        self.file_port_bindings_enabled = bool(self.file_input_ports)
-        self.file_port_binding_map: dict[str, Any] = {}
-        self._configure_file_port_fields(step)
+        self._prefer_available_weather_resource()
 
         # ── Template state (for template display in the form) ─────
         # These flags tell the template whether to show "upload" or
@@ -3364,235 +3484,42 @@ class EnergyPlusStepConfigForm(BaseStepConfigForm):
         # len==1 means only the empty placeholder choice was added.
         self.has_weather_files = len(choices) > 1
 
-    def _get_file_input_ports(self, validator) -> dict[str, Any]:
-        """Return artifact input ports declared by this validator."""
-        if not validator:
-            return {}
-
-        from validibot.validations.models import StepIODefinition
-
-        ports = StepIODefinition.objects.filter(
-            validator=validator,
-            direction=StepIODirection.INPUT,
-            io_medium=StepIOMedium.ARTIFACT,
-        ).order_by("order", "pk")
-        return {port.contract_key: port for port in ports}
-
-    def _configure_file_port_fields(self, step) -> None:
-        """Configure source fields only for declared EnergyPlus file ports."""
-        file_port_field_names = [
-            "primary_model_source",
-            "primary_model_upstream_artifact",
-            "weather_file_source",
-            "weather_file_upstream_artifact",
-        ]
-        if not self.file_port_bindings_enabled:
-            for field_name in file_port_field_names:
-                self.fields.pop(field_name, None)
+    def _prefer_available_weather_resource(self) -> None:
+        """Keep the existing new-step default when a weather resource exists."""
+        port = self.artifact_input_ports.get("weather_file")
+        if port is None or self.artifact_input_binding_map.get(port.pk) is not None:
             return
-
-        self.fields["weather_file"].required = False
-        binding_map = self._existing_file_port_bindings(step)
-        self.file_port_binding_map = binding_map
-
-        for contract_key, port in self.file_input_ports.items():
-            source_field = f"{contract_key}_source"
-            upstream_field = f"{contract_key}_upstream_artifact"
-            if source_field not in self.fields:
-                continue
-
-            source_choices = self._source_choices_for_file_port(port)
-            if not source_choices:
-                self.fields.pop(source_field, None)
-                self.fields.pop(upstream_field, None)
-                continue
-
-            source_choice_field = cast(
-                "forms.ChoiceField",
-                self.fields[source_field],
-            )
-            source_choice_field.choices = source_choices
-            self.fields[source_field].initial = self._initial_source_for_file_port(
-                port,
-                binding_map.get(contract_key),
-            )
-            if upstream_field in self.fields:
-                from validibot.validations.services.artifact_bindings import (
-                    compatible_artifact_choices,
-                )
-
-                workflow = self.workflow
-                upstream_choices = (
-                    compatible_artifact_choices(
-                        consumer_step=step,
-                        consumer_port=port,
-                        workflow=workflow,
-                        proposed_order=self.proposed_order,
-                    )
-                    if workflow is not None
-                    else []
-                )
-                upstream_choice_field = cast(
-                    "forms.ChoiceField",
-                    self.fields[upstream_field],
-                )
-                upstream_choice_field.choices = [
-                    ("", _("— Select generated file —")),
-                    *((choice.reference, choice.label) for choice in upstream_choices),
-                ]
-                binding = binding_map.get(contract_key)
-                if (
-                    binding
-                    and binding.source_scope == BindingSourceScope.UPSTREAM_ARTIFACT
-                ):
-                    self.fields[upstream_field].initial = binding.source_data_path
-
-        for contract_key in ("primary_model", "weather_file"):
-            if contract_key not in self.file_input_ports:
-                self.fields.pop(f"{contract_key}_source", None)
-                self.fields.pop(f"{contract_key}_upstream_artifact", None)
-
-    def _source_choices_for_file_port(self, port) -> list[tuple[str, Any]]:
-        """Map materializable source scopes to user-facing labels."""
-        labels = {
-            BindingSourceScope.SUBMISSION_FILE: _("Submitted file"),
-            BindingSourceScope.WORKFLOW_RESOURCE: _("Workflow resource"),
-            BindingSourceScope.UPSTREAM_ARTIFACT: _("Earlier step output"),
+        allowed = {
+            value for value, _label in self.artifact_source_choices_for_port(port)
         }
-        return [
-            (scope, labels[scope])
-            for scope in (port.allowed_source_scopes or [])
-            if scope in labels
-        ]
-
-    def _initial_source_for_file_port(self, port, binding) -> str:
-        """Pick the compact default source shown in the editor."""
-        allowed = {value for value, _label in self._source_choices_for_file_port(port)}
-        if binding and binding.source_scope in allowed:
-            return binding.source_scope
-        if (
-            port.contract_key == "weather_file"
-            and BindingSourceScope.WORKFLOW_RESOURCE in allowed
-            and self.has_weather_files
-        ):
-            return BindingSourceScope.WORKFLOW_RESOURCE
-        if BindingSourceScope.SUBMISSION_FILE in allowed:
-            return BindingSourceScope.SUBMISSION_FILE
-        return next(iter(allowed), "")
-
-    def _existing_file_port_bindings(self, step) -> dict[str, Any]:
-        """Return existing StepInputBinding rows for declared file ports."""
-        if not step or not self.file_input_ports:
-            return {}
-
-        from validibot.validations.models import StepInputBinding
-
-        return {
-            binding.io_definition.contract_key: binding
-            for binding in StepInputBinding.objects.filter(
-                workflow_step=step,
-                io_definition__in=self.file_input_ports.values(),
-            ).select_related("io_definition")
-        }
+        if self.has_weather_files and BindingSourceScope.WORKFLOW_RESOURCE in allowed:
+            self.fields[
+                "weather_file_source"
+            ].initial = BindingSourceScope.WORKFLOW_RESOURCE
+            self.artifact_default_sources["weather_file"] = (
+                BindingSourceScope.WORKFLOW_RESOURCE
+            )
 
     def clean(self):
         cleaned = super().clean() or {}
         run_simulation = cleaned.get(
             "validation_mode"
         ) == self.VALIDATION_MODE_TEMPLATE or cleaned.get("run_simulation", False)
-        if not self.file_port_bindings_enabled:
-            if run_simulation and not cleaned.get("weather_file"):
-                self.add_error(
-                    "weather_file",
-                    _("Choose a weather file for a full EnergyPlus simulation."),
-                )
-            return cleaned
-
-        for contract_key, port in self.file_input_ports.items():
-            source_field = f"{contract_key}_source"
-            if source_field not in self.fields:
-                continue
-
-            source = cleaned.get(source_field) or self._initial_source_for_file_port(
-                port,
-                self.file_port_binding_map.get(contract_key),
+        weather_source = cleaned.get("weather_file_source")
+        needs_workflow_weather = (
+            not self.file_port_bindings_enabled
+            or weather_source == BindingSourceScope.WORKFLOW_RESOURCE
+        )
+        if (
+            run_simulation
+            and needs_workflow_weather
+            and not cleaned.get("weather_file")
+        ):
+            self.add_error(
+                "weather_file",
+                _("Choose a weather file for a full EnergyPlus simulation."),
             )
-            cleaned[source_field] = source
-            allowed = {
-                value for value, _label in self._source_choices_for_file_port(port)
-            }
-            if source and source not in allowed:
-                self.add_error(source_field, _("Choose an allowed file source."))
-                continue
-
-            if (
-                contract_key == "weather_file"
-                and source == BindingSourceScope.WORKFLOW_RESOURCE
-                and run_simulation
-                and not cleaned.get("weather_file")
-            ):
-                self.add_error(
-                    "weather_file",
-                    _("Choose the workflow resource for this weather file."),
-                )
-
-            upstream_field = f"{contract_key}_upstream_artifact"
-            if (
-                source == BindingSourceScope.UPSTREAM_ARTIFACT
-                and upstream_field in self.fields
-                and (contract_key != "weather_file" or run_simulation)
-                and not cleaned.get(upstream_field)
-            ):
-                self.add_error(
-                    upstream_field,
-                    _("Choose the generated file from an earlier step."),
-                )
-
         return cleaned
-
-    def build_file_port_binding_updates(self) -> list[dict[str, Any]]:
-        """Return StepInputBinding updates for declared EnergyPlus file ports."""
-        updates: list[dict[str, Any]] = []
-        if not self.file_port_bindings_enabled:
-            return updates
-
-        for contract_key, port in self.file_input_ports.items():
-            source_field = f"{contract_key}_source"
-            if source_field not in self.fields:
-                continue
-
-            source = self.cleaned_data.get(
-                source_field,
-            ) or self._initial_source_for_file_port(
-                port,
-                self.file_port_binding_map.get(contract_key),
-            )
-            if not source:
-                continue
-
-            if source == BindingSourceScope.UPSTREAM_ARTIFACT:
-                source_data_path = self.cleaned_data.get(
-                    f"{contract_key}_upstream_artifact",
-                    "",
-                )
-            elif source == BindingSourceScope.WORKFLOW_RESOURCE:
-                source_data_path = port.resource_type or port.data_format
-            else:
-                from validibot.workflows.services.submitted_file_ports import (
-                    submitted_file_source_path,
-                )
-
-                source_data_path = submitted_file_source_path(port)
-
-            updates.append(
-                {
-                    "io_definition": port,
-                    "source_scope": source,
-                    "source_data_path": source_data_path,
-                    "is_required": port.min_items > 0,
-                },
-            )
-        return updates
 
     def _get_default_resource_file(self, org, validator):
         """Return the first default resource file for pre-selection on new steps."""
@@ -4943,7 +4870,7 @@ class TabularStepConfigForm(BaseStepConfigForm):
         return inferred.descriptor
 
 
-class SchematronStepConfigForm(ArtifactInputBindingsFormMixin, BaseStepConfigForm):
+class SchematronStepConfigForm(BaseStepConfigForm):
     """Step configuration for the Schematron validator (ADR-2026-07-01 D2).
 
     Mirrors the XML Schema / SHACL authoring flow: the author pastes or
@@ -5101,7 +5028,7 @@ class SchematronStepConfigForm(ArtifactInputBindingsFormMixin, BaseStepConfigFor
         return cleaned
 
 
-class PdfStepConfigForm(ArtifactInputBindingsFormMixin, BaseStepConfigForm):
+class PdfStepConfigForm(BaseStepConfigForm):
     """Configure package inventory and fixed exact typed extractions."""
 
     supports_execution_profile = True
@@ -5582,6 +5509,7 @@ class PortfolioManagerStepConfigForm(BaseStepConfigForm):
         general_fields = ["name", "description", "submission_structure"]
         if "execution_profile" in self.fields:
             general_fields.append("execution_profile")
+        general_fields.extend(self.artifact_input_layout_fields())
         bulk_fields = [
             "expected_buildings_list",
             "max_archive_members",
@@ -6017,43 +5945,43 @@ class StepInputBindingEditForm(forms.Form):
 
     def _configure_artifact_input_fields(self) -> None:
         """Replace value-path controls with the reusable file-source picker."""
-        from validibot.validations.constants import BindingSourceScope
-        from validibot.validations.services.artifact_bindings import (
-            compatible_artifact_choices,
+        step = getattr(self.binding, "workflow_step", None)
+        validator = getattr(step, "validator", None)
+        config_form_class = (
+            get_config_form_class(validator.validation_type)
+            if validator is not None
+            else ArtifactInputBindingsFormMixin
         )
-
-        labels = {
-            BindingSourceScope.SUBMISSION_FILE: _("Submitted file"),
-            BindingSourceScope.UPSTREAM_ARTIFACT: _("Earlier step output"),
-            BindingSourceScope.WORKFLOW_RESOURCE: _("Workflow resource"),
-        }
-        allowed = self.io_definition.allowed_source_scopes or []
-        self.fields["file_source"].choices = [
-            (scope, labels[scope]) for scope in allowed if scope in labels
-        ]
+        source_choices = config_form_class.artifact_source_choices_for_context(
+            self.io_definition,
+            validator=validator,
+        )
+        allowed = [value for value, _label in source_choices]
+        self.fields["file_source"].choices = source_choices
+        if len(source_choices) == 1:
+            self.fields["file_source"].widget = forms.HiddenInput()
         current_scope = getattr(self.binding, "source_scope", "")
         if current_scope not in allowed:
             current_scope = next(iter(allowed), "")
         self.fields["file_source"].initial = current_scope
 
-        step = getattr(self.binding, "workflow_step", None)
-        choices = []
-        if step is not None and step.workflow_id:
-            choices = compatible_artifact_choices(
+        if BindingSourceScope.UPSTREAM_ARTIFACT in allowed:
+            self.fields[
+                "earlier_step_output"
+            ].choices = ArtifactInputBindingsFormMixin.upstream_artifact_field_choices(
                 consumer_step=step,
                 consumer_port=self.io_definition,
-                workflow=step.workflow,
+                workflow=step.workflow if step is not None else None,
             )
-        self.artifact_binding_choices = choices
-        self.fields["earlier_step_output"].choices = [
-            ("", _("— Select an earlier output —")),
-            *((choice.reference, choice.label) for choice in choices),
-        ]
-        if (
-            self.binding
-            and self.binding.source_scope == BindingSourceScope.UPSTREAM_ARTIFACT
-        ):
-            self.fields["earlier_step_output"].initial = self.binding.source_data_path
+            if (
+                self.binding
+                and self.binding.source_scope == BindingSourceScope.UPSTREAM_ARTIFACT
+            ):
+                self.fields[
+                    "earlier_step_output"
+                ].initial = self.binding.source_data_path
+        else:
+            self.fields.pop("earlier_step_output", None)
 
         for field_name in ("source_data_path", "default_value", "is_required"):
             self.fields.pop(field_name, None)
@@ -6117,12 +6045,11 @@ class StepInputBindingEditForm(forms.Form):
                 consumer_port=io_definition,
                 source_scope=self.cleaned_data["file_source"],
                 artifact_reference=(self.cleaned_data.get("earlier_step_output") or ""),
-                source_data_path=(
-                    binding.source_data_path
-                    if self.cleaned_data["file_source"]
-                    == BindingSourceScope.WORKFLOW_RESOURCE
-                    else ""
+                source_data_path=ArtifactInputBindingsFormMixin.artifact_source_data_path(
+                    io_definition,
+                    self.cleaned_data["file_source"],
                 ),
+                expected_revision=(self.cleaned_data.get("binding_revision") or ""),
             )
         elif binding:
             update_fields = ["default_value", "is_required"]

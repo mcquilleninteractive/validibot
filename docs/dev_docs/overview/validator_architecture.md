@@ -213,6 +213,7 @@ The backend can continue to receive:
 ```json
 {
   "input_files": [{
+    "port_key": "primary_model",
     "role": "primary-model",
     "uri": "...",
     "size_bytes": 5241,
@@ -220,6 +221,7 @@ The backend can continue to receive:
     "storage_version": "..."
   }],
   "resource_files": [{
+    "port_key": "weather_file",
     "name": "weather.epw",
     "type": "energyplus_weather",
     "uri": "...",
@@ -247,9 +249,23 @@ resolution. The snapshot records the selected submitted file, workflow
 resource, or upstream artifact reference, and failed pre-dispatch validation
 writes a failed trace before raising.
 
-Do not make a new validator assume "whatever is in `input_files[0]`" unless
-the declared port contract has exactly one compatible file and the backend
-still validates that assumption defensively.
+`resolve_file_inputs()` is the one application service that interprets these
+bindings. Inline validators receive bounded verified bytes. Isolated adapters
+pass the immutable attempt-visible file identities and receive the same
+descriptor without loading container inputs into Django memory. The envelope
+builder formats that descriptor but does not choose a source independently.
+
+On the backend side, use
+`validibot_shared.validations.file_ports.select_input_file()` or
+`select_resource_file()`. The helper matches the exact `port_key`, permits an
+older role/type only for an item whose own port key is absent, rejects ambiguous
+matches, and never depends on list order. Do not implement a new
+`input_files[0]` or `port_key == expected or role == legacy` matcher.
+
+The full step form and generic Inputs modal both obtain file-source controls
+from `BaseStepConfigForm`. Validator-specific forms may arrange those fields or
+restrict a genuinely domain-specific choice, but they should not rebuild
+source-choice, upstream-output, revision, or binding-save behavior.
 
 ## Output Envelope
 

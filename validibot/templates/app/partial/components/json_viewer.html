@@ -6,15 +6,10 @@ Renders inert JSON data inside a styled line-numbered viewer using the shared
 so no CDN assets or client-side framework are required.
 
 Context:
-  json_data: pretty-printed JSON string
+  json_data: JSON-serializable Python object
 {% endcomment %}
-{# Raw JSON data embedded as inert data — never executed by the browser.       #}
-{# |safe suppresses Django's HTML auto-escaping, which would corrupt quotes    #}
-{# into &quot; entities. The script type="application/json" tag is never       #}
-{# executed as JS, so this is safe — the content is only read via textContent. #}
-{# djlint:off #}
-<script id="json-raw-data" type="application/json">{{ json_data|safe }}</script>
-{# djlint:on #}
+{# json_script escapes HTML-significant characters, including </script>. #}
+{{ json_data|json_script:"json-raw-data" }}
 <div id="json-viewer-root" class="json-viewer rounded-bottom">
 </div>
 {% comment %}
@@ -174,7 +169,13 @@ The raw JSON text is never inserted unescaped.
         return;
       }
 
-      const raw = dataEl.textContent;
+      let raw;
+      try {
+        raw = JSON.stringify(JSON.parse(dataEl.textContent), null, 2);
+      } catch (error) {
+        root.textContent = "Unable to display invalid JSON data.";
+        return;
+      }
       const tokens = tokenise(raw);
       const lines = tokensToLines(tokens);
 

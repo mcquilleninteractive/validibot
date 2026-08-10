@@ -2568,7 +2568,15 @@ class WorkflowStepIOEditView(WorkflowObjectMixin, FormView):
             self.step.workflow_id,
             semantic_change=semantic_change,
         ):
-            form.save()
+            try:
+                form.save()
+            except ValidationError as exc:
+                # The form performs an early stale-write check for a useful
+                # field-level error. The binding service repeats that check
+                # after taking the workflow lock, closing the small race where
+                # another editor saves between validation and persistence.
+                _add_validation_error_to_form(form, exc)
+                return self.form_invalid(form)
         messages.success(self.request, _("Step I/O definition updated."))
         response = HttpResponse(status=200)
         response["HX-Refresh"] = "true"

@@ -765,6 +765,40 @@ class DiscoverConfigsTests(TestCase):
         )
         self.assertIn(BindingSourceScope.SYSTEM, fmu_model.allowed_source_scopes)
 
+    def test_therm_catalog_declares_its_generic_model_file_port(self):
+        """THERM must opt into cross-step files through catalog data alone.
+
+        This contract makes the default step form, shared runtime resolver, and
+        future compatible producers work without THERM-specific workflow code.
+        """
+        configs = discover_configs()
+        therm_config = next(c for c in configs if c.slug == "therm-validator")
+        therm_model = next(
+            entry
+            for entry in therm_config.catalog_entries
+            if entry.slug == "therm_model"
+        )
+
+        self.assertEqual(therm_config.version, 2)
+        self.assertEqual(therm_model.data_type, CatalogValueType.ARTIFACT_REF)
+        self.assertEqual(therm_model.io_medium, StepIOMedium.ARTIFACT)
+        self.assertEqual(therm_model.artifact_kind, ArtifactKind.FILE)
+        self.assertEqual(therm_model.envelope_channel, EnvelopeChannel.INPUT_FILES)
+        self.assertEqual(therm_model.role, "therm-model")
+        self.assertEqual(
+            therm_model.allowed_source_scopes,
+            [
+                BindingSourceScope.SUBMISSION_FILE,
+                BindingSourceScope.UPSTREAM_ARTIFACT,
+            ],
+        )
+        self.assertEqual(
+            therm_model.default_source_strategy,
+            DefaultSourceStrategy.SUBMITTED_FILE_FIRST,
+        )
+        self.assertEqual(therm_model.min_items, 1)
+        self.assertEqual(therm_model.max_items, 1)
+
     def test_energyplus_has_file_handling_fields(self):
         """EnergyPlus config has file type and extension fields populated."""
         configs = discover_configs()

@@ -26,6 +26,18 @@ For EnergyPlus, the primary model stays in `Submission.content` /
 extra file into the execution bundle and passes the bundle URI to the envelope
 builder by port key.
 
+A port may instead select an artifact produced by an earlier workflow step.
+The application resolves that relational binding to the exact artifact from the
+same run and verifies its format, media type, filename, size, hash, and storage
+identity before execution. It does not replace or mutate the original
+`Submission`, and a missing earlier output never falls back to submission data.
+
+Both inline and container validators use the same resolved-file descriptor.
+Inline execution asks the descriptor service for bounded verified bytes.
+Container dispatch supplies the immutable file identities already staged for
+the attempt (or the authoritative earlier artifact/resource identity) and
+renders them into `input_files` or `resource_files`.
+
 The bundle path includes both the org and a server-generated attempt UUID.
 Docker Compose and GCP use the same prefix shape; local Docker then separates
 the bundle into read-only ``input/`` and writable ``output/`` mounts. A retry

@@ -96,6 +96,18 @@ artifact, a workflow resource, a system value, or a default.
 The definition says that a function has a parameter. The binding supplies the
 argument at this call site.
 
+For a singleton artifact input, an earlier-step source is stored as relational
+links to the producer step and output definition. Its portable UI/API/VAF form
+is `<step_key>.<artifact_contract_key>`, for example
+`run_energyplus.eplusout_csv`. The relation protects producer deletion and
+survives step renames; the portable string contains no database or storage ID.
+
+Declared artifact inputs use the same authoring component in the step form and
+the Inputs modal. Each save carries the binding revision, and the shared binding
+service checks it after acquiring the workflow-definition mutation lock. At
+runtime, `resolve_file_inputs()` supplies the exact submitted file, workflow
+resource, system file, or same-run earlier artifact selected by that binding.
+
 ### `WorkflowSignalMapping`: initial workflow vocabulary
 
 A `WorkflowSignalMapping` gives an author-selected name to a CEL/JSON value
