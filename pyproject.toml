@@ -54,7 +54,7 @@ dependencies = [
   "cryptography==50.0.0",
   "defusedxml==0.7.1",
   "django==6.0.7",
-  "django-allauth[mfa]==65.18.0",
+  "django-allauth[mfa]==65.19.0",
   "django-anymail[postmark]==15.1",
   "django-cors-headers==4.9.0",
   "django-crispy-forms==2.7",
@@ -63,14 +63,14 @@ dependencies = [
   "django-markdownify==0.9.7",
   "django-model-utils==5.0.0",
   "django-storages[google]==1.14.6",
-  "djangorestframework==3.17.1",
+  "djangorestframework==3.17.2",
   "drf-spectacular[sidecar]==0.30.0",
   "fmpy==0.3.30",
   # Directly used to exchange worker ADC for attempt-scoped GCS Credential
   # Access Boundary tokens. Do not rely on django-storages pulling it in.
-  "google-auth==2.56.2",
+  "google-auth==2.56.3",
   "google-cloud-kms==3.16.0",
-  "google-cloud-tasks==2.23.0",
+  "google-cloud-tasks==2.24.0",
   # RE2 regex engine: linear-time, no catastrophic backtracking. Used by
   # validibot.validations.regex_safety to run author-supplied patterns (Basic
   # validator regex, Tabular column `pattern`) against submitter data without a
@@ -374,19 +374,19 @@ force-single-line = true
 [dependency-groups]
 dev = [
   # Testing
-  "coverage==7.15.3",
+  "coverage==7.15.4",
   "django-coverage-plugin==3.2.2",
   "factory-boy==3.3.3",
   "pytest==9.1.1",
-  "pytest-django==4.12.0",
+  "pytest-django==4.13.0",
   "pytest-sugar==1.1.1",
   "selenium==4.46.0",
   # Linting and formatting
-  "djlint==1.43.2",
+  "djlint==1.44.1",
   "pre-commit==4.6.1",
   "ruff==0.16.1",
   # Type checking
-  "django-stubs[compatible-mypy]==6.0.7",
+  "django-stubs[compatible-mypy]==6.0.8",
   "djangorestframework-stubs==3.17.1",
   "mypy==2.3.0",
   # Debugging and development utilities
@@ -407,5 +407,5 @@ dev = [
 # hash-pinned requirements/docs.txt, independent of this group.
 docs = [
   # Documentation
-  "zensical==0.0.52",
+  "zensical==0.0.53",
 ]

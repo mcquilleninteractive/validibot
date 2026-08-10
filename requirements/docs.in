@@ -13,4 +13,4 @@
 # REGENERATE requirements/docs.txt after changing this file:
 #   uv pip compile requirements/docs.in --universal --generate-hashes \
 #       --python-version 3.13 -o requirements/docs.txt
-zensical==0.0.52
+zensical==0.0.53
