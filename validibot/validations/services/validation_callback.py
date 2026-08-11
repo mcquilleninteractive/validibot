@@ -68,6 +68,10 @@ from validibot.validations.services.validation_run import ValidationRunService
 if TYPE_CHECKING:
     from validibot_shared.validations.envelopes import ValidationOutputEnvelope
 
+    from validibot.validations.services.step_processor.advanced import (
+        AdvancedValidationProcessor,
+    )
+
 logger = logging.getLogger(__name__)
 
 # ── Allowlisted GCS prefix for callback result URIs ───────────────────
@@ -937,7 +941,10 @@ class ValidationCallbackService:
         """
         from validibot.validations.services.step_processor import get_step_processor
 
-        processor = get_step_processor(run, step_run)
+        processor = cast(
+            "AdvancedValidationProcessor",
+            get_step_processor(run, step_run),
+        )
         processor.complete_from_callback(output_envelope)
 
         # Refresh step_run to get the final status set by the processor.

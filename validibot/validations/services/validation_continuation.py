@@ -32,7 +32,6 @@ from validibot.validations.models import ValidationRunContinuation
 from validibot.validations.services.models import ValidationRunTaskResult
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
     from uuid import UUID
 
     from validibot.validations.models import CallbackReceipt
@@ -446,7 +445,7 @@ def _current_run_result(continuation_id: UUID | str) -> ValidationRunTaskResult:
     run = continuation.validation_run
     return ValidationRunTaskResult(
         run_id=run.pk,
-        status=run.status,
+        status=ValidationRunStatus(run.status),
         error=run.error or "",
     )
 
@@ -498,7 +497,7 @@ def repair_validation_run_continuations(
     dry_run: bool = False,
 ) -> ContinuationRepairReport:
     """Rediscover and redeliver committed continuation work in one bounded pass."""
-    continuation_ids: Iterable[UUID] = pending_validation_continuation_ids(limit=limit)
+    continuation_ids = pending_validation_continuation_ids(limit=limit)
     if dry_run:
         count = len(continuation_ids)
         return ContinuationRepairReport(

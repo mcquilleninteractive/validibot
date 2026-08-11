@@ -35,7 +35,6 @@ from enum import Enum
 from enum import auto
 from typing import TYPE_CHECKING
 from typing import Any
-from typing import cast
 
 from django.db import transaction
 from django.utils import timezone
@@ -195,7 +194,7 @@ class StepOrchestrator:
                 )
                 return ValidationRunTaskResult(
                     run_id=validation_run.id,
-                    status=validation_run.status,
+                    status=ValidationRunStatus(validation_run.status),
                     error="",
                 )
 
@@ -217,7 +216,7 @@ class StepOrchestrator:
             )
             return ValidationRunTaskResult(
                 run_id=validation_run.id,
-                status=validation_run.status,
+                status=ValidationRunStatus(validation_run.status),
                 error=_(
                     "Validation run is not in a state that allows execution.",
                 ),
@@ -278,7 +277,7 @@ class StepOrchestrator:
                     # Use processors for validator steps - they handle both
                     # execution AND persistence (findings, output values, stats)
                     try:
-                        result: StepProcessingResult = self._execute_validator_step(
+                        validator_step_result = self._execute_validator_step(
                             validation_run=validation_run,
                             step_run=step_run,
                         )
@@ -305,12 +304,12 @@ class StepOrchestrator:
                             ),
                         )
                         raise
-                    step_metrics.append(result)
-                    if result.passed is False:
+                    step_metrics.append(validator_step_result)
+                    if validator_step_result.passed is False:
                         overall_failed = True
                         failing_step_id = wf_step.id
                         break
-                    if result.passed is None:
+                    if validator_step_result.passed is None:
                         # Async validator in progress
                         pending_async = True
                         break
@@ -328,10 +327,12 @@ class StepOrchestrator:
                         and wf_step.action.failure_mode == ActionFailureMode.ADVISORY
                     )
                     if self._is_signed_credential_step(wf_step):
-                        result = self._record_deferred_signed_credential_step(
-                            step_run=step_run,
+                        deferred_step_result = (
+                            self._record_deferred_signed_credential_step(
+                                step_run=step_run,
+                            )
                         )
-                        step_metrics.append(result)
+                        step_metrics.append(deferred_step_result)
                         continue
                     try:
                         validation_result: ValidationResult = (
@@ -368,13 +369,13 @@ class StepOrchestrator:
                         else:
                             raise
                         continue
-                    result: StepProcessingResult = self._record_step_result(
+                    action_step_result = self._record_step_result(
                         validation_run=validation_run,
                         step_run=step_run,
                         validation_result=validation_result,
                     )
-                    step_metrics.append(result)
-                    if result.passed is False:
+                    step_metrics.append(action_step_result)
+                    if action_step_result.passed is False:
                         if is_advisory:
                             logger.info(
                                 "Advisory action step %s returned "
@@ -385,7 +386,7 @@ class StepOrchestrator:
                             overall_failed = True
                             failing_step_id = wf_step.id
                             break
-                    if result.passed is None:
+                    if action_step_result.passed is None:
                         pending_async = True
                         break
 
@@ -427,7 +428,7 @@ class StepOrchestrator:
             )
             return ValidationRunTaskResult(
                 run_id=validation_run.id,
-                status=validation_run.status,
+                status=ValidationRunStatus(validation_run.status),
                 error=GENERIC_EXECUTION_ERROR,
             )
 
@@ -476,7 +477,7 @@ class StepOrchestrator:
             # finalize statuses, findings, summaries, and end timestamps.
             return ValidationRunTaskResult(
                 run_id=validation_run.id,
-                status=validation_run.status,
+                status=ValidationRunStatus(validation_run.status),
                 error="",
             )
 
@@ -538,9 +539,9 @@ class StepOrchestrator:
             validation_run=validation_run,
         )
 
-        result = ValidationRunTaskResult(
+        task_result = ValidationRunTaskResult(
             run_id=validation_run.id,
-            status=validation_run.status,
+            status=ValidationRunStatus(validation_run.status),
             error=validation_run.error,
         )
         completion_extra: dict[str, Any] = {
@@ -559,7 +560,7 @@ class StepOrchestrator:
             extra_data=extra_payload,
         )
 
-        return result
+        return task_result
 
     # ---------- Step lifecycle ----------
 
@@ -938,4 +939,4 @@ class StepOrchestrator:
         from django.contrib.auth import get_user_model
 
         user = get_user_model().objects.filter(pk=user_id).first()
-        return cast("User | None", user)
+        return user

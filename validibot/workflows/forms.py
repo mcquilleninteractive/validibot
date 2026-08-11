@@ -598,7 +598,10 @@ class WorkflowForm(forms.ModelForm):
                 "step": "1",
             },
         )
-        allowed_field = self.fields["allowed_file_types"]
+        allowed_field = cast(
+            "forms.MultipleChoiceField",
+            self.fields["allowed_file_types"],
+        )
         # Override the enum's bare labels with extension hints so authors
         # don't have to guess which broad category covers (say) ``.ttl``.
         # The enum labels stay clean in admin / API / audit surfaces;

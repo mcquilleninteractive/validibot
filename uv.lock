@@ -3344,7 +3344,7 @@ wheels = [
 
 [[package]]
 name = "validibot"
-version = "0.14.0"
+version = "0.15.0"
 source = { editable = "." }
 dependencies = [
     { name = "argon2-cffi" },
@@ -3486,7 +3486,7 @@ requires-dist = [
     { name = "stripe", marker = "extra == 'cloud'", specifier = "==15.4.0" },
     { name = "uvicorn", extras = ["standard"], specifier = "==0.52.1" },
     { name = "uvicorn-worker", specifier = "==0.4.0" },
-    { name = "validibot-shared", specifier = "==0.26.0" },
+    { name = "validibot-shared", specifier = "==0.27.0" },
     { name = "whitenoise", specifier = "==6.12.0" },
 ]
 provides-extras = ["cloud", "docker-runner"]
@@ -3516,15 +3516,15 @@ docs = [{ name = "zensical", specifier = "==0.0.52" }]
 
 [[package]]
 name = "validibot-shared"
-version = "0.26.0"
+version = "0.27.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "defusedxml" },
     { name = "pydantic" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/6e/2b/17168346c888045fc1e033cedf203c913fcf70ea7d6daba8c4db655549b9/validibot_shared-0.26.0.tar.gz", hash = "sha256:98adda8e25e53c9a3a8653a742df1dc0d02db89250004d7c4793b0f38859c3c3", size = 71032, upload-time = "2026-08-10T03:20:48.816Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/5a/d8/0a66e28d474d07e4d7d7f3e94e3d0e50ecd95e8ad84138d6b0077a3e5cb0/validibot_shared-0.27.0.tar.gz", hash = "sha256:2a083d30482670c91265b57bbfa5fcec8a7ca7be79e6af3acdd87b58b77fa292", size = 78068, upload-time = "2026-08-11T01:29:08.508Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/00/2a/ba70487671bf7799455c270be883bd3e8c60c72259822483dafe86ee1dd0/validibot_shared-0.26.0-py3-none-any.whl", hash = "sha256:93d24d9a515411cf67f31f5d4cfe07efcd460bbfefb033c2e4b41b3a19b142b7", size = 63239, upload-time = "2026-08-10T03:20:47.252Z" },
+    { url = "https://files.pythonhosted.org/packages/a9/b8/8af2758770e9b66f8b4f781d485fe914a9076c0bfef1e29254550b5dd818/validibot_shared-0.27.0-py3-none-any.whl", hash = "sha256:225ff9b10a4667a509780a480faeba8842b03bfffa691a070a689ee4c3d6fadb", size = 63960, upload-time = "2026-08-11T01:29:07.151Z" },
 ]
 
 [[package]]

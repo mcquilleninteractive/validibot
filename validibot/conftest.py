@@ -42,7 +42,6 @@ def pro_installed():
         "validibot.validations.api_views.apps.is_installed",
         "validibot.validations.views.runs.apps.is_installed",
         "validibot.workflows.views.management.apps.is_installed",
-        "validibot.validations.services.step_orchestrator.apps.is_installed",
     )
     with contextlib.ExitStack() as stack:
         for target in targets:

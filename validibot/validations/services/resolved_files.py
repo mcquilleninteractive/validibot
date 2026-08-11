@@ -112,6 +112,7 @@ def resolve_file_inputs(
             continue
         try:
             artifact_ports.validate_source_scope(port, binding.source_scope)
+            item: ResolvedFileInput | None
             if binding.source_scope == BindingSourceScope.SUBMISSION_FILE:
                 item = _resolve_submission(
                     run=run,
@@ -140,8 +141,6 @@ def resolve_file_inputs(
                     resource_identity_overrides=resource_identity_overrides,
                     materialized_file_identities=materialized_file_identities,
                 )
-                if item is None:
-                    continue
             elif binding.source_scope == BindingSourceScope.SYSTEM:
                 item = _resolve_system_file(
                     port=port,
@@ -154,6 +153,8 @@ def resolve_file_inputs(
                     f"File source '{binding.source_scope}' cannot be materialized "
                     f"for artifact port '{port.contract_key}'."
                 )
+                continue
+            if item is None:
                 continue
             resolved[port.contract_key] = item
             if step_run is not None:
@@ -443,9 +444,13 @@ def _materialized_submission_identity(
     ]
     if binding.source_data_path == "primary":
         candidates.append("primary_file_uri")
-    for key in candidates:
-        if key and (identities or {}).get(key):
-            return identities[key]
+    if identities is not None:
+        for key in candidates:
+            if not key:
+                continue
+            identity = identities.get(key)
+            if identity is not None:
+                return identity
     raise ValueError(
         f"Required artifact port '{port.contract_key}' could not resolve a "
         "submitted file identity from runtime materialization keys "
@@ -459,9 +464,11 @@ def _materialized_contract_identity(
     identities: Mapping[str, FileIdentity] | None,
 ) -> FileIdentity | None:
     """Return an adapter-staged identity for a non-submission contract, if any."""
-    for key in (port.contract_key, f"{port.contract_key}_uri"):
-        if (identities or {}).get(key):
-            return identities[key]
+    if identities is not None:
+        for key in (port.contract_key, f"{port.contract_key}_uri"):
+            identity = identities.get(key)
+            if identity is not None:
+                return identity
     return None
 
 

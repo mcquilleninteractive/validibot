@@ -1008,16 +1008,16 @@ class RulesetAssertion(TimeStampedModel):
         and the mapping has a single source of truth.
         """
         if self.assertion_type == AssertionType.SHACL:
-            return _("SPARQL")
+            return str(_("SPARQL"))
         if self.assertion_type == AssertionType.CEL_EXPRESSION:
-            return _("CEL")
-        return _("Basic")
+            return str(_("CEL"))
+        return str(_("Basic"))
 
     @property
     def target_display(self) -> str:
         if self.assertion_type == AssertionType.SHACL:
-            description = (self.rhs or {}).get("description") or ""
-            return description or _("SPARQL ASK")
+            description = str((self.rhs or {}).get("description") or "")
+            return description or str(_("SPARQL ASK"))
         if self.assertion_type == AssertionType.CEL_EXPRESSION:
             # When the author gave the expression a description, show that on
             # the assertion card instead of the raw CEL. ``rhs["expr"]`` is
@@ -1123,7 +1123,7 @@ class RulesetAssertion(TimeStampedModel):
         if value is None:
             return "null"
         if isinstance(value, bool):
-            return _("true") if value else _("false")
+            return str(_("true")) if value else str(_("false"))
         return str(value)
 
 
@@ -1643,13 +1643,15 @@ class Validator(TimeStampedModel):
         if self.availability_message:
             return self.availability_message
         if self.availability_state == ValidatorAvailabilityState.MISSING_CONFIG:
-            return _(
-                "The validator plugin that registered this validator is not "
-                "available in the current deployment."
+            return str(
+                _(
+                    "The validator plugin that registered this validator is not "
+                    "available in the current deployment."
+                )
             )
         if self.availability_state == ValidatorAvailabilityState.RETIRED:
-            return _("This validator has been retired.")
-        return _("This validator is not available in the current deployment.")
+            return str(_("This validator has been retired."))
+        return str(_("This validator is not available in the current deployment."))
 
     def get_validation_type_display(self) -> str:
         """Return a label for dynamic validation type strings.
@@ -1673,8 +1675,9 @@ class Validator(TimeStampedModel):
 
     def __str__(self):
         prefix = f"{self.validation_type}"
-        if self.org_id:
-            prefix = f"{self.org.name} · {self.validation_type}"
+        org = self.org
+        if org is not None:
+            prefix = f"{org.name} · {self.validation_type}"
         return f"{prefix} {self.slug} v{self.version}".strip()
 
     def clean(self):
@@ -1812,8 +1815,9 @@ class Validator(TimeStampedModel):
         Returns:
             The existing or newly created default Ruleset.
         """
-        if self.default_ruleset_id:
-            return self.default_ruleset
+        default_ruleset = self.default_ruleset
+        if default_ruleset is not None:
+            return default_ruleset
 
         # Map validation_type to RulesetType. They share the same values
         # except AI_ASSIST which falls back to BASIC.
@@ -3968,25 +3972,25 @@ class ValidationRun(TimeStampedModel):
         def add_error(field: str, message: str) -> None:
             errors.setdefault(field, []).append(message)
 
-        if self.workflow_id and self.org_id and self.workflow.org_id != self.org_id:
+        workflow = self.workflow
+        if workflow is not None and self.org_id and workflow.org_id != self.org_id:
             add_error("org", str(_("Run organization must match workflow.")))
 
-        if self.project_id:
-            if self.project.org_id != self.org_id:
+        project = self.project
+        if project is not None:
+            if project.org_id != self.org_id:
                 add_error("project", str(_("Project must match run organization.")))
 
-        if self.submission_id:
-            if self.submission.org_id != self.org_id:
+        submission = self.submission
+        if submission is not None:
+            if submission.org_id != self.org_id:
                 add_error(
                     "submission",
                     str(_("Submission must match run organization.")),
                 )
-            if self.workflow_id and self.submission.workflow_id != self.workflow_id:
+            if self.workflow_id and submission.workflow_id != self.workflow_id:
                 add_error("submission", str(_("Submission must match run workflow.")))
-            if (
-                self.submission.project_id
-                and self.project_id != self.submission.project_id
-            ):
+            if submission.project_id and self.project_id != submission.project_id:
                 add_error(
                     "project",
                     str(_("Run project must match submission project.")),
@@ -3996,13 +4000,14 @@ class ValidationRun(TimeStampedModel):
 
     @property
     def status_pill_class(self) -> str:
-        return {
+        status_classes: dict[str, str] = {
             ValidationRunStatus.PENDING: "bg-secondary",
             ValidationRunStatus.RUNNING: "bg-primary",
             ValidationRunStatus.SUCCEEDED: "bg-success",
             ValidationRunStatus.FAILED: "bg-danger",
             ValidationRunStatus.CANCELED: "bg-warning text-dark",
-        }.get(self.status, "bg-secondary")
+        }
+        return status_classes.get(self.status, "bg-secondary")
 
     @property
     def computed_duration_ms(self) -> int | None:
@@ -4042,8 +4047,12 @@ class ValidationRun(TimeStampedModel):
         from validibot.validations.constants import VALIDATION_RUN_ERROR_MESSAGES
 
         if self.error_category:
+            try:
+                category = ValidationRunErrorCategory(self.error_category)
+            except ValueError:
+                return self.error or ""
             return VALIDATION_RUN_ERROR_MESSAGES.get(
-                self.error_category,
+                category,
                 self.error or "",
             )
         return self.error or ""
@@ -4744,18 +4753,20 @@ class Artifact(TimeStampedModel):
             and self.org_id != self.validation_run.org_id
         ):
             raise ValidationError({"org": _("Artifact org must match run org.")})
+        step_run = self.step_run
         if (
-            self.step_run_id
+            step_run is not None
             and self.validation_run_id
-            and self.step_run.validation_run_id != self.validation_run_id
+            and step_run.validation_run_id != self.validation_run_id
         ):
             raise ValidationError(
                 {"step_run": _("Artifact step run must belong to the same run.")}
             )
+        workflow_step = self.workflow_step
         if (
-            self.workflow_step_id
+            workflow_step is not None
             and self.validation_run_id
-            and self.workflow_step.workflow_id != self.validation_run.workflow_id
+            and workflow_step.workflow_id != self.validation_run.workflow_id
         ):
             raise ValidationError(
                 {
@@ -4968,10 +4979,11 @@ class ValidationRunContinuation(TimeStampedModel):
             errors["completed_step_run"] = _(
                 "Completed step must belong to the continuation's validation run."
             )
+        callback_receipt = self.callback_receipt
         if (
-            self.callback_receipt_id
+            callback_receipt is not None
             and self.validation_run_id
-            and self.callback_receipt.validation_run_id != self.validation_run_id
+            and callback_receipt.validation_run_id != self.validation_run_id
         ):
             errors["callback_receipt"] = _(
                 "Callback receipt must belong to the continuation's validation run."
