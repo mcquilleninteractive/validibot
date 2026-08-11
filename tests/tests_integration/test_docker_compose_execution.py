@@ -48,6 +48,7 @@ import logging
 from pathlib import Path
 
 import pytest
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import override_settings
 from rest_framework.status import HTTP_200_OK
 
@@ -59,18 +60,22 @@ from tests.helpers.polling import extract_issues
 from tests.helpers.polling import normalize_poll_url
 from tests.helpers.polling import poll_until_complete
 from tests.helpers.polling import start_workflow_url
+from tests.helpers.workflows import create_workflow_step_with_default_bindings
+from validibot.core.storage.registry import clear_storage_cache
 from validibot.users.models import RoleCode
 from validibot.users.tests.factories import OrganizationFactory
 from validibot.users.tests.factories import UserFactory
 from validibot.users.tests.factories import grant_role
 from validibot.validations.constants import JSONSchemaVersion
+from validibot.validations.constants import ResourceFileType
 from validibot.validations.constants import ValidationRunStatus
 from validibot.validations.constants import ValidationType
+from validibot.validations.models import ValidatorResourceFile
 from validibot.validations.services.execution.registry import clear_backend_cache
 from validibot.validations.tests.factories import RulesetFactory
-from validibot.validations.tests.factories import ValidatorFactory
+from validibot.workflows.models import WorkflowStepResource
 from validibot.workflows.tests.factories import WorkflowFactory
-from validibot.workflows.tests.factories import WorkflowStepFactory
+from validibot.workflows.tests.factories import WorkflowStepResourceFactory
 
 logger = logging.getLogger(__name__)
 
@@ -151,16 +156,14 @@ class TestBuiltInValidators:
     """
 
     @pytest.fixture
-    def json_schema_workflow(self, api_client):
+    def json_schema_workflow(self, api_client, system_validator_for):
         """Create a workflow with a JSON Schema validator."""
         org = OrganizationFactory()
         user = UserFactory(orgs=[org])
         user.set_current_org(org)
         grant_role(user, org, RoleCode.EXECUTOR)
 
-        validator = ValidatorFactory(
-            validation_type=ValidationType.JSON_SCHEMA,
-        )
+        validator = system_validator_for(ValidationType.JSON_SCHEMA)
 
         schema = load_json_test_asset("assets/json/example_product_schema.json")
         ruleset = RulesetFactory(
@@ -174,7 +177,7 @@ class TestBuiltInValidators:
         )
 
         workflow = WorkflowFactory(org=org, user=user)
-        WorkflowStepFactory(
+        create_workflow_step_with_default_bindings(
             workflow=workflow,
             validator=validator,
             ruleset=ruleset,
@@ -278,6 +281,38 @@ class TestBuiltInValidators:
 # =============================================================================
 
 
+@pytest.fixture
+def local_docker_execution_settings(tmp_path, settings):
+    """Configure real filesystem storage for local container integration.
+
+    The normal test settings use Django's in-memory media backend. Local
+    containers require host paths for both managed resources and attempt data,
+    so the media backend, data-storage root, and cached adapter instances must
+    all agree for the fixture's complete lifetime.
+    """
+    storage_root = tmp_path / "storage"
+    storage_root.mkdir(parents=True, exist_ok=True)
+    settings.DATA_STORAGE_ROOT = storage_root
+    settings.DATA_STORAGE_OPTIONS = {"root": str(storage_root)}
+    settings.MEDIA_ROOT = tmp_path / "media"
+    settings.STORAGES = {
+        **settings.STORAGES,
+        "default": {
+            "BACKEND": "django.core.files.storage.FileSystemStorage",
+            "OPTIONS": {"location": str(settings.MEDIA_ROOT)},
+        },
+    }
+    settings.VALIDATOR_RUNNER = "docker"
+    settings.DATA_STORAGE_BACKEND = "local"
+    clear_backend_cache()
+    clear_storage_cache()
+
+    yield storage_root
+
+    clear_backend_cache()
+    clear_storage_cache()
+
+
 @pytest.mark.django_db(transaction=True)
 @skip_if_no_docker
 @skip_if_no_energyplus_image
@@ -292,34 +327,20 @@ class TestDockerEnergyPlusExecution:
     4. Returns results to the workflow
     """
 
-    @pytest.fixture(autouse=True)
-    def setup_local_storage(self, tmp_path):
-        """Set up temporary local storage for test isolation."""
-        self.storage_root = tmp_path / "storage"
-        self.storage_root.mkdir(parents=True, exist_ok=True)
-
-        # Clear backend cache to ensure fresh initialization
-        clear_backend_cache()
-
-        yield
-
-        # Cleanup
-        clear_backend_cache()
-
     @pytest.fixture
-    def energyplus_workflow(self, api_client, setup_local_storage):
-        """Create a workflow with an EnergyPlus validator."""
-        from validibot.core.storage import get_data_storage
-
+    def energyplus_workflow(
+        self,
+        api_client,
+        local_docker_execution_settings,
+        system_validator_for,
+    ):
+        """Create a production-shaped EnergyPlus workflow and file bindings."""
         org = OrganizationFactory()
         user = UserFactory(orgs=[org])
         user.set_current_org(org)
         grant_role(user, org, RoleCode.EXECUTOR)
 
-        validator = ValidatorFactory(
-            validation_type=ValidationType.ENERGYPLUS,
-            version="24.2.0",
-        )
+        validator = system_validator_for(ValidationType.ENERGYPLUS)
 
         # EnergyPlus doesn't use rules_text the same way, but needs a ruleset
         ruleset = RulesetFactory(
@@ -335,25 +356,31 @@ class TestDockerEnergyPlusExecution:
             allowed_file_types=["json"],
         )
 
-        # Upload the test weather file to local storage
-        storage = get_data_storage()
+        # Register the weather file as a workflow resource. The binding service
+        # resolves this relation into the named ``weather_file`` port; runtime
+        # configuration never carries an untracked weather URI.
         weather_data = load_test_asset("data/energyplus/test_weather.epw")
-        weather_path = f"weather/{org.id}/test_weather.epw"
-        storage.write(weather_path, weather_data)
-        weather_file_uri = storage.get_uri(weather_path)
-
-        logger.info("Uploaded weather file to: %s", weather_file_uri)
-
-        # Create step with weather file configuration
-        # The step needs weather_file_uri in config for EnergyPlus validations
-        WorkflowStepFactory(
+        weather_file = ValidatorResourceFile.objects.create(
+            validator=validator,
+            resource_type=ResourceFileType.ENERGYPLUS_WEATHER,
+            name="EnergyPlus integration weather",
+            filename="test_weather.epw",
+            file=SimpleUploadedFile(
+                "test_weather.epw",
+                weather_data,
+                content_type="application/vnd.energyplus.epw",
+            ),
+        )
+        step = create_workflow_step_with_default_bindings(
             workflow=workflow,
             validator=validator,
             ruleset=ruleset,
             order=1,
-            config={
-                "weather_file_uri": weather_file_uri,
-            },
+        )
+        WorkflowStepResourceFactory(
+            step=step,
+            role=WorkflowStepResource.WEATHER_FILE,
+            validator_resource_file=weather_file,
         )
 
         api_client.force_authenticate(user=user)
@@ -365,13 +392,10 @@ class TestDockerEnergyPlusExecution:
             "ruleset": ruleset,
             "workflow": workflow,
             "client": api_client,
-            "storage_root": self.storage_root,
+            "storage_root": local_docker_execution_settings,
+            "weather_resource": weather_file,
         }
 
-    @override_settings(
-        VALIDATOR_RUNNER="docker",
-        DATA_STORAGE_BACKEND="local",
-    )
     def test_energyplus_execution_via_docker(self, energyplus_workflow):
         """
         Test EnergyPlus validation executes via Docker container.
@@ -388,6 +412,13 @@ class TestDockerEnergyPlusExecution:
         client = energyplus_workflow["client"]
         workflow = energyplus_workflow["workflow"]
         org = energyplus_workflow["org"]
+        weather_resource = energyplus_workflow["weather_resource"]
+
+        weather_path = Path(weather_resource.file.path)
+        assert weather_path.is_file(), (
+            "The workflow's bound EnergyPlus weather resource must exist before "
+            f"dispatch: {weather_path}"
+        )
 
         # Load the test model
         model_data = load_test_asset("data/energyplus/example_epjson.json")
@@ -430,11 +461,9 @@ class TestDockerEnergyPlusExecution:
         run_status = (data.get("status") or "").upper()
         logger.info("Validation completed with status: %s", run_status)
 
-        # For this test, we just verify the run completed (either SUCCESS or FAILED)
-        # The model may fail due to missing weather file, but that's OK -
-        # we're testing the execution flow, not the model validity
-        assert run_status in ("SUCCEEDED", "FAILED"), (
-            f"Expected terminal status, got {run_status}: {data}"
+        assert run_status == ValidationRunStatus.SUCCEEDED, (
+            "Expected the real EnergyPlus contract to succeed, "
+            f"got {run_status}: {data}"
         )
 
         # Log the steps for debugging
@@ -476,25 +505,9 @@ class TestDockerFMUExecution:
     5. Returns simulation results to the workflow
     """
 
-    @pytest.fixture(autouse=True)
-    def setup_local_storage(self, tmp_path):
-        """Set up temporary local storage for test isolation."""
-        self.storage_root = tmp_path / "storage"
-        self.storage_root.mkdir(parents=True, exist_ok=True)
-
-        # Clear backend cache to ensure fresh initialization
-        clear_backend_cache()
-
-        yield
-
-        # Cleanup
-        clear_backend_cache()
-
     @pytest.fixture
-    def fmu_workflow(self, api_client, setup_local_storage):
+    def fmu_workflow(self, api_client, local_docker_execution_settings):
         """Create a workflow with an FMU validator using the Feedthrough FMU."""
-        from django.core.files.uploadedfile import SimpleUploadedFile
-
         from validibot.submissions.constants import SubmissionFileType
         from validibot.validations.constants import RulesetType
         from validibot.validations.models import Ruleset
@@ -543,16 +556,16 @@ class TestDockerFMUExecution:
             rules_text="{}",
         )
 
-        # Create workflow that accepts binary files (FMUs)
+        # The FMU is a validator resource; submissions carry typed simulation
+        # inputs as JSON and never masquerade as the FMU executable itself.
         workflow = WorkflowFactory(
             org=org,
             user=user,
             project=project,
-            allowed_file_types=[SubmissionFileType.BINARY],
+            allowed_file_types=[SubmissionFileType.JSON],
         )
 
-        # Create step with FMU validator
-        WorkflowStepFactory(
+        create_workflow_step_with_default_bindings(
             workflow=workflow,
             validator=validator,
             ruleset=ruleset,
@@ -570,13 +583,9 @@ class TestDockerFMUExecution:
             "workflow": workflow,
             "project": project,
             "client": api_client,
-            "storage_root": self.storage_root,
+            "storage_root": local_docker_execution_settings,
         }
 
-    @override_settings(
-        VALIDATOR_RUNNER="docker",
-        DATA_STORAGE_BACKEND="local",
-    )
     def test_fmu_execution_via_docker(self, fmu_workflow):
         """
         Test FMU validation executes via Docker container.
@@ -586,32 +595,27 @@ class TestDockerFMUExecution:
         2. Waits for the Docker container to run the FMU simulation
         3. Verifies the validation completes with results
         """
-        from io import BytesIO
-
         client = fmu_workflow["client"]
         workflow = fmu_workflow["workflow"]
         org = fmu_workflow["org"]
 
-        # FMU submissions contain input parameter values as JSON
-        # Submit as binary content (since workflow accepts BINARY files)
+        # FMU submissions contain input parameter values as JSON. The bound
+        # ``fmu_model`` file comes from the validator's immutable resource.
         submission_data = {
             "input_parameters": {
                 "real_in": 1.5,
             },
         }
-        # Encode JSON as binary for submission
-        binary_content = json.dumps(submission_data).encode("utf-8")
 
         url = start_workflow_url(workflow)
 
         logger.info("Starting FMU validation via Docker")
         logger.info("URL: %s", url)
 
-        # Submit as multipart form data with a file
         resp = client.post(
             url,
-            data={"file": BytesIO(binary_content)},
-            format="multipart",
+            data=json.dumps(submission_data),
+            content_type="application/json",
         )
         assert resp.status_code in (200, 201, 202), (
             f"Failed to start workflow: {resp.status_code} {resp.content}"
@@ -641,10 +645,8 @@ class TestDockerFMUExecution:
         run_status = (data.get("status") or "").upper()
         logger.info("Validation completed with status: %s", run_status)
 
-        # For this test, we verify the run completed (either SUCCESS or FAILED)
-        # The FMU may fail for various reasons, but we're testing the execution flow
-        assert run_status in ("SUCCEEDED", "FAILED"), (
-            f"Expected terminal status, got {run_status}: {data}"
+        assert run_status == ValidationRunStatus.SUCCEEDED, (
+            f"Expected the real FMU contract to succeed, got {run_status}: {data}"
         )
 
         # Log the steps for debugging

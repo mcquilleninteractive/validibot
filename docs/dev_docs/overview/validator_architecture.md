@@ -52,41 +52,51 @@ The input envelope is a JSON document that tells the validator what to do. It co
 from pydantic import BaseModel
 from typing import Literal
 
+
 class InputFileItem(BaseModel):
     """A file to be validated."""
-    name: str                    # Filename (e.g., "model.idf")
-    uri: str                     # Where to download the file
-    mime_type: str               # MIME type for format detection
-    role: str | None             # Optional descriptive backend metadata
-    port_key: str                # Required declared Validibot file port
+
+    name: str  # Filename (e.g., "model.idf")
+    uri: str  # Where to download the file
+    mime_type: str  # MIME type for format detection
+    role: str | None  # Optional descriptive backend metadata
+    port_key: str  # Required declared Validibot file port
+
 
 class ResourceFileItem(BaseModel):
     """An auxiliary resource file needed by the validator."""
-    id: str                      # Resource UUID
-    type: str                    # Resource type (e.g., "energyplus_weather")
-    uri: str                     # Where to download the resource
-    port_key: str                # Required declared Validibot file port
+
+    id: str  # Resource UUID
+    type: str  # Resource type (e.g., "energyplus_weather")
+    uri: str  # Where to download the resource
+    port_key: str  # Required declared Validibot file port
+
 
 class ValidatorInfo(BaseModel):
     """Information about the validator being run."""
-    id: str                      # Validator UUID
-    type: str                    # Validator type (e.g., "ENERGYPLUS", "FMU")
-    version: str                 # Validator version
+
+    id: str  # Validator UUID
+    type: str  # Validator type (e.g., "ENERGYPLUS", "FMU")
+    version: str  # Validator version
+
 
 class ExecutionContext(BaseModel):
     """Execution metadata for callbacks and storage."""
-    callback_url: str | None     # Where to POST results (async mode)
-    callback_id: str | None      # Unique ID for idempotent callbacks
-    execution_bundle_uri: str    # Base URI for storing artifacts
-    execution_attempt_id: str    # Durable retry/attempt UUID
-    step_run_id: str             # Exact step execution being completed
+
+    callback_url: str | None  # Where to POST results (async mode)
+    callback_id: str | None  # Unique ID for idempotent callbacks
+    execution_bundle_uri: str  # Base URI for storing artifacts
+    execution_attempt_id: str  # Durable retry/attempt UUID
+    step_run_id: str  # Exact step execution being completed
     attempt_contract_version: str
-    expected_output_uri: str     # Exact attempt-bound output identity
-    timeout_seconds: int         # Maximum execution time
+    expected_output_uri: str  # Exact attempt-bound output identity
+    timeout_seconds: int  # Maximum execution time
+
 
 class ValidationInputEnvelope(BaseModel):
     """Base input envelope - extend for your validator."""
-    run_id: str                  # Validation run UUID
+
+    run_id: str  # Validation run UUID
     input_files: list[InputFileItem]
     resource_files: list[ResourceFileItem]
     validator: ValidatorInfo
@@ -104,6 +114,7 @@ class EnergyPlusInputs(BaseModel):
     output_variables: list[str] = []
     invocation_mode: Literal["cli", "api"] = "cli"
 
+
 class EnergyPlusInputEnvelope(ValidationInputEnvelope):
     inputs: EnergyPlusInputs
 ```
@@ -114,6 +125,7 @@ class FMUInputs(BaseModel):
     start_time: float = 0.0
     stop_time: float = 1.0
     step_size: float | None = None
+
 
 class FMUInputEnvelope(ValidationInputEnvelope):
     inputs: FMUInputs
@@ -277,35 +289,43 @@ The output envelope reports validation results back to Validibot.
 ```python
 from enum import Enum
 
+
 class ValidationStatus(str, Enum):
-    SUCCESS = "success"       # Validation completed, model is valid
-    FAILURE = "failure"       # Validation completed, model has issues
-    ERROR = "error"           # Validation could not complete (crash, timeout)
+    SUCCESS = "success"  # Validation completed, model is valid
+    FAILURE = "failure"  # Validation completed, model has issues
+    ERROR = "error"  # Validation could not complete (crash, timeout)
+
 
 class Severity(str, Enum):
     INFO = "info"
     WARNING = "warning"
     ERROR = "error"
 
+
 class ValidationMessage(BaseModel):
     """A message from the validation process."""
+
     severity: Severity
     text: str
-    code: str | None = None     # Machine-readable error code
-    location: str | None = None # File/line reference
+    code: str | None = None  # Machine-readable error code
+    location: str | None = None  # File/line reference
+
 
 class ValidationMetric(BaseModel):
     """A numeric metric extracted during validation."""
-    name: str                   # Metric identifier
-    value: float | int | str    # Metric value
-    unit: str | None = None     # Unit of measurement
+
+    name: str  # Metric identifier
+    value: float | int | str  # Metric value
+    unit: str | None = None  # Unit of measurement
+
 
 class ValidationOutputEnvelope(BaseModel):
     """Base output envelope - extend for your validator."""
+
     run_id: str
     validator: ValidatorInfo
     status: ValidationStatus
-    timing: dict                # started_at, finished_at timestamps
+    timing: dict  # started_at, finished_at timestamps
     messages: list[ValidationMessage] = []
     metrics: list[ValidationMetric] = []
 ```
@@ -321,6 +341,7 @@ class EnergyPlusOutputs(BaseModel):
     execution_seconds: float
     invocation_mode: str
     # References to output files (SQL, CSV, etc.)
+
 
 class EnergyPlusOutputEnvelope(ValidationOutputEnvelope):
     outputs: EnergyPlusOutputs
@@ -404,16 +425,20 @@ from validibot_shared.validations.envelopes import (
     ValidationOutputEnvelope,
 )
 
+
 class MyValidatorInputs(BaseModel):
     setting_a: str
     setting_b: int = 10
 
+
 class MyValidatorInputEnvelope(ValidationInputEnvelope):
     inputs: MyValidatorInputs
+
 
 class MyValidatorOutputs(BaseModel):
     result_code: int
     summary: str
+
 
 class MyValidatorOutputEnvelope(ValidationOutputEnvelope):
     outputs: MyValidatorOutputs
@@ -455,6 +480,7 @@ from validibot_shared.myvalidator.envelopes import (
     MyValidatorOutputEnvelope,
 )
 
+
 def main():
     # Read input envelope
     input_uri = os.environ["VALIDIBOT_INPUT_URI"]
@@ -470,6 +496,7 @@ def main():
     with open(output_uri.replace("file://", ""), "w") as f:
         f.write(output_envelope.model_dump_json(indent=2))
 
+
 if __name__ == "__main__":
     main()
 ```
@@ -483,6 +510,7 @@ from validibot_shared.validations.envelopes import (
     ValidationMessage,
     Severity,
 )
+
 
 def run_validation(input_envelope):
     started_at = datetime.now(timezone.utc)
@@ -582,6 +610,7 @@ AdvancedValidator.validate()
 # In EnergyPlusValidator
 def preprocess_submission(self, *, step, submission):
     from .preprocessing import preprocess_energyplus_submission
+
     result = preprocess_energyplus_submission(step=step, submission=submission)
     return result.template_metadata
 ```

@@ -286,6 +286,7 @@ content = storage.read("runs/run-123/output/envelope.json")
 
 # Write/read Pydantic envelopes
 from validibot_shared.energyplus.envelopes import EnergyPlusInputEnvelope
+
 storage.write_envelope("runs/run-123/input/envelope.json", envelope)
 
 output = storage.read_envelope(

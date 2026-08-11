@@ -231,14 +231,14 @@ below.
 
 ```python
 context = {
-    "p": payload,            # alias for payload
-    "payload": payload,      # raw submission or validator output data
-    "s": signals_dict,       # alias for signal
+    "p": payload,  # alias for payload
+    "payload": payload,  # raw submission or validator output data
+    "s": signals_dict,  # alias for signal
     "signal": signals_dict,  # workflow signals + promoted values
-    "i": inputs_dict,        # alias for input
-    "input": inputs_dict,    # parser facts + resolved bindings (this step)
-    "o": output_dict,        # alias for output
-    "output": output_dict,   # this step's declared output values
+    "i": inputs_dict,  # alias for input
+    "input": inputs_dict,  # parser facts + resolved bindings (this step)
+    "o": output_dict,  # alias for output
+    "output": output_dict,  # this step's declared output values
     "steps": steps_context,  # inputs and outputs from completed upstream steps
     "submission": submission_dict,  # submission envelope (metadata + facts)
 }

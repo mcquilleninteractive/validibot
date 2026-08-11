@@ -4,7 +4,7 @@
 # * E402 — Django settings idiomatically group imports next to the
 #   settings they build (OIDC imports sit deep in the file next to
 #   the IDP_OIDC_* settings block). Auto-formatters strip per-line
-#   ``# noqa: E402`` markers, so we ignore the rule file-wide.
+#   suppression markers, so we ignore the rule file-wide.
 # * E501 — wide settings lines are readable; line-length noise here
 #   obscures the settings structure.
 # * S105 — tokens-by-format-name ("jwt") trigger ``possible hardcoded
@@ -1325,7 +1325,7 @@ TASK_OIDC_ALLOWED_SERVICE_ACCOUNTS = env.list(
 # to avoid multiline escaping pain in env files and secret stores.
 # NOTE: these imports are deliberately placed deep in the file next
 # to their IDP-OIDC usage. E402 is waived file-wide — see the top-of-
-# file ``# ruff: noqa`` for rationale.
+# file suppression directive for rationale.
 import base64 as _idp_base64
 
 from validibot.idp.constants import CLAUDE_OIDC_CLIENT_ID as _IDP_CLAUDE_CLIENT_ID

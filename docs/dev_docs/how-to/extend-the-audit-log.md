@@ -39,6 +39,7 @@ class AuditAction(TextChoices):
     # ... existing actions ...
     WEBHOOK_INVOKED = "webhook_invoked", _("Webhook Invoked")
 
+
 # Optional — only if the default 2-year cold retention is wrong:
 RETENTION_COLD_DAYS: dict[AuditAction, int] = {
     # ... existing ...
@@ -65,7 +66,7 @@ AUDITABLE_FIELDS = {
         "workflow_visibility",
         "mcp_enabled",
         "x402_enabled",
-        "new_field_to_audit",   # ← add here
+        "new_field_to_audit",  # ← add here
     ),
     # ...
 }
@@ -156,6 +157,7 @@ Three ways:
 
    ```python
    from validibot.audit.models import AuditLogEntry
+
    AuditLogEntry.objects.filter(
        action="workflow_updated",
    ).order_by("-occurred_at")[:5]
@@ -254,7 +256,7 @@ explicitly:
 
 ```python
 # Simplified pseudocode of the inner loop.
-receipt = backend.archive(chunk)           # may raise → command aborts
+receipt = backend.archive(chunk)  # may raise → command aborts
 if receipt.archived_ids:
     AuditLogEntry.objects.filter(pk__in=receipt.archived_ids).delete()
 # Rows not in receipt.archived_ids stay in the DB for the next run.

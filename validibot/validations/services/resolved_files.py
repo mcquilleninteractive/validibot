@@ -256,7 +256,13 @@ def _resolve_submission(
         )
         content = None
         name = _filename_from_uri(identity.uri) or "submission"
-    artifact_ports.validate_file_uri(port=port, uri=identity.uri or name)
+    # Inline submissions can have an opaque evidence URI (``submission:<uuid>``)
+    # because no storage object exists.  The sanitized original filename is the
+    # carrier identity in that case and is therefore what the extension
+    # contract must validate.  Materialized execution paths still validate the
+    # concrete workspace/cloud URI supplied by the adapter.
+    validation_uri = name if load_content else identity.uri or name
+    artifact_ports.validate_file_uri(port=port, uri=validation_uri)
     return ResolvedFileInput(
         contract_key=port.contract_key,
         name=name,

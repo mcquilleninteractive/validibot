@@ -263,17 +263,12 @@ class JsonSchemaValidator(BaseValidator):
         # Convert to Validibot format
         issues = [
             ValidationIssue(
-                path=error.absolute_path,
-                message=error.message,
-                severity=Severity.ERROR
+                path=error.absolute_path, message=error.message, severity=Severity.ERROR
             )
             for error in errors
         ]
 
-        return ValidationResult(
-            passed=len(issues) == 0,
-            issues=issues
-        )
+        return ValidationResult(passed=len(issues) == 0, issues=issues)
 ```
 
 ### Sequence Diagram: Basic Validation Run

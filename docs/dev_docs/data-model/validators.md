@@ -344,8 +344,7 @@ config = ValidatorConfig(
     name="EnergyPlus Validator",
     validation_type=ValidationType.ENERGYPLUS,
     validator_class=(
-        "validibot.validations.validators.energyplus"
-        ".validator.EnergyPlusValidator"
+        "validibot.validations.validators.energyplus.validator.EnergyPlusValidator"
     ),
     compute_tier=ComputeTier.HIGH,
     supports_assertions=True,

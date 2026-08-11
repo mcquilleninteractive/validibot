@@ -971,11 +971,10 @@ class TestEnvelopeSkipCallback:
 class TestEnvelopeFileMetadata:
     """Tests for dynamic file metadata in envelope building.
 
-    The envelope's ``input_files[0].name`` and ``mime_type`` must match
-    the actual file type.  The EnergyPlus runner uses ``name`` as the
-    local filename when downloading from GCS/local storage, and
-    EnergyPlus uses the file extension to decide whether to parse the
-    file as IDF text or epJSON.
+    The envelope's named ``primary_model`` item's ``name`` and ``mime_type``
+    must match the actual file type. The EnergyPlus runner uses ``name`` as
+    the local filename after exact port selection, and EnergyPlus uses the
+    extension to decide whether to parse IDF text or epJSON.
 
     A bug previously hardcoded these to ``model.idf`` / ``ENERGYPLUS_IDF``
     for all submissions, breaking direct epJSON execution.  These tests

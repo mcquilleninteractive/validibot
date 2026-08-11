@@ -28,6 +28,7 @@ from tests.helpers.payloads import valid_product_payload
 from tests.helpers.polling import extract_issues
 from tests.helpers.polling import normalize_poll_url
 from tests.helpers.polling import start_workflow_url
+from tests.helpers.workflows import create_workflow_step_with_default_bindings
 from validibot.users.models import RoleCode
 from validibot.users.tests.factories import OrganizationFactory
 from validibot.users.tests.factories import UserFactory
@@ -36,9 +37,7 @@ from validibot.validations.constants import JSONSchemaVersion
 from validibot.validations.constants import ValidationRunStatus
 from validibot.validations.constants import ValidationType
 from validibot.validations.tests.factories import RulesetFactory
-from validibot.validations.tests.factories import ValidatorFactory
 from validibot.workflows.tests.factories import WorkflowFactory
-from validibot.workflows.tests.factories import WorkflowStepFactory
 
 logger = logging.getLogger(__name__)
 
@@ -118,7 +117,7 @@ def _submit_run(
 
 
 @pytest.fixture
-def json_schema_setup(load_json_asset, api_client):
+def json_schema_setup(load_json_asset, api_client, system_validator_for):
     """
     Create the shared test objects: org, user, validator, ruleset, workflow, step.
 
@@ -130,9 +129,7 @@ def json_schema_setup(load_json_asset, api_client):
     user.set_current_org(org)
     grant_role(user, org, RoleCode.EXECUTOR)
 
-    validator = ValidatorFactory(
-        validation_type=ValidationType.JSON_SCHEMA,
-    )
+    validator = system_validator_for(ValidationType.JSON_SCHEMA)
 
     schema = load_json_asset("example_product_schema.json")
     ruleset = RulesetFactory(
@@ -146,7 +143,7 @@ def json_schema_setup(load_json_asset, api_client):
     )
 
     workflow = WorkflowFactory(org=org, user=user)
-    WorkflowStepFactory(
+    create_workflow_step_with_default_bindings(
         workflow=workflow,
         validator=validator,
         ruleset=ruleset,

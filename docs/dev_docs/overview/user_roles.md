@@ -264,10 +264,11 @@ All REST API endpoints enforce authentication and role-based permissions:
 # Example: Starting a validation requires EXECUTOR role
 def can_execute(self, *, user: User) -> bool:
     """Check if user can execute this workflow."""
-    return Workflow.objects.for_user(
-        user,
-        required_role_code=RoleCode.EXECUTOR
-    ).filter(pk=self.pk).exists()
+    return (
+        Workflow.objects.for_user(user, required_role_code=RoleCode.EXECUTOR)
+        .filter(pk=self.pk)
+        .exists()
+    )
 ```
 
 ### Database Level
@@ -404,7 +405,7 @@ can_access = workflow.can_execute(user=user)
 
 # Debug organization membership
 orgs_with_roles = [
-    (membership.org.name, list(membership.roles.values_list('code', flat=True)))
+    (membership.org.name, list(membership.roles.values_list("code", flat=True)))
     for membership in user.memberships.filter(is_active=True)
 ]
 ```

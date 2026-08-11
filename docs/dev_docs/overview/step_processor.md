@@ -105,11 +105,11 @@ for details.
 
 ```python
 # Advanced validator flow (sync)
-result = engine.validate(...)           # Launches container, blocks until done
+result = engine.validate(...)  # Launches container, blocks until done
 post_result = engine.post_execute_validate(output_envelope)  # Processes results
 
 # Advanced validator flow (async)
-result = engine.validate(...)           # Launches container, returns immediately
+result = engine.validate(...)  # Launches container, returns immediately
 # ... later, callback arrives ...
 post_result = engine.post_execute_validate(output_envelope)  # Processes results
 ```
@@ -434,10 +434,10 @@ value, the input keeps the bare name and the output is reachable only via
 
 ```python
 {
-    "Q_cooling_max": 6000,          # input (bare)
-    "T_room": 296.63,               # output (no collision → bare)
-    "Q_cooling_actual": 5172.83,    # output (no collision → bare)
-    "output": {                     # nested namespace
+    "Q_cooling_max": 6000,  # input (bare)
+    "T_room": 296.63,  # output (no collision → bare)
+    "Q_cooling_actual": 5172.83,  # output (no collision → bare)
+    "output": {  # nested namespace
         "T_room": 296.63,
         "Q_cooling_actual": 5172.83,
     },
@@ -535,7 +535,7 @@ The return type from all processor `execute()` methods:
 ```python
 @dataclass
 class StepProcessingResult:
-    passed: bool | None      # None = async, waiting for callback
+    passed: bool | None  # None = async, waiting for callback
     step_run: ValidationStepRun
     severity_counts: Counter  # {Severity.ERROR: 2, Severity.WARNING: 5}
     total_findings: int

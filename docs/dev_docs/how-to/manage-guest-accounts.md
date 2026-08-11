@@ -94,6 +94,7 @@ From the Django shell:
 
 ```python
 from validibot.core.site_settings import get_site_settings
+
 settings = get_site_settings()
 settings.allow_guest_access = False
 settings.allow_guest_invites = False

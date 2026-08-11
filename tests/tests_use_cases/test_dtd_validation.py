@@ -1,3 +1,9 @@
+"""End-to-end DTD validation through the declared XML document file port.
+
+Both success and schema-failure paths use the production system validator and
+default input-binding service so a clean database has the deployed contract.
+"""
+
 from __future__ import annotations
 
 import logging
@@ -12,6 +18,7 @@ from tests.helpers.polling import extract_issues
 from tests.helpers.polling import normalize_poll_url
 from tests.helpers.polling import poll_until_complete
 from tests.helpers.polling import start_workflow_url
+from tests.helpers.workflows import create_workflow_step_with_default_bindings
 from validibot.submissions.constants import SubmissionFileType
 from validibot.users.models import RoleCode
 from validibot.users.tests.factories import OrganizationFactory
@@ -21,15 +28,13 @@ from validibot.validations.constants import ValidationRunStatus
 from validibot.validations.constants import ValidationType
 from validibot.validations.constants import XMLSchemaType
 from validibot.validations.tests.factories import RulesetFactory
-from validibot.validations.tests.factories import ValidatorFactory
 from validibot.workflows.tests.factories import WorkflowFactory
-from validibot.workflows.tests.factories import WorkflowStepFactory
 
 logger = logging.getLogger(__name__)
 
 
 @pytest.fixture
-def workflow_context(load_dtd_asset, api_client):
+def workflow_context(load_dtd_asset, api_client, system_validator_for):
     """
     Build a minimal workflow configured for XML DTD
     validation and authenticate the API client.
@@ -39,7 +44,7 @@ def workflow_context(load_dtd_asset, api_client):
     grant_role(user, org, RoleCode.EXECUTOR)
     user.set_current_org(org)
 
-    validator = ValidatorFactory(validation_type=ValidationType.XML_SCHEMA)
+    validator = system_validator_for(ValidationType.XML_SCHEMA)
     schema = load_dtd_asset("product.dtd")
 
     ruleset = RulesetFactory(
@@ -57,7 +62,7 @@ def workflow_context(load_dtd_asset, api_client):
         user=user,
         allowed_file_types=[SubmissionFileType.XML],
     )
-    step = WorkflowStepFactory(
+    step = create_workflow_step_with_default_bindings(
         workflow=workflow,
         validator=validator,
         ruleset=ruleset,

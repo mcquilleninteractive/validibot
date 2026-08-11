@@ -1,3 +1,10 @@
+"""Use-case coverage for custom BASIC validators and namespaced CEL payloads.
+
+The validator is intentionally organization-owned and has no file ports. The
+workflow helper still enforces the production binding postcondition so future
+inputs added to this scenario cannot be silently omitted.
+"""
+
 from __future__ import annotations
 
 import json
@@ -5,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers.workflows import create_workflow_step_with_default_bindings
 from validibot.submissions.tests.factories import SubmissionFactory
 from validibot.users.constants import RoleCode
 from validibot.users.tests.factories import OrganizationFactory
@@ -21,7 +29,6 @@ from validibot.validations.tests.factories import RulesetFactory
 from validibot.validations.tests.factories import ValidatorFactory
 from validibot.validations.validators.basic import BasicValidator
 from validibot.workflows.tests.factories import WorkflowFactory
-from validibot.workflows.tests.factories import WorkflowStepFactory
 
 
 @pytest.mark.django_db(transaction=True)
@@ -58,7 +65,7 @@ class TestCelAssertion:
         )
 
         workflow = WorkflowFactory(org=org, user=user, is_active=True)
-        step = WorkflowStepFactory(
+        step = create_workflow_step_with_default_bindings(
             workflow=workflow,
             validator=validator,
             ruleset=ruleset,

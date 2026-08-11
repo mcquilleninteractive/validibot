@@ -13,6 +13,8 @@ their own dedicated sync functions.
 
 from __future__ import annotations
 
+from io import StringIO
+
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.test import TestCase
@@ -24,6 +26,7 @@ from validibot.validations.constants import StepIODirection
 from validibot.validations.constants import StepIOMedium
 from validibot.validations.constants import StepIOOriginKind
 from validibot.validations.constants import ValidationType
+from validibot.validations.constants import ValidatorAvailabilityState
 from validibot.validations.models import FMUModel
 from validibot.validations.models import StepInputBinding
 from validibot.validations.models import StepIODefinition
@@ -33,6 +36,21 @@ from validibot.validations.tests.factories import StepInputBindingFactory
 from validibot.validations.tests.factories import StepIODefinitionFactory
 from validibot.validations.tests.factories import ValidatorFactory
 from validibot.workflows.tests.factories import WorkflowStepFactory
+
+EXPECTED_SYSTEM_ARTIFACT_INPUTS = {
+    "energyplus-idf-validator": {"primary_model", "weather_file"},
+    "fmu-validator": {"fmu_model"},
+    "json-schema-validator": {"json_document"},
+    "pdf-validator": {"pdf_document"},
+    "portfolio-manager-validator": {
+        "expected_buildings_list",
+        "portfolio_manager_report",
+    },
+    "schematron-validator": {"xml_document"},
+    "shacl-validator": {"data_graph"},
+    "therm-validator": {"therm_model"},
+    "xml-validator": {"xml_document"},
+}
 
 # ── Core binding creation ────────────────────────────────────────────
 # These tests verify that the function creates the right bindings for
@@ -211,6 +229,60 @@ class TestEnsureStepInputBindings(TestCase):
         self.assertEqual(binding.source_scope, BindingSourceScope.SYSTEM)
         self.assertEqual(binding.source_data_path, "fmu_model")
         self.assertTrue(binding.is_required)
+
+    def test_every_system_file_port_gets_an_explicit_valid_default_binding(self):
+        """Every deployed file input must enter runtime through one binding.
+
+        This matrix is intentionally explicit: adding or renaming a system file
+        port is semantic backend drift and must update this test alongside the
+        validator version. It prevents production-shaped tests from passing on
+        partial factory rows while a clean installation fails before dispatch.
+        """
+        call_command(
+            "sync_validators",
+            stdout=StringIO(),
+            stderr=StringIO(),
+        )
+
+        observed: dict[str, set[str]] = {}
+        validators = (
+            Validator.objects.filter(
+                is_system=True,
+                availability_state=ValidatorAvailabilityState.AVAILABLE,
+                step_io_definitions__direction=StepIODirection.INPUT,
+                step_io_definitions__io_medium=StepIOMedium.ARTIFACT,
+            )
+            .distinct()
+            .order_by("slug", "version")
+        )
+        for validator in validators:
+            with self.subTest(validator=validator.slug):
+                ports = list(
+                    validator.step_io_definitions.filter(
+                        direction=StepIODirection.INPUT,
+                        io_medium=StepIOMedium.ARTIFACT,
+                    ).order_by("contract_key")
+                )
+                observed[validator.slug] = {port.contract_key for port in ports}
+
+                step = WorkflowStepFactory(validator=validator)
+                ensure_step_input_bindings(step)
+                bindings = {
+                    binding.io_definition.contract_key: binding
+                    for binding in StepInputBinding.objects.filter(
+                        workflow_step=step,
+                        io_definition__in=ports,
+                    ).select_related("io_definition")
+                }
+
+                self.assertEqual(set(bindings), observed[validator.slug])
+                for port in ports:
+                    binding = bindings[port.contract_key]
+                    self.assertIn(binding.source_scope, port.allowed_source_scopes)
+                    if binding.source_scope == BindingSourceScope.SUBMISSION_FILE:
+                        self.assertEqual(binding.source_data_path, "primary")
+
+        self.assertEqual(observed, EXPECTED_SYSTEM_ARTIFACT_INPUTS)
 
 
 # ── Filtering: only the right I/O definitions get bindings ───────────────────

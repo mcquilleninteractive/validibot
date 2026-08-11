@@ -131,7 +131,7 @@ logger.info(
         "run_id": str(run.id),
         "workflow_id": str(run.workflow_id),
         "user_id": str(run.user_id),
-    }
+    },
 )
 ```
 

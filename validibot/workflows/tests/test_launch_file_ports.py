@@ -106,14 +106,14 @@ def _energyplus_workflow_with_submitted_weather():
         workflow_step=step,
         io_definition=primary_port,
         source_scope=BindingSourceScope.SUBMISSION_FILE,
-        source_data_path="primary_file_uri",
+        source_data_path="primary",
         is_required=True,
     )
     StepInputBindingFactory(
         workflow_step=step,
         io_definition=weather_port,
         source_scope=BindingSourceScope.SUBMISSION_FILE,
-        source_data_path="",
+        source_data_path="weather_file",
         is_required=True,
     )
     return workflow, step
@@ -163,7 +163,7 @@ def _shacl_workflow_with_primary_data_graph():
         workflow_step=step,
         io_definition=data_graph_port,
         source_scope=BindingSourceScope.SUBMISSION_FILE,
-        source_data_path="data_graph",
+        source_data_path="primary",
         is_required=True,
     )
     return workflow, step
@@ -209,7 +209,7 @@ def _schematron_workflow_with_primary_xml_document():
         workflow_step=step,
         io_definition=xml_document_port,
         source_scope=BindingSourceScope.SUBMISSION_FILE,
-        source_data_path="xml_document",
+        source_data_path="primary",
         is_required=True,
     )
     return workflow, step

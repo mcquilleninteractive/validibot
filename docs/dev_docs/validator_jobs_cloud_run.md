@@ -448,10 +448,10 @@ Configure the Docker runner in Django settings:
 # In settings or environment
 VALIDATOR_RUNNER = "docker"
 VALIDATOR_RUNNER_OPTIONS = {
-    "memory_limit": "4g",      # Container memory limit
-    "cpu_limit": "2.0",        # CPU limit (cores)
-    "network": "validibot",    # Docker network for container
-    "timeout_seconds": 3600,   # Max execution time (1 hour)
+    "memory_limit": "4g",  # Container memory limit
+    "cpu_limit": "2.0",  # CPU limit (cores)
+    "network": "validibot",  # Docker network for container
+    "timeout_seconds": 3600,  # Max execution time (1 hour)
 }
 ```
 

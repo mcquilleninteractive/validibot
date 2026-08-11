@@ -91,8 +91,7 @@ All execution logic must implement the `StepHandler` protocol defined in `validi
 
 ```python
 class StepHandler(Protocol):
-    def execute(self, run_context: RunContext) -> StepResult:
-        ...
+    def execute(self, run_context: RunContext) -> StepResult: ...
 ```
 
 - **RunContext**: Contains the run, current step, workflow namespaces, and

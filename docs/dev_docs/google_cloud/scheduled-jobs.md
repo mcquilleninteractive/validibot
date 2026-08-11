@@ -108,6 +108,7 @@ To add a new scheduled task:
    # validibot/myapp/management/commands/my_cleanup.py
    from django.core.management.base import BaseCommand
 
+
    class Command(BaseCommand):
        help = "Description of what this command does"
 
@@ -130,11 +131,13 @@ To add a new scheduled task:
 
 3. **Register the URL** in `config/api_internal_router.py`:
    ```python
-   path(
-       "scheduled/my-cleanup/",
-       MyCleanupView.as_view(),
-       name="scheduled-my-cleanup",
-   ),
+   (
+       path(
+           "scheduled/my-cleanup/",
+           MyCleanupView.as_view(),
+           name="scheduled-my-cleanup",
+       ),
+   )
    ```
 
 4. **Add to the scheduler setup** in `justfile` under `gcp-scheduler-setup`:

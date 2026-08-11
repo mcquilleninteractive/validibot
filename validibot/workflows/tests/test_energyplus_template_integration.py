@@ -2382,7 +2382,7 @@ def _make_launcher_fixtures(
         workflow_step=step,
         io_definition=primary_model_port,
         source_scope=BindingSourceScope.SUBMISSION_FILE,
-        source_data_path="primary_file_uri",
+        source_data_path="primary",
     )
     StepInputBindingFactory(
         workflow_step=step,

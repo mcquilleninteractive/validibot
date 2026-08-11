@@ -545,6 +545,53 @@ def test_step_and_all_file_bindings_roll_back_when_one_update_is_invalid() -> No
     ).exists()
 
 
+def test_resolver_validates_inline_submission_filename_not_opaque_identity() -> None:
+    """An inline file keeps its extension contract despite having no storage URL.
+
+    Raw JSON and XML API bodies are stored inline below the configured size
+    limit. Their immutable identity is ``submission:<uuid>``, while their
+    sanitized ``original_filename`` carries the file extension declared by the
+    port. The resolver must not mistake that opaque evidence identity for a
+    filename and reject every normal inline workflow launch.
+    """
+    workflow = WorkflowFactory()
+    validator = ValidatorFactory(validation_type=ValidationType.JSON_SCHEMA)
+    step = WorkflowStepFactory(workflow=workflow, validator=validator)
+    port = _artifact_port(
+        validator=validator,
+        contract_key="json_document",
+        direction=StepIODirection.INPUT,
+        data_format=SubmissionDataFormat.JSON,
+        media_type="application/json",
+        allow_upstream=True,
+    )
+    port.metadata = {"accepted_extensions": ["json"]}
+    port.save(update_fields=["metadata"])
+    set_artifact_input_binding(
+        consumer_step=step,
+        consumer_port=port,
+        source_scope=BindingSourceScope.SUBMISSION_FILE,
+        artifact_reference="primary",
+    )
+    run = ValidationRunFactory(workflow=workflow)
+    run.submission.set_content(
+        inline_text='{"valid": true}',
+        filename="document.json",
+    )
+    run.submission.save()
+    step_run = ValidationStepRunFactory(
+        validation_run=run,
+        workflow_step=step,
+    )
+
+    resolved = resolve_file_inputs(run=run, step=step, step_run=step_run)
+
+    item = resolved["json_document"]
+    assert item.name == "document.json"
+    assert item.identity.uri == f"submission:{run.submission_id}"
+    assert item.content == b'{"valid": true}'
+
+
 def test_resolver_verifies_and_returns_exact_upstream_xml_bytes() -> None:
     """An in-process XML validator receives bytes from the exact run artifact."""
     workflow = WorkflowFactory()

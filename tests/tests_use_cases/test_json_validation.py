@@ -1,3 +1,10 @@
+"""End-to-end JSON Schema workflow tests using the synchronized system catalog.
+
+These tests prove both passing and failing submissions through the public API.
+The workflow fixture uses the declared ``json_document`` file port and its
+production default binding instead of an incomplete validator model stand-in.
+"""
+
 from __future__ import annotations
 
 import json
@@ -13,6 +20,7 @@ from tests.helpers.polling import extract_issues
 from tests.helpers.polling import normalize_poll_url
 from tests.helpers.polling import poll_until_complete
 from tests.helpers.polling import start_workflow_url
+from tests.helpers.workflows import create_workflow_step_with_default_bindings
 from validibot.users.models import RoleCode
 from validibot.users.tests.factories import OrganizationFactory
 from validibot.users.tests.factories import UserFactory
@@ -21,15 +29,13 @@ from validibot.validations.constants import JSONSchemaVersion
 from validibot.validations.constants import ValidationRunStatus
 from validibot.validations.constants import ValidationType
 from validibot.validations.tests.factories import RulesetFactory
-from validibot.validations.tests.factories import ValidatorFactory
 from validibot.workflows.tests.factories import WorkflowFactory
-from validibot.workflows.tests.factories import WorkflowStepFactory
 
 logger = logging.getLogger(__name__)
 
 
 @pytest.fixture
-def workflow_context(load_json_asset, api_client):
+def workflow_context(load_json_asset, api_client, system_validator_for):
     """
     Build a minimal workflow that validates a product JSON using a JSON Schema
     ruleset, and authenticate the API client with EXECUTOR permissions.
@@ -40,9 +46,7 @@ def workflow_context(load_json_asset, api_client):
 
     grant_role(user, org, RoleCode.EXECUTOR)
 
-    validator = ValidatorFactory(
-        validation_type=ValidationType.JSON_SCHEMA,
-    )
+    validator = system_validator_for(ValidationType.JSON_SCHEMA)
 
     schema = load_json_asset("example_product_schema.json")
     ruleset = RulesetFactory(
@@ -56,7 +60,7 @@ def workflow_context(load_json_asset, api_client):
     )
 
     workflow = WorkflowFactory(org=org, user=user)
-    step = WorkflowStepFactory(
+    step = create_workflow_step_with_default_bindings(
         workflow=workflow,
         validator=validator,
         ruleset=ruleset,

@@ -1,12 +1,27 @@
+"""Shared fixtures and database hygiene for the public end-to-end test tree.
+
+The system-validator resolver in this module deliberately synchronizes the
+production catalog so workflow tests exercise named ports and backend identity,
+while low-level unit tests remain free to construct partial model graphs.
+"""
+
 from __future__ import annotations
 
 import json
+from io import StringIO
 from pathlib import Path
+from typing import TYPE_CHECKING
 from typing import Any
 
 import pytest
+from django.core.management import call_command
 from django.db import connections
 from rest_framework.test import APIClient
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from validibot.validations.models import Validator
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -191,6 +206,41 @@ def load_thmx_asset():
 @pytest.fixture
 def api_client() -> APIClient:
     return APIClient()
+
+
+@pytest.fixture
+def system_validator_for() -> Callable[[str], Validator]:
+    """Resolve production system validators from their synchronized catalogs.
+
+    End-to-end tests must not replace a config-managed system validator with a
+    generic model factory because the catalog owns semantic fields, named file
+    ports, and backend identity. The command runs at most once per consuming
+    test, while the returned resolver can select multiple validator families.
+    """
+    synchronized = False
+
+    def _resolver(validation_type: str) -> Validator:
+        nonlocal synchronized
+
+        from validibot.validations.models import Validator
+        from validibot.validations.validators.base.config import get_config
+
+        if not synchronized:
+            call_command(
+                "sync_validators",
+                stdout=StringIO(),
+                stderr=StringIO(),
+            )
+            synchronized = True
+
+        config = get_config(validation_type)
+        if config is None:
+            raise AssertionError(
+                f"No registered system validator config for {validation_type!r}.",
+            )
+        return Validator.objects.get(slug=config.slug, version=config.version)
+
+    return _resolver
 
 
 @pytest.fixture(autouse=True)

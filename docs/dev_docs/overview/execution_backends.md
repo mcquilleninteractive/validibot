@@ -251,7 +251,7 @@ VALIDATOR_RUNNER = "docker"
 VALIDATOR_RUNNER_OPTIONS = {
     "memory_limit": "4g",
     "cpu_limit": "2.0",
-    "network": None,            # None = no network (default, most secure)
+    "network": None,  # None = no network (default, most secure)
     "timeout_seconds": 3600,
 }
 
@@ -539,6 +539,7 @@ To support a new deployment target (e.g., AWS):
 ```python
 # aws.py
 from .base import ExecutionBackend, ExecutionRequest, ExecutionResponse
+
 
 class AWSExecutionBackend(ExecutionBackend):
     is_async = True  # or False for synchronous

@@ -21,6 +21,7 @@ from pathlib import Path
 
 from django.test import TestCase
 
+from tests.helpers.workflows import create_workflow_step_with_default_bindings
 from validibot.projects.tests.factories import ProjectFactory
 from validibot.submissions.constants import SubmissionFileType
 from validibot.submissions.tests.factories import SubmissionFactory
@@ -42,7 +43,6 @@ from validibot.validations.services.validation_run import ValidationRunService
 from validibot.validations.tests.factories import ValidatorFactory
 from validibot.workflows.models import WorkflowSignalMapping
 from validibot.workflows.tests.factories import WorkflowFactory
-from validibot.workflows.tests.factories import WorkflowStepFactory
 
 ASSET_DIR = (
     Path(__file__).resolve().parents[1] / "assets" / "sysml_v2" / "radiator_example"
@@ -140,7 +140,7 @@ class SysmlV2RadiatorWorkflowTests(TestCase):
             rules_text=cls._asset_text("thermal_radiator_schema.json"),
             metadata={"schema_type": JSONSchemaVersion.DRAFT_2020_12.value},
         )
-        WorkflowStepFactory(
+        create_workflow_step_with_default_bindings(
             workflow=workflow,
             validator=validator,
             ruleset=ruleset,
@@ -164,7 +164,7 @@ class SysmlV2RadiatorWorkflowTests(TestCase):
             ruleset_type=RulesetType.BASIC,
             version="1.0",
         )
-        WorkflowStepFactory(
+        create_workflow_step_with_default_bindings(
             workflow=workflow,
             validator=validator,
             ruleset=ruleset,
@@ -227,7 +227,7 @@ class SysmlV2RadiatorWorkflowTests(TestCase):
             ruleset_type=RulesetType.FMU,
             version="1.0",
         )
-        WorkflowStepFactory(
+        create_workflow_step_with_default_bindings(
             workflow=workflow,
             validator=validator,
             ruleset=ruleset,

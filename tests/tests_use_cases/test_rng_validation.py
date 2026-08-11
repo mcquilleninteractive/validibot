@@ -1,3 +1,9 @@
+"""End-to-end RELAX NG workflow tests using the XML system validator contract.
+
+The submitted XML is bound through the synchronized ``xml_document`` file port
+before the ordinary API launch and result-polling lifecycle is exercised.
+"""
+
 from __future__ import annotations
 
 import logging
@@ -12,6 +18,7 @@ from tests.helpers.polling import extract_issues
 from tests.helpers.polling import normalize_poll_url
 from tests.helpers.polling import poll_until_complete
 from tests.helpers.polling import start_workflow_url
+from tests.helpers.workflows import create_workflow_step_with_default_bindings
 from validibot.submissions.constants import SubmissionFileType
 from validibot.users.models import RoleCode
 from validibot.users.tests.factories import OrganizationFactory
@@ -21,16 +28,14 @@ from validibot.validations.constants import ValidationRunStatus
 from validibot.validations.constants import ValidationType
 from validibot.validations.constants import XMLSchemaType
 from validibot.validations.tests.factories import RulesetFactory
-from validibot.validations.tests.factories import ValidatorFactory
 from validibot.workflows.tests.factories import WorkflowFactory
-from validibot.workflows.tests.factories import WorkflowStepFactory
 
 logger = logging.getLogger(__name__)
 pytestmark = pytest.mark.django_db
 
 
 @pytest.fixture
-def workflow_context(load_rng_asset, api_client):
+def workflow_context(load_rng_asset, api_client, system_validator_for):
     """
     Build a workflow configured for RELAX NG XML validation and authenticate
     the API client.
@@ -41,9 +46,7 @@ def workflow_context(load_rng_asset, api_client):
 
     grant_role(user, org, RoleCode.EXECUTOR)
 
-    validator = ValidatorFactory(
-        validation_type=ValidationType.XML_SCHEMA,
-    )
+    validator = system_validator_for(ValidationType.XML_SCHEMA)
 
     schema = load_rng_asset("product.rng")
 
@@ -62,7 +65,7 @@ def workflow_context(load_rng_asset, api_client):
         user=user,
         allowed_file_types=[SubmissionFileType.XML],
     )
-    step = WorkflowStepFactory(
+    step = create_workflow_step_with_default_bindings(
         workflow=workflow,
         validator=validator,
         ruleset=ruleset,

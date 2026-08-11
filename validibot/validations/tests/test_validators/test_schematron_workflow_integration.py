@@ -26,18 +26,16 @@ The three scenarios mirror the fixture invoices:
                  proving two steps with different uploaded rules layer
                  exactly as the D7 workflow intends
 
-Skips as a module when validibot-shared < 0.12.0 (the inline-rules
-contract); activates automatically once the released package is synced.
 """
 
 from __future__ import annotations
 
+from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
+from django.core.management import call_command
 from django.test import TestCase
-from validibot_shared.schematron.envelopes import SchematronInputs
 
 from validibot.submissions.constants import SubmissionFileType
 from validibot.submissions.tests.factories import SubmissionFactory
@@ -53,19 +51,22 @@ from validibot.validations.constants import ValidationType
 from validibot.validations.models import RulesetAssertion
 from validibot.validations.models import ValidationFinding
 from validibot.validations.models import ValidationRun
+from validibot.validations.models import Validator
 from validibot.validations.services.execution.base import ExecutionResponse
 from validibot.validations.services.validation_run import ValidationRunService
+from validibot.validations.validators.base.config import get_config
 from validibot.workflows.forms import SchematronStepConfigForm
 from validibot.workflows.tests.factories import WorkflowFactory
 from validibot.workflows.views_helpers import save_workflow_step
 
-if "schematron_text" not in SchematronInputs.model_fields:
-    pytest.skip(
-        "requires validibot-shared >= 0.12.0 (inline Schematron rules contract)",
-        allow_module_level=True,
-    )
-
 ASSETS = Path("tests/assets/schematron")
+
+
+def _system_schematron_validator() -> Validator:
+    """Return the installed Schematron validator with its declared file port."""
+    call_command("sync_validators", stdout=StringIO(), stderr=StringIO())
+    config = get_config(ValidationType.SCHEMATRON)
+    return Validator.objects.get(slug=config.slug, version=config.version)
 
 
 class LxmlContainerBackend:
@@ -179,14 +180,9 @@ class TestPeppolPreflightWorkflow(TestCase):
         grant_role(self.user, self.org, RoleCode.EXECUTOR)
         self.user.set_current_org(self.org)
 
-        from validibot.validations.tests.factories import ValidatorFactory
-
         # ONE Schematron validator (the engine); the two steps differ only
         # by the rules their authors uploaded — the user's mental model.
-        self.validator = ValidatorFactory(
-            validation_type=ValidationType.SCHEMATRON,
-            supports_assertions=True,
-        )
+        self.validator = _system_schematron_validator()
         self.workflow = WorkflowFactory(org=self.org)
 
         # Author step 1 through the REAL form: the EN 16931-like rules.
@@ -230,6 +226,7 @@ class TestPeppolPreflightWorkflow(TestCase):
             workflow=self.workflow,
             content=(ASSETS / invoice_filename).read_text(),
             file_type=SubmissionFileType.XML,
+            original_filename=invoice_filename,
         )
         run = ValidationRun.objects.create(
             org=self.org,
@@ -346,12 +343,7 @@ class TestPurchaseOrderPreflightWorkflow(TestCase):
         grant_role(self.user, self.org, RoleCode.EXECUTOR)
         self.user.set_current_org(self.org)
 
-        from validibot.validations.tests.factories import ValidatorFactory
-
-        self.validator = ValidatorFactory(
-            validation_type=ValidationType.SCHEMATRON,
-            supports_assertions=True,
-        )
+        self.validator = _system_schematron_validator()
         self.workflow = WorkflowFactory(org=self.org)
 
         # One Schematron step carrying the neutral purchase-order pack.
@@ -374,6 +366,7 @@ class TestPurchaseOrderPreflightWorkflow(TestCase):
             workflow=self.workflow,
             content=(ASSETS / "purchase_order" / fixture_filename).read_text(),
             file_type=SubmissionFileType.XML,
+            original_filename=fixture_filename,
         )
         run = ValidationRun.objects.create(
             org=self.org,

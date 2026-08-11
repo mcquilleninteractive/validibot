@@ -30,21 +30,26 @@ model creation, following the project's Django testing standards.
 from __future__ import annotations
 
 import json
+from io import StringIO
 from pathlib import Path
 from unittest.mock import MagicMock
 from unittest.mock import patch
 
 import pytest
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.core.management import call_command
 
 from validibot.actions.protocols import RunContext
 from validibot.submissions.tests.factories import SubmissionFactory
 from validibot.users.tests.factories import OrganizationFactory
 from validibot.validations.constants import ValidationType
+from validibot.validations.models import Validator
 from validibot.validations.services.execution.base import ExecutionResponse
+from validibot.validations.services.input_bindings import ensure_step_input_bindings
 from validibot.validations.tests.factories import ValidationRunFactory
 from validibot.validations.tests.factories import ValidationStepRunFactory
-from validibot.validations.tests.factories import ValidatorFactory
+from validibot.validations.tests.factories import ValidatorResourceFileFactory
+from validibot.validations.validators.base.config import get_config
 from validibot.validations.validators.base.config import (
     get_validator_class as get_validator,
 )
@@ -87,6 +92,7 @@ WindowMaterial:SimpleGlazingSystem,
 
 def _make_template_workflow(
     *,
+    validator: Validator,
     template_content: str | None = None,
     step_config: dict | None = None,
     template_variables: list[dict] | None = None,
@@ -114,7 +120,6 @@ def _make_template_workflow(
     ]
 
     org = OrganizationFactory()
-    validator = ValidatorFactory(validation_type=ValidationType.ENERGYPLUS)
     workflow = WorkflowFactory(org=org)
     step = WorkflowStepFactory(
         workflow=workflow,
@@ -141,7 +146,9 @@ def _make_template_workflow(
     WorkflowStepResourceFactory(
         step=step,
         role=WorkflowStepResource.WEATHER_FILE,
+        validator_resource_file=ValidatorResourceFileFactory(validator=validator),
     )
+    ensure_step_input_bindings(step)
 
     # Create with a dummy submission first (required by factory's LazyAttributes)
     # We'll replace it with the real submission in each test.
@@ -160,14 +167,13 @@ def _make_template_workflow(
     return org, workflow, step, validator, validation_run, step_run
 
 
-def _make_direct_workflow():
+def _make_direct_workflow(*, validator: Validator):
     """Create a workflow graph for direct-mode (no template) E2E testing.
 
     The step has a WEATHER_FILE but no MODEL_TEMPLATE resource, so
     preprocessing is a no-op.
     """
     org = OrganizationFactory()
-    validator = ValidatorFactory(validation_type=ValidationType.ENERGYPLUS)
     workflow = WorkflowFactory(org=org)
     step = WorkflowStepFactory(
         workflow=workflow,
@@ -179,7 +185,9 @@ def _make_direct_workflow():
     WorkflowStepResourceFactory(
         step=step,
         role=WorkflowStepResource.WEATHER_FILE,
+        validator_resource_file=ValidatorResourceFileFactory(validator=validator),
     )
+    ensure_step_input_bindings(step)
 
     dummy_submission = SubmissionFactory(workflow=workflow, org=org, project=None)
     validation_run = ValidationRunFactory(
@@ -194,6 +202,14 @@ def _make_direct_workflow():
     )
 
     return org, workflow, step, validator, validation_run, step_run
+
+
+@pytest.fixture
+def energyplus_system_validator() -> Validator:
+    """Return the installed EnergyPlus catalog row with its declared ports."""
+    call_command("sync_validators", stdout=StringIO(), stderr=StringIO())
+    config = get_config(ValidationType.ENERGYPLUS)
+    return Validator.objects.get(slug=config.slug, version=config.version)
 
 
 def _make_mock_backend(*, capture_request: list | None = None):
@@ -262,6 +278,7 @@ class TestEnergyPlusTemplateE2E:
         self,
         mock_get_backend,
         caplog,
+        energyplus_system_validator,
     ):
         """Submit valid parameters to a template step and verify:
 
@@ -275,7 +292,9 @@ class TestEnergyPlusTemplateE2E:
         captured = []
         mock_get_backend.return_value = _make_mock_backend(capture_request=captured)
 
-        org, workflow, step, validator, run, step_run = _make_template_workflow()
+        org, workflow, step, validator, run, step_run = _make_template_workflow(
+            validator=energyplus_system_validator,
+        )
         params = json.dumps(
             {
                 "U_FACTOR": "2.5",
@@ -326,7 +345,11 @@ class TestEnergyPlusTemplateE2E:
         assert "could not be resolved" not in caplog.text
 
     @patch("validibot.validations.services.execution.get_execution_backend")
-    def test_template_with_demo_idf(self, mock_get_backend):
+    def test_template_with_demo_idf(
+        self,
+        mock_get_backend,
+        energyplus_system_validator,
+    ):
         """Verify the full-size demo template (window glazing shoebox model)
         resolves correctly through the pipeline.
 
@@ -338,6 +361,7 @@ class TestEnergyPlusTemplateE2E:
 
         demo_content = _DEMO_TEMPLATE_PATH.read_text()
         org, workflow, step, validator, run, step_run = _make_template_workflow(
+            validator=energyplus_system_validator,
             template_content=demo_content,
         )
         params = json.dumps(
@@ -376,7 +400,11 @@ class TestEnergyPlusTemplateE2E:
         assert result.stats["template_parameters_used"]["U_FACTOR"] == "1.70"
 
     @patch("validibot.validations.services.execution.get_execution_backend")
-    def test_template_defaults_fill_missing_params(self, mock_get_backend):
+    def test_template_defaults_fill_missing_params(
+        self,
+        mock_get_backend,
+        energyplus_system_validator,
+    ):
         """When a variable has a default and the submitter omits it, the
         default value should appear in the resolved IDF.
 
@@ -388,6 +416,7 @@ class TestEnergyPlusTemplateE2E:
         mock_get_backend.return_value = _make_mock_backend(capture_request=captured)
 
         org, workflow, step, validator, run, step_run = _make_template_workflow(
+            validator=energyplus_system_validator,
             template_variables=[
                 {"name": "U_FACTOR", "variable_type": "number"},
                 {"name": "SHGC", "variable_type": "number"},
@@ -432,7 +461,11 @@ class TestEnergyPlusTemplateValidation:
     """Template preprocessing validation errors surface as failed results."""
 
     @patch("validibot.validations.services.execution.get_execution_backend")
-    def test_missing_required_param_returns_failure(self, mock_get_backend):
+    def test_missing_required_param_returns_failure(
+        self,
+        mock_get_backend,
+        energyplus_system_validator,
+    ):
         """When a required parameter is missing (no default), validate()
         returns a failure result naming the missing variable.  The backend
         is never called — the error is caught during preprocessing.
@@ -440,7 +473,9 @@ class TestEnergyPlusTemplateValidation:
         captured = []
         mock_get_backend.return_value = _make_mock_backend(capture_request=captured)
 
-        org, workflow, step, validator, run, step_run = _make_template_workflow()
+        org, workflow, step, validator, run, step_run = _make_template_workflow(
+            validator=energyplus_system_validator,
+        )
         # Missing VISIBLE_TRANSMITTANCE — all three are required (no defaults)
         params = json.dumps({"U_FACTOR": "2.0", "SHGC": "0.25"})
         submission = SubmissionFactory(
@@ -460,7 +495,11 @@ class TestEnergyPlusTemplateValidation:
         assert "VISIBLE_TRANSMITTANCE" in error_text
 
     @patch("validibot.validations.services.execution.get_execution_backend")
-    def test_invalid_json_returns_failure(self, mock_get_backend):
+    def test_invalid_json_returns_failure(
+        self,
+        mock_get_backend,
+        energyplus_system_validator,
+    ):
         """Non-JSON submission content to a template step should return
         a clear error about invalid JSON.  This catches the common case
         where someone accidentally submits a raw IDF to a template workflow.
@@ -468,7 +507,9 @@ class TestEnergyPlusTemplateValidation:
         captured = []
         mock_get_backend.return_value = _make_mock_backend(capture_request=captured)
 
-        org, workflow, step, validator, run, step_run = _make_template_workflow()
+        org, workflow, step, validator, run, step_run = _make_template_workflow(
+            validator=energyplus_system_validator,
+        )
         submission = SubmissionFactory(
             content="This is not JSON!",
             workflow=workflow,
@@ -486,7 +527,11 @@ class TestEnergyPlusTemplateValidation:
         assert "JSON" in error_text
 
     @patch("validibot.validations.services.execution.get_execution_backend")
-    def test_value_out_of_range_returns_failure(self, mock_get_backend):
+    def test_value_out_of_range_returns_failure(
+        self,
+        mock_get_backend,
+        energyplus_system_validator,
+    ):
         """When a parameter value is outside the author-defined range,
         merge validation catches it and returns a failure result.
         """
@@ -494,6 +539,7 @@ class TestEnergyPlusTemplateValidation:
         mock_get_backend.return_value = _make_mock_backend(capture_request=captured)
 
         org, workflow, step, validator, run, step_run = _make_template_workflow(
+            validator=energyplus_system_validator,
             template_variables=[
                 {
                     "name": "U_FACTOR",
@@ -529,7 +575,11 @@ class TestEnergyPlusTemplateValidation:
         assert "U_FACTOR" in error_text
 
     @patch("validibot.validations.services.execution.get_execution_backend")
-    def test_typo_in_parameter_name(self, mock_get_backend):
+    def test_typo_in_parameter_name(
+        self,
+        mock_get_backend,
+        energyplus_system_validator,
+    ):
         """A misspelled parameter name should produce an error about the
         missing required parameter.  The merge step warns about unrecognized
         parameters and errors on missing required ones.
@@ -537,7 +587,9 @@ class TestEnergyPlusTemplateValidation:
         captured = []
         mock_get_backend.return_value = _make_mock_backend(capture_request=captured)
 
-        org, workflow, step, validator, run, step_run = _make_template_workflow()
+        org, workflow, step, validator, run, step_run = _make_template_workflow(
+            validator=energyplus_system_validator,
+        )
         params = json.dumps(
             {
                 "U_FACTR": "2.0",  # Typo — should be U_FACTOR
@@ -575,7 +627,11 @@ class TestEnergyPlusDirectModeE2E:
     """Direct-mode submissions bypass template preprocessing entirely."""
 
     @patch("validibot.validations.services.execution.get_execution_backend")
-    def test_direct_mode_bypasses_preprocessing(self, mock_get_backend):
+    def test_direct_mode_bypasses_preprocessing(
+        self,
+        mock_get_backend,
+        energyplus_system_validator,
+    ):
         """A step without a MODEL_TEMPLATE resource should pass the
         original submission content unchanged to the backend.
 
@@ -585,7 +641,9 @@ class TestEnergyPlusDirectModeE2E:
         captured = []
         mock_get_backend.return_value = _make_mock_backend(capture_request=captured)
 
-        org, workflow, step, validator, run, step_run = _make_direct_workflow()
+        org, workflow, step, validator, run, step_run = _make_direct_workflow(
+            validator=energyplus_system_validator,
+        )
         original_content = "Version,24.2;"
         submission = SubmissionFactory(
             content=original_content,
@@ -610,7 +668,11 @@ class TestEnergyPlusDirectModeE2E:
         assert "template_parameters_used" not in (result.stats or {})
 
     @patch("validibot.validations.services.execution.get_execution_backend")
-    def test_epjson_direct_mode_preserves_filename(self, mock_get_backend):
+    def test_epjson_direct_mode_preserves_filename(
+        self,
+        mock_get_backend,
+        energyplus_system_validator,
+    ):
         """Direct epJSON submissions should preserve their original
         filename so the envelope builder can derive the correct
         ``name`` and ``mime_type`` for the InputFileItem.
@@ -622,7 +684,9 @@ class TestEnergyPlusDirectModeE2E:
         captured = []
         mock_get_backend.return_value = _make_mock_backend(capture_request=captured)
 
-        org, workflow, step, validator, run, step_run = _make_direct_workflow()
+        org, workflow, step, validator, run, step_run = _make_direct_workflow(
+            validator=energyplus_system_validator,
+        )
         submission = SubmissionFactory(
             content='{"Version": {"Version Identifier": "24.2"}}',
             original_filename="model.epjson",

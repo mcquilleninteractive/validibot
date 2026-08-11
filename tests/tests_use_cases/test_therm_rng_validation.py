@@ -18,6 +18,7 @@ from tests.helpers.polling import extract_issues
 from tests.helpers.polling import normalize_poll_url
 from tests.helpers.polling import poll_until_complete
 from tests.helpers.polling import start_workflow_url
+from tests.helpers.workflows import create_workflow_step_with_default_bindings
 from validibot.submissions.constants import SubmissionFileType
 from validibot.users.models import RoleCode
 from validibot.users.tests.factories import OrganizationFactory
@@ -27,16 +28,14 @@ from validibot.validations.constants import ValidationRunStatus
 from validibot.validations.constants import ValidationType
 from validibot.validations.constants import XMLSchemaType
 from validibot.validations.tests.factories import RulesetFactory
-from validibot.validations.tests.factories import ValidatorFactory
 from validibot.workflows.tests.factories import WorkflowFactory
-from validibot.workflows.tests.factories import WorkflowStepFactory
 
 logger = logging.getLogger(__name__)
 pytestmark = pytest.mark.django_db
 
 
 @pytest.fixture
-def therm_workflow_context(load_rng_asset, api_client):
+def therm_workflow_context(load_rng_asset, api_client, system_validator_for):
     """Build a workflow configured for THERM RNG validation."""
     org = OrganizationFactory()
     user = UserFactory(orgs=[org])
@@ -44,9 +43,7 @@ def therm_workflow_context(load_rng_asset, api_client):
 
     grant_role(user, org, RoleCode.EXECUTOR)
 
-    validator = ValidatorFactory(
-        validation_type=ValidationType.XML_SCHEMA,
-    )
+    validator = system_validator_for(ValidationType.XML_SCHEMA)
 
     schema = load_rng_asset("therm.rng")
 
@@ -65,7 +62,7 @@ def therm_workflow_context(load_rng_asset, api_client):
         user=user,
         allowed_file_types=[SubmissionFileType.XML],
     )
-    WorkflowStepFactory(
+    create_workflow_step_with_default_bindings(
         workflow=workflow,
         validator=validator,
         ruleset=ruleset,

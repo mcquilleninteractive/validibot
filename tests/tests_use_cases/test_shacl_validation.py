@@ -33,6 +33,7 @@ from tests.helpers.polling import extract_issues
 from tests.helpers.polling import normalize_poll_url
 from tests.helpers.polling import poll_until_complete
 from tests.helpers.polling import start_workflow_url
+from tests.helpers.workflows import create_workflow_step_with_default_bindings
 from validibot.submissions.constants import SubmissionFileType
 from validibot.users.models import RoleCode
 from validibot.users.tests.factories import OrganizationFactory
@@ -45,9 +46,7 @@ from validibot.validations.constants import ValidationRunStatus
 from validibot.validations.constants import ValidationType
 from validibot.validations.tests.factories import RulesetAssertionFactory
 from validibot.validations.tests.factories import RulesetFactory
-from validibot.validations.tests.factories import ValidatorFactory
 from validibot.workflows.tests.factories import WorkflowFactory
-from validibot.workflows.tests.factories import WorkflowStepFactory
 
 logger = logging.getLogger(__name__)
 pytestmark = pytest.mark.django_db
@@ -87,7 +86,7 @@ def require_shacl_backend():
 
 
 @pytest.fixture
-def workflow_context(load_shacl_asset, api_client):
+def workflow_context(load_shacl_asset, api_client, system_validator_for):
     """Build a minimal SHACL workflow + authenticated API client.
 
     The workflow has a single step using the system SHACL validator
@@ -99,9 +98,7 @@ def workflow_context(load_shacl_asset, api_client):
     user.set_current_org(org)
     grant_role(user, org, RoleCode.EXECUTOR)
 
-    validator = ValidatorFactory(
-        validation_type=ValidationType.SHACL,
-    )
+    validator = system_validator_for(ValidationType.SHACL)
 
     shapes = load_shacl_asset("example_person_shapes.ttl")
     ontology = load_shacl_asset("example_person_ontology.ttl")
@@ -125,7 +122,7 @@ def workflow_context(load_shacl_asset, api_client):
         user=user,
         allowed_file_types=[SubmissionFileType.TEXT],
     )
-    step = WorkflowStepFactory(
+    step = create_workflow_step_with_default_bindings(
         workflow=workflow,
         validator=validator,
         ruleset=ruleset,
@@ -297,7 +294,11 @@ class TestShaclValidation:
 
 
 @pytest.fixture
-def workflow_223p_context(load_shacl_asset, api_client):
+def workflow_223p_context(
+    load_shacl_asset,
+    api_client,
+    system_validator_for,
+):
     """Build the workflow described in the 223P blog post.
 
     Uses the four blog-derived assets in ``tests/assets/shacl/``:
@@ -312,9 +313,7 @@ def workflow_223p_context(load_shacl_asset, api_client):
     user.set_current_org(org)
     grant_role(user, org, RoleCode.EXECUTOR)
 
-    validator = ValidatorFactory(
-        validation_type=ValidationType.SHACL,
-    )
+    validator = system_validator_for(ValidationType.SHACL)
 
     shapes = load_shacl_asset("223p_example_shapes.ttl")
     ontology = load_shacl_asset("223p_example_ontology.ttl")
@@ -352,7 +351,7 @@ def workflow_223p_context(load_shacl_asset, api_client):
         user=user,
         allowed_file_types=[SubmissionFileType.TEXT],
     )
-    step = WorkflowStepFactory(
+    step = create_workflow_step_with_default_bindings(
         workflow=workflow,
         validator=validator,
         ruleset=ruleset,

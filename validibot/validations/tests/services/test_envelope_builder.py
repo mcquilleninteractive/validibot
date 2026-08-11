@@ -703,14 +703,15 @@ class TestEnvelopeStructure:
         """The primary model file should appear in ``input_files``.
 
         Only the model file goes in ``input_files``; weather and other
-        auxiliary files go in ``resource_files``.  The runner treats
-        ``input_files[0]`` as the primary model to simulate.
+        auxiliary files go in ``resource_files``. The runner selects this item
+        by the exact ``primary_model`` port key, never by list position.
         """
         envelope = _build_envelope(
             model_file=_file_identity("gs://test-bucket/model.idf"),
         )
         assert len(envelope.input_files) == 1
         model_file = envelope.input_files[0]
+        assert model_file.port_key == "primary_model"
         assert model_file.uri == "gs://test-bucket/model.idf"
         assert model_file.role == "primary-model"
 
@@ -725,6 +726,7 @@ class TestEnvelopeStructure:
         envelope = _build_envelope(resource_files=[weather])
 
         assert len(envelope.resource_files) == 1
+        assert envelope.resource_files[0].port_key == "weather_file"
         assert envelope.resource_files[0].type == "energyplus_weather"
         assert envelope.resource_files[0].uri == "gs://test-bucket/weather.epw"
 
@@ -866,7 +868,7 @@ class TestEnergyPlusFilePortMaterialization:
             workflow_step=_step,
             io_definition=primary_port,
             source_scope=BindingSourceScope.SUBMISSION_FILE,
-            source_data_path="primary_file_uri",
+            source_data_path="primary",
         )
         StepInputBindingFactory(
             workflow_step=_step,
@@ -916,7 +918,7 @@ class TestEnergyPlusFilePortMaterialization:
             workflow_step=step,
             io_definition=primary_port,
             source_scope=BindingSourceScope.SUBMISSION_FILE,
-            source_data_path="primary_file_uri",
+            source_data_path="primary",
         )
 
         envelope = _build_test_input_envelope(
@@ -1164,7 +1166,7 @@ class TestEnergyPlusFilePortMaterialization:
             workflow_step=step,
             io_definition=primary_port,
             source_scope=BindingSourceScope.SUBMISSION_FILE,
-            source_data_path="primary_file_uri",
+            source_data_path="primary",
         )
         StepInputBindingFactory(
             workflow_step=step,
@@ -1198,13 +1200,13 @@ class TestEnergyPlusFilePortMaterialization:
             workflow_step=step,
             io_definition=primary_port,
             source_scope=BindingSourceScope.SUBMISSION_FILE,
-            source_data_path="primary_file_uri",
+            source_data_path="primary",
         )
         StepInputBindingFactory(
             workflow_step=step,
             io_definition=weather_port,
             source_scope=BindingSourceScope.SUBMISSION_FILE,
-            source_data_path="",
+            source_data_path="weather_file",
         )
 
         envelope = _build_test_input_envelope(
@@ -1242,13 +1244,13 @@ class TestEnergyPlusFilePortMaterialization:
             workflow_step=step,
             io_definition=primary_port,
             source_scope=BindingSourceScope.SUBMISSION_FILE,
-            source_data_path="primary_file_uri",
+            source_data_path="primary",
         )
         StepInputBindingFactory(
             workflow_step=step,
             io_definition=weather_port,
             source_scope=BindingSourceScope.SUBMISSION_FILE,
-            source_data_path="",
+            source_data_path="weather_file",
         )
 
         weather_identity = _file_identity(
@@ -1293,13 +1295,13 @@ class TestEnergyPlusFilePortMaterialization:
             workflow_step=step,
             io_definition=primary_port,
             source_scope=BindingSourceScope.SUBMISSION_FILE,
-            source_data_path="primary_file_uri",
+            source_data_path="primary",
         )
         StepInputBindingFactory(
             workflow_step=step,
             io_definition=weather_port,
             source_scope=BindingSourceScope.SUBMISSION_FILE,
-            source_data_path="",
+            source_data_path="weather_file",
         )
 
         with pytest.raises(ValueError, match="weather_file"):
@@ -1329,13 +1331,13 @@ class TestEnergyPlusFilePortMaterialization:
             workflow_step=step,
             io_definition=primary_port,
             source_scope=BindingSourceScope.SUBMISSION_FILE,
-            source_data_path="primary_file_uri",
+            source_data_path="primary",
         )
         StepInputBindingFactory(
             workflow_step=step,
             io_definition=weather_port,
             source_scope=BindingSourceScope.SUBMISSION_FILE,
-            source_data_path="",
+            source_data_path="weather_file",
         )
 
         with pytest.raises(ValueError, match=r"expected one of \.epw"):
@@ -1373,7 +1375,7 @@ class TestEnergyPlusFilePortMaterialization:
             workflow_step=step,
             io_definition=primary_port,
             source_scope=BindingSourceScope.SUBMISSION_FILE,
-            source_data_path="primary_file_uri",
+            source_data_path="primary",
         )
         StepInputBindingFactory(
             workflow_step=step,
@@ -1415,7 +1417,7 @@ class TestEnergyPlusFilePortMaterialization:
             workflow_step=step,
             io_definition=primary_port,
             source_scope=BindingSourceScope.SUBMISSION_FILE,
-            source_data_path="primary_file_uri",
+            source_data_path="primary",
         )
         StepInputBindingFactory(
             workflow_step=step,
@@ -1458,7 +1460,7 @@ class TestEnergyPlusFilePortMaterialization:
             workflow_step=step,
             io_definition=primary_port,
             source_scope=BindingSourceScope.SUBMISSION_FILE,
-            source_data_path="primary_file_uri",
+            source_data_path="primary",
         )
         StepInputBindingFactory(
             workflow_step=step,
@@ -1506,7 +1508,7 @@ class TestEnergyPlusFilePortMaterialization:
             workflow_step=step,
             io_definition=primary_port,
             source_scope=BindingSourceScope.SUBMISSION_FILE,
-            source_data_path="primary_file_uri",
+            source_data_path="primary",
         )
         StepInputBindingFactory(
             workflow_step=step,
@@ -1546,7 +1548,7 @@ class TestEnergyPlusFilePortMaterialization:
             workflow_step=step,
             io_definition=primary_port,
             source_scope=BindingSourceScope.SUBMISSION_FILE,
-            source_data_path="primary_file_uri",
+            source_data_path="primary",
         )
         StepInputBindingFactory(
             workflow_step=step,
@@ -1637,17 +1639,16 @@ class TestSHACLDataGraphFilePortMaterialization:
     def test_submitted_rdf_data_graph_materializes_with_port_key(self):
         """A submitted Turtle file should populate SHACL ``input_files``.
 
-        The backend still receives the first input file URI, but the envelope
-        now carries ``port_key=data_graph`` so traces, evidence, and future
-        binding UIs can identify the semantic input instead of relying on an
-        implicit SHACL-only convention.
+        The backend selects the exact ``data_graph`` port. List position and
+        descriptive role metadata remain irrelevant to traces, evidence, and
+        workflow binding identity.
         """
         run, step, data_graph_port = _build_shacl_data_graph_run()
         StepInputBindingFactory(
             workflow_step=step,
             io_definition=data_graph_port,
             source_scope=BindingSourceScope.SUBMISSION_FILE,
-            source_data_path="data_graph",
+            source_data_path="primary",
         )
 
         data_graph_identity = _file_identity(
@@ -1764,7 +1765,7 @@ class TestSHACLDataGraphFilePortMaterialization:
             workflow_step=step,
             io_definition=data_graph_port,
             source_scope=BindingSourceScope.SUBMISSION_FILE,
-            source_data_path="data_graph",
+            source_data_path="primary",
         )
 
         with pytest.raises(ValueError, match=r"expected one of \.ttl"):
@@ -1805,7 +1806,7 @@ class TestSchematronXmlDocumentFilePortMaterialization:
             workflow_step=step,
             io_definition=xml_document_port,
             source_scope=BindingSourceScope.SUBMISSION_FILE,
-            source_data_path="xml_document",
+            source_data_path="primary",
         )
 
         xml_identity = _file_identity("file:///validibot/input/invoice.xml")
@@ -1913,7 +1914,7 @@ class TestSchematronXmlDocumentFilePortMaterialization:
             workflow_step=step,
             io_definition=xml_document_port,
             source_scope=BindingSourceScope.SUBMISSION_FILE,
-            source_data_path="xml_document",
+            source_data_path="primary",
         )
 
         with pytest.raises(ValueError, match=r"expected one of \.xml"):
