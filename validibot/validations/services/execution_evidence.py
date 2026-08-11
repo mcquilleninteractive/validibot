@@ -22,13 +22,13 @@ if TYPE_CHECKING:
     from validibot.submissions.models import Submission
     from validibot.workflows.models import WorkflowStep
 
-_PRIMARY_INPUT_ROLES = frozenset(
+_PRIMARY_INPUT_PORT_KEYS = frozenset(
     {
-        "data-graph",
-        "primary-file",
-        "primary-model",
-        "submission",
-        "xml-document",
+        "data_graph",
+        "pdf_document",
+        "portfolio_manager_report",
+        "primary_model",
+        "xml_document",
     },
 )
 _SHA256_HEX_LENGTH = 64
@@ -82,7 +82,7 @@ def _input_file_record(item) -> ManifestExecutionInput:
         channel="input_files",
         name=item.name,
         role=item.role or "",
-        port_key=item.port_key or "",
+        port_key=item.port_key,
         media_type=_enum_value(item.mime_type),
         size_bytes=item.size_bytes,
         sha256=item.sha256,
@@ -96,7 +96,7 @@ def _resource_file_record(item) -> ManifestExecutionInput:
         channel="resource_files",
         name=item.name,
         resource_type=item.type,
-        port_key=item.port_key or "",
+        port_key=item.port_key,
         resource_id=item.id,
         size_bytes=item.size_bytes,
         sha256=item.sha256,
@@ -187,15 +187,14 @@ def _select_primary_input(
     submission_sha256: str,
 ) -> dict[str, Any] | None:
     """Select the envelope item representing the primary submitted content."""
-    primary = [item for item in input_files if item.get("role") in _PRIMARY_INPUT_ROLES]
-    for candidates in (primary, input_files):
-        for item in candidates:
-            if item.get("sha256") == submission_sha256:
-                return item
+    primary = [
+        item for item in input_files if item.get("port_key") in _PRIMARY_INPUT_PORT_KEYS
+    ]
+    for item in primary:
+        if item.get("sha256") == submission_sha256:
+            return item
     if len(primary) == 1:
         return primary[0]
-    if len(input_files) == 1:
-        return input_files[0]
     return None
 
 

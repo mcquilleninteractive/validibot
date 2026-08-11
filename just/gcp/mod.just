@@ -983,7 +983,7 @@ _maybe-deploy-mcp stage:
         set +a
     fi
 
-    just gcp mcp build
+    just gcp mcp build-push
     just gcp mcp deploy "{{stage}}"
 
 # Internal: conditionally run migrations before deploy.

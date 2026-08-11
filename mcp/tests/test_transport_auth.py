@@ -388,7 +388,11 @@ class TestToolIntegration:
         workflow_ref = build_workflow_ref(org_slug=TEST_ORG, workflow_slug="energy-check")
         with respx.mock(assert_all_called=False) as router:
             router.get(f"{API_BASE}/api/v1/mcp/workflows/{workflow_ref}/").respond(
-                json={**SAMPLE_WORKFLOW_FULL, "workflow_ref": workflow_ref, "org_slug": TEST_ORG},
+                json={
+                    **SAMPLE_WORKFLOW_FULL,
+                    "workflow_ref": workflow_ref,
+                    "org_slug": TEST_ORG,
+                },
             )
 
             response = await _call_tool(

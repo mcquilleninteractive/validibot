@@ -451,6 +451,8 @@ def _data_format_from_known_uri(uri: str) -> str:
         return "energyplus_eso"
     if extension == "fmu":
         return SubmissionDataFormat.FMU
+    if extension == "pdf":
+        return SubmissionDataFormat.PDF
     if extension == "xml":
         return SubmissionDataFormat.XML
     if extension == "svrl":

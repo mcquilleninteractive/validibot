@@ -15,29 +15,30 @@ of a commercial package from community source would NOT fail locally — it woul
 only blow up in a real community install. This test is the safety net that
 makes that regression fail here instead.
 
-THE TWO RULES IT ENFORCES
--------------------------
-1. **Pro may only be imported conditionally.** Community code is allowed to
-   integrate with ``validibot_pro`` (e.g. surfacing issued credentials) — but
-   only via imports that do NOT run unconditionally at import time: inside a
-   function, a ``try/except``, or a conditional ``if`` (the sanctioned
-   module-level form is ``if "validibot_pro" in settings.INSTALLED_APPS:`` —
-   see ``config/urls_web.py`` — plus ``if TYPE_CHECKING:`` for type-only
-   imports). A *bare* module-level ``from validibot_pro import …`` would raise
-   ``ModuleNotFoundError`` at import time on a community-only install, so that
-   shape is forbidden.
-2. **Cloud must never be referenced at all.** The one-way rule (see
+THE THREE RULES IT ENFORCES
+---------------------------
+1. **The existing Pro-import baseline cannot grow.** Older credential and URL
+   integration paths use deferred imports of ``validibot_pro``. Every current
+   occurrence is recorded below so new imports fail CI and removed imports
+   require the baseline to ratchet downward. New commercial integrations use
+   community-owned registries, protocols, or hooks instead.
+2. **Allowlisted Pro imports must remain conditional.** A bare module-level
+   ``from validibot_pro import …`` would raise ``ModuleNotFoundError`` on a
+   community-only installation, so even a known integration path must remain
+   inside a function, ``try`` block, or explicit conditional.
+3. **Cloud must never be referenced at all.** The one-way rule (see
    ``validibot-cloud/CLAUDE.md``): cloud may import community, never the
    reverse. So *any* ``validibot_cloud`` import in community source — lazy or
    not — is a violation.
 
-If this test fails, move the offending import inside the function that uses it
-(for Pro) or remove the community→cloud dependency entirely (for Cloud).
+If this test fails, move the commercial behavior behind a community-owned
+extension interface or remove the community→cloud dependency entirely.
 """
 
 from __future__ import annotations
 
 import ast
+from collections import Counter
 from pathlib import Path
 
 # Repo root is the parent of this ``tests/`` directory.
@@ -53,6 +54,48 @@ _SCAN_ROOTS = (
 
 _PRO_PREFIX = "validibot_pro"
 _CLOUD_PREFIX = "validibot_cloud"
+
+# Temporary migration baseline. Keys are stable ``(path, imported module)``
+# pairs rather than line numbers so harmless formatting does not churn the
+# contract. Counts preserve repeated imports from the same module in one file.
+# Removing an import must lower this baseline in the same change.
+_ALLOWED_PRO_IMPORTS = Counter(
+    {
+        ("config/urls_web.py", "validibot_pro.urls"): 1,
+        (
+            "validibot/validations/api_views.py",
+            "validibot_pro.credentials.models",
+        ): 1,
+        (
+            "validibot/validations/credential_utils.py",
+            "validibot_pro.credentials.models",
+        ): 1,
+        (
+            "validibot/validations/management/commands/delete_validation_runs.py",
+            "validibot_pro.credentials.models",
+        ): 4,
+        (
+            "validibot/validations/serializers.py",
+            "validibot_pro.credentials.models",
+        ): 1,
+        (
+            "validibot/validations/services/evidence_bundle.py",
+            "validibot_pro.credentials.models",
+        ): 1,
+        (
+            "validibot/validations/views/runs.py",
+            "validibot_pro.credentials.models",
+        ): 1,
+        (
+            "validibot/workflows/views/management.py",
+            "validibot_pro.credentials.models",
+        ): 1,
+        (
+            "validibot/workflows/views/management.py",
+            "validibot_pro.credentials.workflow_digest",
+        ): 1,
+    },
+)
 
 
 def _is_excluded(path: Path) -> bool:
@@ -87,9 +130,9 @@ def _is_deferred(node: ast.AST) -> bool:
 
     * a **function** body — only runs when that code path executes;
     * a ``try`` block — guarded against the package being absent;
-    * an ``if`` block — conditional. The sanctioned module-level pattern is
-      ``if "validibot_pro" in settings.INSTALLED_APPS:`` (see
-      ``config/urls_web.py``), and ``if TYPE_CHECKING:`` for type-only imports.
+    * an ``if`` block — conditional. Existing allowlisted module-level examples
+      include ``if "validibot_pro" in settings.INSTALLED_APPS:`` (see
+      ``config/urls_web.py``) and ``if TYPE_CHECKING:`` for type-only imports.
 
     Only a *bare, unconditional* module-level import would always execute (and
     therefore crash) when Pro is absent, so that is the only shape we forbid.
@@ -117,6 +160,7 @@ def _imported_modules(node: ast.Import | ast.ImportFrom):
 def _commercial_import_violations() -> list[str]:
     """Collect every community import that breaks the open-core boundary."""
     violations: list[str] = []
+    observed_pro_imports: Counter[tuple[str, str]] = Counter()
     for path in _iter_community_py_files():
         try:
             tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
@@ -128,6 +172,7 @@ def _commercial_import_violations() -> list[str]:
                 child.parent = parent  # type: ignore[attr-defined]
 
         rel = path.relative_to(_REPO_ROOT)
+        rel_text = rel.as_posix()
         for node in ast.walk(tree):
             if not isinstance(node, (ast.Import, ast.ImportFrom)):
                 continue
@@ -140,20 +185,36 @@ def _commercial_import_violations() -> list[str]:
                 elif _references(module, _PRO_PREFIX) and not _is_deferred(node):
                     violations.append(
                         f"{rel}:{node.lineno}: top-level import of {module!r}; "
-                        "move it inside the function that uses it (Pro imports "
-                        "must be deferred so community installs without Pro)",
+                        "commercial providers must register through a "
+                        "community-owned extension interface",
                     )
+                elif _references(module, _PRO_PREFIX):
+                    observed_pro_imports[(rel_text, module)] += 1
+
+    for (path, module), count in (observed_pro_imports - _ALLOWED_PRO_IMPORTS).items():
+        allowed = _ALLOWED_PRO_IMPORTS[(path, module)]
+        violations.append(
+            f"{path}: found {count + allowed} deferred imports of {module!r}, "
+            f"but the migration baseline allows {allowed}; use a "
+            "community-owned extension interface",
+        )
+    for (path, module), count in (_ALLOWED_PRO_IMPORTS - observed_pro_imports).items():
+        observed = observed_pro_imports[(path, module)]
+        violations.append(
+            f"{path}: Pro-import debt decreased for {module!r}: baseline allows "
+            f"{count + observed}, observed {observed}; ratchet "
+            "_ALLOWED_PRO_IMPORTS downward",
+        )
     return violations
 
 
-def test_community_never_imports_commercial_packages_at_module_level():
-    """Community source must not hard-depend on Pro/Cloud at import time.
+def test_community_commercial_imports_do_not_exceed_migration_baseline():
+    """Community source must not add knowledge of downstream packages.
 
-    This pins the open-core guarantee: a community-only install (no
-    ``validibot_pro`` / ``validibot_cloud`` on the path) can import every module
-    and boot. Deferred Pro imports are allowed; cloud imports are not. A failure
-    here lists the exact ``file:line`` to fix — and would otherwise have slipped
-    through because our dev venv has the commercial packages installed.
+    Existing deferred Pro imports remain community-install safe but are tracked
+    debt, not precedent. Cloud imports and unconditional Pro imports remain
+    forbidden. A failure identifies either new debt or a stale baseline that
+    should be ratcheted after an import was removed.
     """
     violations = _commercial_import_violations()
     detail = "\n  ".join(violations)

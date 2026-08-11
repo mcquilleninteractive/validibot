@@ -339,6 +339,7 @@ class PdfPayloadSelectorStepConfig(BaseModel):
     af_relationship: str = ""
     rich_media_asset_name: str = ""
     xml_root_qname: str = ""
+    step_file_schema: list[str] = Field(default_factory=list)
 
     model_config = ConfigDict(extra="forbid")
 
@@ -346,6 +347,7 @@ class PdfPayloadSelectorStepConfig(BaseModel):
 class PdfStepConfig(ContainerExecutionStepConfig):
     """Semantic configuration for isolated PDF package inspection."""
 
+    execution_timeout_seconds: int | None = Field(default=None, ge=1, le=300)
     profile: Literal["inventory_v1", "safe_static_package_v1"] = "inventory_v1"
     emit_extracted_files_bundle: bool = False
     selected_xml: PdfPayloadSelectorStepConfig | None = None

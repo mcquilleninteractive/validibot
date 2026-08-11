@@ -726,9 +726,9 @@ def launch_energyplus_validation(
         callback_url = build_validation_callback_url()
         callback_credentials = _issue_callback_credentials_for_step(current_step_run)
 
-        # 4. Build typed input envelope. The shared builder resolves declared
-        # file ports when present and falls back to the historical
-        # primary_file_uri/resource_files path for unsynced dev rows.
+        # 4. Build the typed input envelope exclusively through the validator's
+        # declared file ports. ``primary_file_uri`` is the internal identity
+        # supplied to the submission-file resolver for ``primary_model``.
         input_file_uris = {"primary_file_uri": model_file}
         input_file_uris.update(
             upload_submitted_input_files_to_gcs(

@@ -23,11 +23,7 @@ from validibot_mcp.client import (
     start_authenticated_validation_run,
 )
 
-from .conftest import (
-    SAMPLE_API_KEY,
-    SAMPLE_RUN_PENDING,
-    SAMPLE_WORKFLOW_FULL,
-)
+from .conftest import SAMPLE_API_KEY, SAMPLE_RUN_PENDING, SAMPLE_WORKFLOW_FULL
 
 ORG = "acme-corp"
 

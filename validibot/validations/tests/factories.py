@@ -17,6 +17,7 @@ from validibot.validations.constants import ResourceFileType
 from validibot.validations.constants import RulesetType
 from validibot.validations.constants import Severity
 from validibot.validations.constants import StepStatus
+from validibot.validations.constants import ValidationContinuationState
 from validibot.validations.constants import ValidationRunSource
 from validibot.validations.constants import ValidationRunStatus
 from validibot.validations.constants import ValidationType
@@ -29,6 +30,7 @@ from validibot.validations.models import Ruleset
 from validibot.validations.models import RulesetAssertion
 from validibot.validations.models import ValidationFinding
 from validibot.validations.models import ValidationRun
+from validibot.validations.models import ValidationRunContinuation
 from validibot.validations.models import ValidationStepRun
 from validibot.validations.models import Validator
 from validibot.validations.models import ValidatorResourceFile
@@ -354,6 +356,35 @@ class CallbackReceiptFactory(DjangoModelFactory):
     result_uri = factory.LazyAttribute(
         lambda o: f"gs://bucket/runs/{o.validation_run.id}/output.json"
     )
+
+
+class ValidationRunContinuationFactory(DjangoModelFactory):
+    """Build a continuation with one internally consistent callback graph."""
+
+    class Meta:
+        model = ValidationRunContinuation
+
+    completed_step_run = factory.SubFactory(
+        ValidationStepRunFactory,
+        status=StepStatus.PASSED,
+        validation_run__status=ValidationRunStatus.RUNNING,
+    )
+    validation_run = factory.LazyAttribute(
+        lambda obj: obj.completed_step_run.validation_run,
+    )
+    callback_receipt = factory.LazyAttribute(
+        lambda obj: CallbackReceiptFactory(
+            validation_run=obj.validation_run,
+            execution_attempt=ExecutionAttemptFactory(
+                step_run=obj.completed_step_run,
+                state=ExecutionAttemptState.COMPLETED,
+            ),
+        ),
+    )
+    resume_from_step = factory.LazyAttribute(
+        lambda obj: obj.completed_step_run.step_order,
+    )
+    state = ValidationContinuationState.PENDING
 
 
 class ValidatorResourceFileFactory(DjangoModelFactory):

@@ -126,7 +126,8 @@ set, the MCP container listens on `http://localhost:8001`.
 For tests:
 
 ```bash
-just mcp test          # ruff + pytest, fully mocked, no GCP calls
+just mcp check         # lock + format + lint + pytest + container contract
+just mcp test          # pytest + container contract, fully mocked, no GCP calls
 just mcp test-e2e      # hits a live MCP server, requires .envs/.local/.test
 ```
 
@@ -146,10 +147,14 @@ just gcp mcp setup prod
 # handles x402; payment config lives in cloud Django's .django.)
 just gcp deploy-all prod    # web + worker + scheduler + MCP
 
-# Or surgically:
-just gcp mcp build
+# Or surgically (the command name makes registry publication explicit):
+just gcp mcp build-push
 just gcp mcp deploy prod
 ```
+
+For local image work that must not publish anything, use `just mcp
+build-local`. The older `just mcp build` spelling remains a compatibility alias
+for `build-push`; new scripts should use the explicit command.
 
 For docker-compose self-hosters, MCP rides along when
 `ENABLE_MCP_SERVER=true` is set in

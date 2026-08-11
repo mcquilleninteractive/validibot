@@ -103,7 +103,11 @@ class TestGetWorkflowDetailsTool:
             lambda: "user-sub-123",
         )
         mock_api.get(f"/api/v1/mcp/workflows/{workflow_ref}/").respond(
-            json={**SAMPLE_WORKFLOW_FULL, "workflow_ref": workflow_ref, "org_slug": ORG},
+            json={
+                **SAMPLE_WORKFLOW_FULL,
+                "workflow_ref": workflow_ref,
+                "org_slug": ORG,
+            },
         )
 
         result = await get_workflow_details(workflow_ref=workflow_ref)

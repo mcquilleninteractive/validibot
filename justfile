@@ -226,13 +226,120 @@ test *args:
     source ./set-env.sh >/dev/null 2>&1 || true
     exec .venv/bin/pytest {{args}}
 
+# Verify both Python lockfiles without changing them.
+lock-check:
+    uv lock --check
+    cd mcp && uv lock --check
+
+# Lint Django application Python; MCP owns an independent stricter lint recipe.
+lint:
+    uv run --frozen --group dev ruff check --exclude '*.md' .
+
+# Verify Python formatting without changing files.
+format-check:
+    uv run --frozen --group dev ruff format --check --exclude '*.md' .
+
 # Enforce the ratcheting production-code mypy baseline used by CI.
 typecheck:
     #!/usr/bin/env bash
     set -euo pipefail
     cd "{{justfile_directory()}}"
     source ./set-env.sh >/dev/null 2>&1 || true
-    exec uv run python scripts/check_mypy_baseline.py
+    exec uv run --frozen --group dev python scripts/check_mypy_baseline.py
+
+# Verify frontend types, tests, production bundles, and bundle freshness.
+frontend-check:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # The build writes normal generated targets. Stale targets remain visible
+    # for the developer to review and commit.
+    npm ci
+    npm run typecheck
+    npm test -- --passWithNoTests=false
+    npm run build
+    CHANGES="$(git status --porcelain -- validibot/static/css validibot/static/js)"
+    if [[ -n "$CHANGES" ]]; then
+        echo "Error: Committed frontend bundles are stale. Review the rebuilt files:"
+        echo "$CHANGES"
+        exit 1
+    fi
+
+# Audit the exact locked runtime sets for Django/self-hosting and MCP.
+audit:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    AUDIT_DIR="$(mktemp -d)"
+    trap 'rm -rf "$AUDIT_DIR"' EXIT
+
+    uv export --frozen --extra docker-runner \
+        --no-emit-project \
+        --no-emit-local \
+        --quiet \
+        --format requirements-txt \
+        --output-file "$AUDIT_DIR/validibot.txt"
+    uvx --from pip-audit==2.10.1 pip-audit \
+        --requirement "$AUDIT_DIR/validibot.txt" \
+        --require-hashes \
+        --disable-pip \
+        --strict
+
+    (
+        cd mcp
+        uv export --frozen \
+            --no-emit-project \
+            --quiet \
+            --format requirements-txt \
+            --output-file "$AUDIT_DIR/mcp.txt"
+    )
+    uvx --from pip-audit==2.10.1 pip-audit \
+        --requirement "$AUDIT_DIR/mcp.txt" \
+        --require-hashes \
+        --disable-pip \
+        --strict
+
+# Run the complete local integration gate.
+check: lock-check format-check lint typecheck test frontend-check
+    just mcp check
+
+# Require the exact main-branch commit to have a successful CI workflow.
+_require-release-ci:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    gh auth status >/dev/null
+    REPO="$(gh repo view --json nameWithOwner --jq .nameWithOwner)"
+    HEAD_SHA="$(git rev-parse HEAD)"
+    RUN_INFO="$(
+        gh run list \
+            --repo "$REPO" \
+            --workflow ci.yml \
+            --branch main \
+            --commit "$HEAD_SHA" \
+            --event push \
+            --limit 1 \
+            --json databaseId,status,conclusion,url \
+            --jq 'if length == 0 then "" else .[0] | "\(.databaseId)|\(.status)|\(.conclusion // "")|\(.url)" end'
+    )"
+
+    if [[ -z "$RUN_INFO" ]]; then
+        echo "Error: No main-branch CI run exists for $HEAD_SHA."
+        echo "Push main and wait for CI before releasing."
+        exit 1
+    fi
+
+    IFS='|' read -r RUN_ID RUN_STATUS RUN_CONCLUSION RUN_URL <<< "$RUN_INFO"
+    if [[ "$RUN_STATUS" != "completed" ]]; then
+        echo "Waiting for CI run $RUN_ID to finish: $RUN_URL"
+        gh run watch "$RUN_ID" --repo "$REPO" --exit-status
+    elif [[ "$RUN_CONCLUSION" != "success" ]]; then
+        echo "Error: CI did not succeed for $HEAD_SHA: $RUN_URL"
+        exit 1
+    fi
+
+    echo "CI succeeded for $HEAD_SHA: $RUN_URL"
+
+# Run every local and remote release prerequisite without creating a tag.
+release-check: check audit _require-release-ci
 
 # Community + validibot-pro. No args: run Pro's own suite (its settings). With
 # args: run those paths under config.settings.test_pro (Pro in INSTALLED_APPS).
@@ -418,6 +525,16 @@ release VERSION:
                 echo "✓ validibot-shared is at latest ($SHARED_LATEST)"
             fi
         fi
+    fi
+
+    echo ""
+    echo "Running the full release gate..."
+    just release-check
+
+    if [[ -n $(git status --porcelain) ]]; then
+        echo "✗ Release checks changed the working tree. Review and commit those changes first."
+        git status --short
+        exit 1
     fi
 
     echo ""

@@ -32,12 +32,12 @@
 #
 # First-time setup:
 #   just mcp setup prod
-#   just mcp build
+#   just mcp build-push
 #   just mcp deploy prod
 #   just mcp lb-add prod mcp.your-domain.example
 #
 # Subsequent deploys:
-#   just mcp build
+#   just mcp build-push
 #   just mcp deploy prod
 #
 # =============================================================================
@@ -158,13 +158,15 @@ fi
 
 
 # ── Build ─────────────────────────────────────────────────────────────────
-# Builds the MCP Docker image and pushes it to Artifact Registry.
+# Local builds and registry publication are separate operations. Deployment
+# uses ``build-push``; ``build`` remains as a compatibility alias so existing
+# operator scripts keep working.
 #
 # Build context is ``mcp/`` (the sibling FastMCP project); the Dockerfile
 # lives at ``compose/production/mcp/Dockerfile`` so it shares a directory
 # with the other production Dockerfiles (django, postgres).
 
-build: _require-gcp-config
+build-local:
     #!/usr/bin/env bash
     set -euo pipefail
     {{_mcp_enabled_gate}}
@@ -182,24 +184,49 @@ build: _require-gcp-config
         fi
     fi
 
-    echo "Building MCP image: {{mcp_image}}:{{git_sha}}"
+    echo "Building local MCP image: validibot-mcp:{{git_sha}}"
 
     # --platform linux/amd64 matches Cloud Run's runtime even when
     # building on Apple Silicon. --provenance=false avoids multi-platform
     # manifest issues with the simpler single-arch push.
     docker build --platform linux/amd64 --provenance=false \
         -f compose/production/mcp/Dockerfile \
+        -t validibot-mcp:{{git_sha}} \
+        -t validibot-mcp:latest \
+        mcp/
+
+    echo "Local MCP image ready: validibot-mcp:{{git_sha}}"
+
+# Build registry-tagged image bytes and push them to Artifact Registry.
+build-push: _require-gcp-config
+    #!/usr/bin/env bash
+    set -euo pipefail
+    {{_mcp_enabled_gate}}
+
+    if [ "${GCP_ALLOW_DIRTY:-0}" != "1" ]; then
+        if [ -n "$(git status --porcelain -- mcp/ compose/production/mcp/)" ]; then
+            echo "Error: Uncommitted changes in mcp/ or compose/production/mcp/."
+            echo "Commit or stash first, or set GCP_ALLOW_DIRTY=1."
+            exit 1
+        fi
+    fi
+
+    echo "Building MCP image for Artifact Registry: {{mcp_image}}:{{git_sha}}"
+    docker build --platform linux/amd64 --provenance=false \
+        -f compose/production/mcp/Dockerfile \
         -t {{mcp_image}}:{{git_sha}} \
         -t {{mcp_image}}:latest \
         mcp/
 
-    echo ""
-    echo "Pushing to Artifact Registry..."
+    echo "Pushing MCP image to Artifact Registry..."
     docker push {{mcp_image}}:{{git_sha}}
     docker push {{mcp_image}}:latest
 
     echo ""
     echo "MCP image ready: {{mcp_image}}:{{git_sha}}"
+
+# Compatibility alias. Prefer build-local or build-push in new automation.
+build: build-push
 
 
 # ── Setup (one-time) ──────────────────────────────────────────────────────
@@ -338,7 +365,7 @@ setup stage: _require-gcp-config
     echo "Next steps:"
     echo "  1. Create .envs/.production/.google-cloud/.mcp with secrets"
     echo "  2. just mcp secrets {{stage}}"
-    echo "  3. just mcp build"
+    echo "  3. just mcp build-push"
     echo "  4. just mcp deploy {{stage}}"
 
 
@@ -852,12 +879,26 @@ status stage: _require-gcp-config
 # Unit/integration tests run locally with mocked APIs. E2E tests hit the
 # live deployed service with a real API token.
 
+lock-check:
+    cd mcp && uv lock --check
+
+lint:
+    cd mcp && uv run --frozen --extra dev ruff check src/ tests/
+
+format-check:
+    cd mcp && uv run --frozen --extra dev ruff format --check src/ tests/
+
+format:
+    cd mcp && uv run --frozen --extra dev ruff format src/ tests/
+    cd mcp && uv run --frozen --extra dev ruff check --fix src/ tests/
+
 test:
     #!/usr/bin/env bash
     set -euo pipefail
     cd mcp
-    uv run ruff check src/ tests/
-    uv run pytest -xvs
+    uv run --frozen --extra dev pytest -xvs tests/
+
+check: lock-check format-check lint test
 
 # Run E2E tests against the live MCP server.
 # Requires .envs/.local/.test with VALIDIBOT_E2E_TOKEN and VALIDIBOT_E2E_ORG_SLUG.
@@ -879,4 +920,4 @@ test-e2e:
     set +a
 
     cd mcp
-    uv run pytest tests/test_e2e.py -xvs
+    uv run --frozen --extra dev pytest tests/test_e2e.py -xvs

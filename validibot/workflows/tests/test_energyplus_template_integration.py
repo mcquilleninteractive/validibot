@@ -2200,8 +2200,8 @@ def _launcher_mocks():
         "upload_file": patch(f"{_PATCH_PREFIX}.upload_file"),
         "upload_envelope": patch(f"{_PATCH_PREFIX}.upload_envelope"),
         "stored_resource_identity": patch(
-            "validibot.validations.services.cloud_run.envelope_builder."
-            "_stored_step_resource_identity",
+            "validibot.validations.services.resolved_files."
+            "_stored_workflow_resource_identity",
             side_effect=_stored_resource_identity,
         ),
         "copy_gcs_file_generation": patch(
@@ -2288,7 +2288,18 @@ def _make_launcher_fixtures(
     Returns a dict with keys: ``run``, ``validator``, ``submission``,
     ``step``, ``step_run``.
     """
+    from validibot.submissions.constants import SubmissionDataFormat
     from validibot.submissions.tests.factories import SubmissionFactory
+    from validibot.validations.constants import ArtifactKind
+    from validibot.validations.constants import BindingSourceScope
+    from validibot.validations.constants import CatalogValueType
+    from validibot.validations.constants import EnvelopeChannel
+    from validibot.validations.constants import ResourceFileType
+    from validibot.validations.constants import StepIODirection
+    from validibot.validations.constants import StepIOMedium
+    from validibot.validations.constants import StepIOSourceKind
+    from validibot.validations.tests.factories import StepInputBindingFactory
+    from validibot.validations.tests.factories import StepIODefinitionFactory
 
     # 1. Validator (EnergyPlus type)
     validator = ValidatorFactory(
@@ -2310,6 +2321,74 @@ def _make_launcher_fixtures(
         step=step,
         role=WorkflowStepResource.WEATHER_FILE,
         validator_resource_file=weather_vrf,
+    )
+
+    # Launcher fixtures use the same validator-owned catalog and per-step
+    # bindings as a synced installation. This keeps the integration test on
+    # the single declared-port path used in production.
+    primary_model_port = StepIODefinitionFactory(
+        validator=validator,
+        workflow_step=None,
+        contract_key="primary_model",
+        native_name="primary_model",
+        direction=StepIODirection.INPUT,
+        source_kind=StepIOSourceKind.PAYLOAD_PATH,
+        data_type=CatalogValueType.ARTIFACT_REF,
+        io_medium=StepIOMedium.ARTIFACT,
+        artifact_kind=ArtifactKind.FILE,
+        media_type="application/vnd.energyplus.idf",
+        data_format=SubmissionDataFormat.ENERGYPLUS_IDF,
+        accepted_data_formats=[
+            SubmissionDataFormat.ENERGYPLUS_IDF,
+            SubmissionDataFormat.ENERGYPLUS_EPJSON,
+        ],
+        accepted_media_types=[
+            "application/vnd.energyplus.idf",
+            "application/vnd.energyplus.epjson",
+        ],
+        metadata={"accepted_extensions": ["idf", "epjson", "json"]},
+        envelope_channel=EnvelopeChannel.INPUT_FILES,
+        role="primary-model",
+        min_items=1,
+        max_items=1,
+        allowed_source_scopes=[
+            BindingSourceScope.SUBMISSION_FILE,
+            BindingSourceScope.UPSTREAM_ARTIFACT,
+        ],
+    )
+    weather_file_port = StepIODefinitionFactory(
+        validator=validator,
+        workflow_step=None,
+        contract_key="weather_file",
+        native_name="weather_file",
+        direction=StepIODirection.INPUT,
+        source_kind=StepIOSourceKind.PAYLOAD_PATH,
+        data_type=CatalogValueType.ARTIFACT_REF,
+        io_medium=StepIOMedium.ARTIFACT,
+        artifact_kind=ArtifactKind.FILE,
+        media_type="application/vnd.energyplus.epw",
+        data_format=ResourceFileType.ENERGYPLUS_WEATHER,
+        accepted_data_formats=[ResourceFileType.ENERGYPLUS_WEATHER],
+        accepted_media_types=["application/vnd.energyplus.epw"],
+        metadata={"accepted_extensions": ["epw"]},
+        envelope_channel=EnvelopeChannel.RESOURCE_FILES,
+        resource_type=ResourceFileType.ENERGYPLUS_WEATHER,
+        role="weather",
+        min_items=1,
+        max_items=1,
+        allowed_source_scopes=[BindingSourceScope.WORKFLOW_RESOURCE],
+    )
+    StepInputBindingFactory(
+        workflow_step=step,
+        io_definition=primary_model_port,
+        source_scope=BindingSourceScope.SUBMISSION_FILE,
+        source_data_path="primary_file_uri",
+    )
+    StepInputBindingFactory(
+        workflow_step=step,
+        io_definition=weather_file_port,
+        source_scope=BindingSourceScope.WORKFLOW_RESOURCE,
+        source_data_path=ResourceFileType.ENERGYPLUS_WEATHER,
     )
 
     # 4. Optionally add a template resource (step-owned file)
@@ -2355,19 +2434,13 @@ def _make_launcher_fixtures(
 
 
 class TestLauncherDirectMode:
-    """Tests for the direct (non-template) code path in the launcher.
-
-    Direct mode is the original behavior: the submission is a complete
-    IDF or epJSON file that gets uploaded directly to GCS.  These tests
-    verify that the template mode changes didn't break existing behavior.
-    """
+    """Tests for complete IDF or epJSON submissions that need no template."""
 
     def test_direct_mode_uploads_submission_and_returns_pending(self):
         """When no MODEL_TEMPLATE resource exists, the submission is uploaded
         as-is to GCS and the launcher returns a pending result.
 
-        This is the regression guard for the template mode refactor — the
-        original direct path must remain unchanged.
+        Direct submissions and resolved templates share this launch boundary.
         """
         from validibot.validations.services.cloud_run.launcher import (
             launch_energyplus_validation,

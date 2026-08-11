@@ -367,20 +367,24 @@ Run `validibot doctor` to get a stage-aware advisory:
 If a callback never reaches Django, the durable attempt remains the authority.
 The `cleanup_stuck_runs` management command handles both execution shapes:
 
-1. The command runs every 10 minutes via Cloud Scheduler
-2. It finds runs stuck in `RUNNING` past `VALIDATOR_TIMEOUT_SECONDS` (default:
+1. The command runs every 10 minutes via Cloud Scheduler.
+2. It first repairs callback-driven `ValidationRunContinuation` rows whose
+   dispatch or execution owner disappeared. These rows are committed with the
+   callback result, so a worker process can die before enqueue without losing
+   the remaining workflow.
+3. It finds runs stuck in `RUNNING` past `VALIDATOR_TIMEOUT_SECONDS` (default:
    3600 seconds / 60 minutes)
-3. It first tries to load and verify the exact expected output generation. A
+4. It first tries to load and verify the exact expected output generation. A
    valid output is processed through the same trusted callback service
-4. For Jobs, it may also query the provider execution status and cancel the
+5. For Jobs, it may also query the provider execution status and cancel the
    execution after the absolute deadline
-5. For Services, status lookup is explicitly unsupported. The watchdog retries
+6. For Services, status lookup is explicitly unsupported. The watchdog retries
    transient output/provider errors only within a bounded grace period; the
    absolute attempt deadline still wins
-6. Service cancellation deletes the deterministic provider task when possible
+7. Service cancellation deletes the deterministic provider task when possible
    and durably fences the attempt. A request already executing may finish, but
    its late output/callback cannot change the terminal decision
-7. Each request child starts in a new operating-system session. A hard deadline
+8. Each request child starts in a new operating-system session. A hard deadline
    terminates the complete process group, escalating from `SIGTERM` to
    `SIGKILL`, so domain-runner grandchildren cannot leak into the next request
 

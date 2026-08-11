@@ -1,7 +1,9 @@
 """
-Management command to mark stuck validation runs as failed.
+Management command to repair durable continuations and time out stuck runs.
 
-Validation runs can become "stuck" in RUNNING status if a validator container
+The command first redelivers callback-driven workflow continuations whose
+dispatch or execution owner disappeared. It then handles validation runs that
+become "stuck" in RUNNING status if a validator container
 crashes without sending a callback, or if the callback fails to reach the
 worker service. This watchdog command finds runs that have been in RUNNING
 status longer than a threshold and handles them.
@@ -85,7 +87,7 @@ def get_default_timeout_minutes() -> int:
 
 
 class Command(BaseCommand):
-    help = "Mark validation runs stuck in RUNNING status as TIMED_OUT."
+    help = "Repair durable continuations and time out stuck validation runs."
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -110,6 +112,15 @@ class Command(BaseCommand):
             help="Maximum number of runs to process per invocation (default: 100)",
         )
 
+    @staticmethod
+    def _repair_continuations(*, limit: int, dry_run: bool):
+        """Run the operation-specific durable-work repair pass."""
+        from validibot.validations.services.validation_continuation import (
+            repair_validation_run_continuations,
+        )
+
+        return repair_validation_run_continuations(limit=limit, dry_run=dry_run)
+
     def handle(self, *args, **options):
         timeout_minutes = options["timeout_minutes"]
         if timeout_minutes is None:
@@ -118,6 +129,30 @@ class Command(BaseCommand):
             raise CommandError("--timeout-minutes must be greater than zero")
         dry_run = options["dry_run"]
         batch_size = options["batch_size"]
+        if batch_size <= 0:
+            raise CommandError("--batch-size must be greater than zero")
+
+        continuation_report = self._repair_continuations(
+            limit=batch_size,
+            dry_run=dry_run,
+        )
+        if dry_run:
+            self.stdout.write(
+                f"[DRY RUN] Found {continuation_report.examined} durable "
+                "continuation(s) eligible for repair."
+            )
+        elif continuation_report.examined:
+            self.stdout.write(
+                self.style.SUCCESS(
+                    "Continuation repair: "
+                    f"examined={continuation_report.examined}, "
+                    f"dispatched={continuation_report.dispatched}, "
+                    f"already_dispatched={continuation_report.already_dispatched}, "
+                    f"busy={continuation_report.busy}, "
+                    f"not_required={continuation_report.not_required}, "
+                    f"failed={continuation_report.failed}."
+                )
+            )
 
         timeout = timedelta(minutes=timeout_minutes)
         now = timezone.now()

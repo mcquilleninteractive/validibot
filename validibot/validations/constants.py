@@ -165,6 +165,30 @@ class ExecutionAttemptState(TextChoices):
     TIMED_OUT = "TIMED_OUT", _("Timed out")
 
 
+class ValidationContinuationState(TextChoices):
+    """Lifecycle of one durable request to resume a validation run.
+
+    A continuation is committed with the callback result that requires it.
+    Queue delivery is deliberately separate: PostgreSQL records the decision,
+    while Celery or Cloud Tasks provides at-least-once transport.
+    """
+
+    PENDING = "PENDING", _("Pending dispatch")
+    DISPATCHING = "DISPATCHING", _("Dispatching")
+    DISPATCHED = "DISPATCHED", _("Dispatched")
+    EXECUTING = "EXECUTING", _("Executing")
+    COMPLETED = "COMPLETED", _("Completed")
+    NOT_REQUIRED = "NOT_REQUIRED", _("No longer required")
+
+
+VALIDATION_CONTINUATION_TERMINAL_STATES = frozenset(
+    {
+        ValidationContinuationState.COMPLETED,
+        ValidationContinuationState.NOT_REQUIRED,
+    }
+)
+
+
 EXECUTION_ATTEMPT_TERMINAL_STATES = frozenset(
     {
         ExecutionAttemptState.COMPLETED,

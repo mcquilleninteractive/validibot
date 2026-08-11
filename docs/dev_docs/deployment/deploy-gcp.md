@@ -368,7 +368,7 @@ just gcp mcp secrets prod      # only .mcp → mcp-env
 just gcp deploy-all prod
 
 # MCP-only deploy — useful for hotfixing just the MCP image
-just gcp mcp build
+just gcp mcp build-push
 just gcp mcp deploy prod
 ```
 

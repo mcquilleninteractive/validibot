@@ -88,12 +88,19 @@ class CeleryDispatcher(TaskDispatcher):
                 "validation_run_id": str(request.validation_run_id),
                 "user_id": request.user_id,
                 "resume_from_step": request.resume_from_step,
+                "continuation_id": (
+                    str(request.continuation_id)
+                    if request.continuation_id is not None
+                    else None
+                ),
             }
 
             # Generate a deterministic task ID upfront so we can return it
             # even when deferring task dispatch until transaction commit.
             # This allows callers to track the task regardless of timing.
-            task_id = f"task-{request.validation_run_id}-{uuid.uuid4().hex[:8]}"
+            task_id = request.task_id or (
+                f"task-{request.validation_run_id}-{uuid.uuid4().hex[:8]}"
+            )
 
             # Check if we're in eager mode (tests)
             if current_app.conf.task_always_eager:

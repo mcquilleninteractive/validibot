@@ -13,7 +13,6 @@ from unittest.mock import patch
 import pytest
 from django.test import override_settings
 from validibot_shared.canonicalization import compute_callback_nonce_commitment
-from validibot_shared.validations.envelopes import ValidationCallback
 from validibot_shared.validations.envelopes import ValidationStatus
 
 from validibot.validations.constants import ExecutionAttemptState
@@ -34,6 +33,9 @@ from validibot.validations.services.execution_attempts import (
     CallbackCredentialsAlreadyIssuedError,
 )
 from validibot.validations.services.execution_attempts import build_attempt_callback_id
+from validibot.validations.services.execution_attempts import (
+    build_callback_nonce_verifier,
+)
 from validibot.validations.services.execution_attempts import (
     get_or_create_execution_attempt,
 )
@@ -98,14 +100,14 @@ class TestExecutionAttemptWriter:
         """A crash between provider completion and step finalization stays safe."""
         attempt = ExecutionAttemptFactory(state=ExecutionAttemptState.COMPLETED)
 
-        step_run, should_execute = StepOrchestrator()._start_step_run(
+        admission = StepOrchestrator()._start_step_run(
             validation_run=attempt.step_run.validation_run,
             workflow_step=attempt.step_run.workflow_step,
         )
 
-        assert step_run == attempt.step_run
-        assert should_execute is False
-        assert step_run.execution_attempts.count() == 1
+        assert admission.step_run == attempt.step_run
+        assert admission.disposition.name == "IN_PROGRESS"
+        assert admission.step_run.execution_attempts.count() == 1
 
     def test_callback_id_resolves_only_inside_its_own_run(self):
         """An opaque callback key cannot be replayed against another tenant run."""
@@ -519,18 +521,16 @@ class TestAttemptCallbackCompletion:
         attempt = ExecutionAttemptFactory(
             state=ExecutionAttemptState.RUNNING,
             output_envelope_uri="gs://bucket/output.json",
+            callback_nonce_hash=build_callback_nonce_verifier(TEST_CALLBACK_NONCE),
         )
         run = attempt.step_run.validation_run
+        run.status = ValidationRunStatus.RUNNING
+        run.save(update_fields=["status"])
         receipt = CallbackReceiptFactory(
             callback_id=build_attempt_callback_id(attempt),
             validation_run=run,
             execution_attempt=attempt,
-        )
-        callback = ValidationCallback(
-            run_id=str(run.pk),
-            callback_id=receipt.callback_id,
-            callback_nonce=TEST_CALLBACK_NONCE,
-            status=ValidationStatus.SUCCESS,
+            status="PROCESSING",
             result_uri="gs://bucket/output.json",
         )
         service = ValidationCallbackService()
@@ -544,11 +544,6 @@ class TestAttemptCallbackCompletion:
         with (
             patch.object(
                 service,
-                "_resolve_active_step_run",
-                return_value=(attempt.step_run, MagicMock()),
-            ),
-            patch.object(
-                service,
                 "_download_and_validate_envelope",
                 return_value=output_envelope,
             ),
@@ -557,14 +552,21 @@ class TestAttemptCallbackCompletion:
                 "_complete_step",
                 return_value=processing_result,
             ),
-            patch.object(service, "_finalize_or_resume"),
-            patch.object(service, "_mark_receipt_completed"),
+            patch.object(service, "_finalize_or_stage_continuation"),
+            patch(
+                "validibot.validations.services.validation_callback."
+                "output_envelope_sha256",
+                return_value="b" * 64,
+            ),
         ):
-            response = service._process_callback(
-                callback=callback,
-                run=run,
-                receipt=receipt,
-                attempt=attempt,
+            response = service.process(
+                payload={
+                    "run_id": str(run.pk),
+                    "callback_id": receipt.callback_id,
+                    "callback_nonce": TEST_CALLBACK_NONCE,
+                    "status": ValidationStatus.SUCCESS,
+                    "result_uri": "gs://bucket/output.json",
+                },
             )
 
         attempt.refresh_from_db()

@@ -34,6 +34,12 @@ from rest_framework import status
 from rest_framework.response import Response
 
 from validibot.core.api.worker import WorkerOnlyAPIView
+from validibot.validations.services.validation_continuation import (
+    ValidationContinuationBusyError,
+)
+from validibot.validations.services.validation_continuation import (
+    execute_validation_run_continuation,
+)
 from validibot.validations.services.validation_run import ValidationRunService
 
 logger = logging.getLogger(__name__)
@@ -83,6 +89,7 @@ class ExecuteValidationRunView(WorkerOnlyAPIView):
         validation_run_id = request.data.get("validation_run_id")
         user_id = request.data.get("user_id")
         resume_from_step = request.data.get("resume_from_step")
+        continuation_id = request.data.get("continuation_id")
 
         if not validation_run_id:
             logger.error("Missing validation_run_id in request")
@@ -90,12 +97,6 @@ class ExecuteValidationRunView(WorkerOnlyAPIView):
                 {"error": "validation_run_id is required"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-
-        # user_id is optional - runs can be created without user context (e.g., API).
-        # When resuming from an async validator callback, we pass `run.user_id or 0`
-        # to signal "no user". This view converts 0 back to None.
-        if user_id == 0:
-            user_id = None
 
         logger.info(
             "Received execute-validation-run task: validation_run_id=%s "
@@ -106,12 +107,15 @@ class ExecuteValidationRunView(WorkerOnlyAPIView):
         )
 
         try:
-            service = ValidationRunService()
-            result = service.execute_workflow_steps(
-                validation_run_id=validation_run_id,
-                user_id=user_id,
-                resume_from_step=resume_from_step,
-            )
+            if continuation_id is not None:
+                result = execute_validation_run_continuation(continuation_id)
+            else:
+                service = ValidationRunService()
+                result = service.execute_workflow_steps(
+                    validation_run_id=validation_run_id,
+                    user_id=user_id,
+                    resume_from_step=resume_from_step,
+                )
 
             logger.info(
                 "Validation run %s execution completed: status=%s",
@@ -130,6 +134,18 @@ class ExecuteValidationRunView(WorkerOnlyAPIView):
                 status=status.HTTP_200_OK,
             )
 
+        except ValidationContinuationBusyError:
+            logger.info(
+                "Validation continuation %s already has an active worker",
+                continuation_id,
+            )
+            return Response(
+                {
+                    "validation_run_id": validation_run_id,
+                    "error": "continuation is already executing",
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
         except Exception:
             # Log the exception and return 500 to trigger task retry
             logger.exception(

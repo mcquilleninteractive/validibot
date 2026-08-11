@@ -61,6 +61,7 @@ from validibot.validations.constants import StepIOMedium
 from validibot.validations.constants import StepIOOriginKind
 from validibot.validations.constants import StepIOSourceKind
 from validibot.validations.constants import StepStatus
+from validibot.validations.constants import ValidationContinuationState
 from validibot.validations.constants import ValidationRunErrorCategory
 from validibot.validations.constants import ValidationRunSource
 from validibot.validations.constants import ValidationRunStatus
@@ -4813,6 +4814,29 @@ class CallbackReceipt(models.Model):
         help_text=_("When this callback was first processed."),
     )
 
+    processing_token = models.UUIDField(
+        null=True,
+        blank=True,
+        editable=False,
+        help_text=_(
+            "Opaque ownership token for the callback processor currently "
+            "performing external work."
+        ),
+    )
+
+    processing_started_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text=_("When the active callback-processing claim began."),
+    )
+
+    delivery_count = models.PositiveIntegerField(
+        default=0,
+        help_text=_(
+            "Number of callback deliveries that acquired processing ownership."
+        ),
+    )
+
     # Store minimal callback data for debugging and processing state
     status = models.CharField(
         max_length=50,
@@ -4827,6 +4851,9 @@ class CallbackReceipt(models.Model):
         default="",
         help_text=_("URI to the output envelope (e.g., gs:// for GCS, s3:// for S3)."),
     )
+
+    last_error_code = models.CharField(max_length=64, blank=True, default="")
+    last_error = models.CharField(max_length=2000, blank=True, default="")
 
     class Meta:
         indexes = [
@@ -4855,6 +4882,117 @@ class CallbackReceipt(models.Model):
                     )
                 }
             )
+
+
+class ValidationRunContinuation(TimeStampedModel):
+    """Durable, idempotent work required to resume a run after a callback.
+
+    The row is created in the same transaction that commits the completed
+    callback step. Queue acceptance and worker execution happen afterward and
+    may be retried independently without losing the original business decision.
+    This is intentionally a validation-specific work record rather than a
+    generic event bus or arbitrary outbox.
+    """
+
+    class Meta:
+        ordering = ["created"]
+        indexes = [
+            models.Index(fields=["state", "created"]),
+            models.Index(fields=["state", "dispatch_started_at"]),
+            models.Index(fields=["state", "execution_started_at"]),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(state__in=ValidationContinuationState.values),
+                name="ck_validation_continuation_state_known",
+            ),
+        ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    validation_run = models.ForeignKey(
+        ValidationRun,
+        on_delete=models.CASCADE,
+        related_name="continuations",
+    )
+    completed_step_run = models.OneToOneField(
+        ValidationStepRun,
+        on_delete=models.CASCADE,
+        related_name="continuation",
+        help_text=_("Completed step after which workflow execution must resume."),
+    )
+    callback_receipt = models.OneToOneField(
+        CallbackReceipt,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="continuation",
+        help_text=_("Callback decision that created this continuation."),
+    )
+    resume_from_step = models.PositiveIntegerField(
+        help_text=_("Stable order of the completed step; execution resumes after it."),
+    )
+    state = models.CharField(
+        max_length=16,
+        choices=ValidationContinuationState.choices,
+        default=ValidationContinuationState.PENDING,
+    )
+
+    dispatch_token = models.UUIDField(null=True, blank=True, editable=False)
+    dispatch_started_at = models.DateTimeField(null=True, blank=True)
+    dispatch_attempts = models.PositiveIntegerField(default=0)
+    transport_task_id = models.CharField(max_length=512, blank=True, default="")
+    dispatched_at = models.DateTimeField(null=True, blank=True)
+
+    execution_token = models.UUIDField(null=True, blank=True, editable=False)
+    execution_started_at = models.DateTimeField(null=True, blank=True)
+    execution_attempts = models.PositiveIntegerField(default=0)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    last_error_code = models.CharField(max_length=64, blank=True, default="")
+    last_error = models.CharField(max_length=2000, blank=True, default="")
+
+    @property
+    def task_id(self) -> str:
+        """Return the deterministic transport identity for every dispatch retry."""
+        return f"validation-continuation-{self.pk.hex}"
+
+    def clean(self):
+        """Keep the continuation, callback, and completed step in one run."""
+        super().clean()
+        errors = {}
+        if (
+            self.completed_step_run_id
+            and self.validation_run_id
+            and self.completed_step_run.validation_run_id != self.validation_run_id
+        ):
+            errors["completed_step_run"] = _(
+                "Completed step must belong to the continuation's validation run."
+            )
+        if (
+            self.callback_receipt_id
+            and self.validation_run_id
+            and self.callback_receipt.validation_run_id != self.validation_run_id
+        ):
+            errors["callback_receipt"] = _(
+                "Callback receipt must belong to the continuation's validation run."
+            )
+        if (
+            self.completed_step_run_id
+            and self.resume_from_step
+            and self.completed_step_run.step_order != self.resume_from_step
+        ):
+            errors["resume_from_step"] = _(
+                "Resume order must equal the completed step's stable order."
+            )
+        if errors:
+            raise ValidationError(errors)
+
+    def __str__(self) -> str:
+        """Show the run boundary, completed step, and continuation state."""
+        return (
+            f"ValidationRunContinuation(run={self.validation_run_id}, "
+            f"after={self.resume_from_step}, state={self.state})"
+        )
 
 
 class RunEvidenceArtifactAvailability(models.TextChoices):

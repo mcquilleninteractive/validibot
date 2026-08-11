@@ -356,10 +356,12 @@ ignore = [
   "W293",    # blank line contains whitespace
   "W291",    # trailing whitespace
   "PLR0915", # Too many statements in a class (112/100)
+  "PLR0917", # Ratchet positional-argument limits before enforcing repository-wide
   "RUF059",  # Allow use of dataclass with mutable default values
   "PLC0415", # Allow imports in places other than top of file
   "C416",    # Allow Unnecessary dict comprehension (rewrite using `dict()`)
   "COM812",  # Allow Trailing comma missing
+  "ISC004",  # Ratchet string-concatenation style before enforcing repository-wide
   "PERF401", # Allow use of list comprehensions that could be replaced with generator expressions
   "G004",    # Allow f-strings in logging statements
   "SLF001",  # Allow private member access across modules

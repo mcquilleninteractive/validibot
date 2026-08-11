@@ -104,7 +104,7 @@ SAMPLE_API_KEY = "test-api-key-abc123"
 # ── Fixtures ───────────────────────────────────────────────────────────
 
 
-@pytest.fixture()
+@pytest.fixture
 def mock_api():
     """Activate respx to intercept all httpx requests.
 
@@ -116,7 +116,7 @@ def mock_api():
         yield router
 
 
-@pytest.fixture()
+@pytest.fixture
 def mock_auth(monkeypatch):
     """Patch ``get_api_key()`` and ``get_api_key_or_none()`` to return a
     test token without needing a real MCP HTTP request context.
@@ -131,7 +131,7 @@ def mock_auth(monkeypatch):
     monkeypatch.setattr("validibot_mcp.auth.get_authenticated_user_sub_or_none", lambda: None)
 
 
-@pytest.fixture()
+@pytest.fixture
 def mock_access_token(monkeypatch):
     """Mock ``get_access_token()`` to return a fake AccessToken with
     configurable token value.

@@ -419,7 +419,7 @@ def test_command_verifies_one_backend_without_activating(
     settings.GCP_APP_NAME = "validibot"
     settings.VALIDIBOT_STAGE = "prod"
     settings.GCP_VALIDATOR_TASK_INVOKER_SERVICE_ACCOUNT = INVOKER_IDENTITY
-    ValidatorFactory(
+    validator = ValidatorFactory(
         validation_type=ValidationType.SHACL,
         execution_backend_slug="shacl",
         execution_runtime_contract="validibot-execution-v1",
@@ -435,11 +435,14 @@ def test_command_verifies_one_backend_without_activating(
     )
 
     routes = ValidatorExecutionDeployment.objects.all()
-    assert routes.count() == 1
+    assert routes.filter(validator=validator).count() == 1
+    assert set(routes.values_list("validator__execution_backend_slug", flat=True)) == {
+        "shacl"
+    }
     assert set(routes.values_list("routing_role", flat=True)) == {
         ExecutionDeploymentRoutingRole.INACTIVE
     }
-    assert client.get_service.call_count == 1
+    assert client.get_service.call_count == routes.count()
     assert client.get_service.call_args.kwargs["name"].endswith(
         "/services/vb-vs-shacl-v0-15-1"
     )

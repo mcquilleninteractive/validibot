@@ -8,7 +8,8 @@ worker-only callback endpoint when they complete. The callback handler:
 2. Authenticates the callback against its durable execution attempt
 3. Downloads the full output envelope from cloud storage
 4. Delegates to ValidationStepProcessor.complete_from_callback() for step completion
-5. Either dispatches a resume task (when more steps remain) or finalizes the run
+5. Atomically records a durable continuation (when steps remain) or finalizes
+   the run
 
 The public API view should be a thin wrapper around this service.
 
@@ -20,16 +21,17 @@ handles all assertion types (CEL, etc.) for the output stage.
 from __future__ import annotations
 
 import logging
+import uuid
 from dataclasses import dataclass
 from dataclasses import field
 from datetime import UTC
 from datetime import datetime
+from datetime import timedelta
 from typing import TYPE_CHECKING
 from typing import Any
 from typing import cast
 
 from django.conf import settings
-from django.db import DatabaseError
 from django.db import transaction
 from django.utils import timezone
 from pydantic import ValidationError
@@ -44,6 +46,7 @@ from validibot.validations.constants import StepStatus
 from validibot.validations.constants import ValidationRunErrorCategory
 from validibot.validations.constants import ValidationRunStatus
 from validibot.validations.models import CallbackReceipt
+from validibot.validations.models import ExecutionAttempt
 from validibot.validations.models import ValidationRun
 from validibot.validations.models import ValidationStepRun
 from validibot.validations.services.attempt_paths import validate_attempt_gcs_uri
@@ -65,8 +68,6 @@ from validibot.validations.services.validation_run import ValidationRunService
 if TYPE_CHECKING:
     from validibot_shared.validations.envelopes import ValidationOutputEnvelope
 
-    from validibot.validations.models import ExecutionAttempt
-
 logger = logging.getLogger(__name__)
 
 # ── Allowlisted GCS prefix for callback result URIs ───────────────────
@@ -85,7 +86,7 @@ logger = logging.getLogger(__name__)
 
 # ── Exception for early-exit error responses ──────────────────────────
 #
-# _process_callback delegates to several helper methods that each validate
+# Callback processing delegates to several helper methods that each validate
 # preconditions (active step run exists, envelope downloads successfully,
 # envelope IDs match the expected run/validator).  Rather than threading
 # Response objects back through return values, helpers raise this exception
@@ -95,7 +96,7 @@ logger = logging.getLogger(__name__)
 class _CallbackProcessingError(Exception):
     """Raised by helpers when callback processing cannot continue.
 
-    Carries the HTTP status code and response body so _process_callback
+    Carries the HTTP status code and response body so the public entry point
     can convert it to a DRF Response in one place.
     """
 
@@ -110,7 +111,7 @@ class _CallbackProcessingError(Exception):
 
 @dataclass(frozen=True)
 class _StepCompletionResult:
-    """Intermediate result from _complete_step, consumed by _finalize_or_resume."""
+    """Step outcome consumed by run finalization or continuation staging."""
 
     step_run: ValidationStepRun
     step_status: StepStatus
@@ -127,6 +128,15 @@ class _CallbackRequest:
     callback_nonce: str | None = field(repr=False)
     status: ValidationStatus
     result_uri: str
+
+
+@dataclass(frozen=True, slots=True)
+class _CallbackProcessingClaim:
+    """Ownership of external callback work between two short transactions."""
+
+    receipt_id: uuid.UUID
+    processing_token: uuid.UUID
+    attempt_id: uuid.UUID
 
 
 # ── Helpers ───────────────────────────────────────────────────────────
@@ -200,7 +210,7 @@ class ValidationCallbackService:
     - Check idempotency after authentication
     - Download output envelope from cloud storage
     - Delegate to ValidationStepProcessor.complete_from_callback()
-    - Enqueue resume task (more steps) or finalize run (last step)
+    - Commit a durable resume request (more steps) or finalize the run
 
     Finding persistence and assertion evaluation are NOT done here - the
     processor handles all of that via validator.post_execute_validate().
@@ -347,24 +357,12 @@ class ValidationCallbackService:
         require_callback_nonce: bool,
         caller_email: str,
     ) -> Response:
-        """
-        Ensure idempotent processing for an attempt-bound callback.
+        """Authenticate, claim, verify, and atomically apply one callback.
 
-        Cloud Tasks (and most message queues) guarantee at-least-once delivery,
-        so duplicate callbacks are expected. This method uses a CallbackReceipt
-        table as an idempotency ledger:
-
-        1. Resolve the callback's execution attempt.
-        2. Authenticate external delivery before reading any receipt or output.
-        3. A new callback_id creates a PROCESSING receipt under a
-           row-level lock so no concurrent request can duplicate the work.
-        4. Existing receipt still PROCESSING → previous attempt crashed
-           mid-flight (or hit a transient error), so retry.
-        5. Existing receipt in a terminal state (COMPLETED or REJECTED) →
-           already handled, return a cached 200 so Cloud Tasks stops retrying.
-           A permanently REJECTED callback must not be retried forever.
-        6. Lock contention (another request holds the row lock) → return
-           409 so Cloud Tasks retries later.
+        The processing token fences stale workers without holding a database
+        transaction across storage I/O. A duplicate delivery observes terminal
+        state, receives a retryable conflict while a live claim exists, or takes
+        over a claim whose bounded processing window expired.
         """
         from validibot.validations.services.execution_attempts import (
             resolve_callback_attempt,
@@ -422,235 +420,300 @@ class ValidationCallbackService:
                         {"error": "Callback runtime identity does not match attempt"},
                         status=status.HTTP_403_FORBIDDEN,
                     )
+        claimed = self._claim_callback_processing(callback, run, attempt)
+        if isinstance(claimed, Response):
+            return claimed
+
         try:
-            with transaction.atomic():
-                receipt, receipt_created = self._get_or_create_receipt(
-                    callback,
-                    run,
-                    attempt,
-                )
-
-                if not receipt_created:
-                    if receipt.execution_attempt_id != attempt.pk:
-                        logger.error(
-                            "Callback receipt attempt binding mismatch",
-                            extra={
-                                "run_id": str(run.pk),
-                                "attempt_id": str(attempt.pk),
-                                "receipt_id": receipt.pk,
-                            },
-                        )
-                        return Response(
-                            {"error": "Callback receipt identity conflict"},
-                            status=status.HTTP_400_BAD_REQUEST,
-                        )
-                    if receipt.status != CallbackReceiptStatus.PROCESSING:
-                        was_rejected = receipt.status == CallbackReceiptStatus.REJECTED
-                        logger.info(
-                            "Callback %s already in terminal state %s "
-                            "(received at %s), returning cached response",
-                            callback.callback_id,
-                            receipt.status,
-                            receipt.received_at,
-                        )
-                        # Return a 200 even for a REJECTED receipt: the callback
-                        # was permanently rejected on the first attempt, so we
-                        # must stop Cloud Tasks from retrying it. Returning
-                        # inside the atomic block also exits cleanly, releasing
-                        # the row lock.
-                        return Response(
-                            {
-                                "message": (
-                                    "Callback already rejected"
-                                    if was_rejected
-                                    else "Callback already processed"
-                                ),
-                                "idempotent_replayed": True,
-                                "original_received_at": (
-                                    receipt.received_at.isoformat()
-                                ),
-                            },
-                            status=status.HTTP_200_OK,
-                        )
-
-                    logger.info(
-                        "Callback %s still PROCESSING (previous attempt "
-                        "failed), retrying",
-                        callback.callback_id,
-                    )
-
-                # A crash can leave a PROCESSING receipt after the attempt or
-                # logical step became terminal. Close that receipt and
-                # acknowledge the late delivery without touching output.
-                current_step = run.current_step_run
-                if (
-                    attempt.is_terminal
-                    or current_step is None
-                    or current_step.pk != attempt.step_run_id
-                ):
-                    self._mark_receipt_completed(callback, receipt, run)
-                    return self._late_callback_response(callback, run)
-
-                # Preserve the existing idempotent response above for a true
-                # duplicate receipt. For a new/dangling receipt, refresh the
-                # authoritative run before any storage read; if cancellation,
-                # timeout, or another callback already won, close the receipt
-                # and acknowledge without processing stale output.
-                run.refresh_from_db(fields=["status"])
-                if run.status in VALIDATION_RUN_TERMINAL_STATUSES:
-                    self._mark_receipt_completed(callback, receipt, run)
-                    return self._late_callback_response(callback, run)
-
-                # Process inside the transaction so the row lock is held
-                # until the receipt status reaches a terminal value.
-                return self._process_callback(
-                    callback=callback,
-                    run=run,
-                    receipt=receipt,
-                    attempt=attempt,
-                )
-
-        except DatabaseError:
-            # Lock acquisition failed — another request is processing this
-            # callback. Return 409 so Cloud Tasks retries later.
-            logger.info(
-                "Callback %s locked by concurrent request, returning 409",
-                callback.callback_id,
-            )
-            return Response(
-                {
-                    "message": "Callback is being processed by another request",
-                    "retry": True,
-                },
-                status=status.HTTP_409_CONFLICT,
-            )
-
-    @staticmethod
-    def _get_or_create_receipt(
-        callback: _CallbackRequest,
-        run: ValidationRun,
-        attempt,
-    ) -> tuple[CallbackReceipt, bool]:
-        """
-        Fetch an existing receipt under a row lock, or create a new one.
-
-        Returns:
-            (receipt, created) — mirrors Django's get_or_create convention.
-        """
-        try:
-            receipt = CallbackReceipt.objects.select_for_update(
-                nowait=True,
-            ).get(callback_id=callback.callback_id)
-        except CallbackReceipt.DoesNotExist:
-            receipt = CallbackReceipt.objects.create(
-                callback_id=callback.callback_id,
-                validation_run=run,
-                execution_attempt=attempt,
-                status=CallbackReceiptStatus.PROCESSING,
-                result_uri=callback.result_uri or "",
-            )
-            return receipt, True
-        else:
-            return receipt, False
-
-    # ── Core processing pipeline ──────────────────────────────────────
-
-    def _process_callback(
-        self,
-        *,
-        callback: _CallbackRequest,
-        run: ValidationRun,
-        receipt: CallbackReceipt,
-        attempt,
-    ) -> Response:
-        """
-        Orchestrate the callback processing pipeline.
-
-        This method is the core of the service, called either inside a
-        transaction (with idempotency guard) or directly (without). It
-        delegates to focused helper methods for each phase:
-
-        1. Resolve the active step run and its validator
-        2. Download and validate the output envelope from GCS
-        3. Complete the step (processor handles findings + assertions)
-        4. Either resume the next step or finalize the run
-        5. Mark the receipt as completed (idempotency bookkeeping)
-        """
-        callback_received_at = timezone.now()
-        try:
-            step_run, validator = self._resolve_active_step_run(run)
+            _step_run, validator = self._resolve_attempt_step_run(run, attempt)
             output_envelope = self._download_and_validate_envelope(
                 callback,
                 run,
                 validator,
                 attempt,
             )
-            result = self._complete_step(run, step_run, output_envelope)
-            self._finalize_or_resume(run, result)
         except _CallbackProcessingError as exc:
-            # A client-error (4xx) status means the callback is permanently
-            # bad — the allowlist rejected its result_uri, no output envelope
-            # class is registered, or the envelope's validator/run IDs don't
-            # match. Nothing a retry could fix, so mark the receipt REJECTED
-            # (terminal); the idempotency guard then short-circuits any Cloud
-            # Tasks retry to a cached 200 instead of re-running doomed work.
-            # Server errors (5xx, e.g. a transient envelope-download failure)
-            # are left PROCESSING so the retry can re-attempt.
-            logger.warning(
-                "Validator callback processing failed",
-                extra={
-                    "event": "validator_callback_failure",
-                    "run_id": str(run.pk),
-                    "attempt_id": str(attempt.pk),
-                    "callback_status_code": exc.status_code,
-                },
-            )
             if status.is_client_error(exc.status_code):
-                self._mark_receipt_rejected(callback, receipt, run)
-                from validibot.validations.constants import ExecutionAttemptState
-                from validibot.validations.services.execution_attempts import (
-                    transition_execution_attempt,
+                self._reject_callback_claim(
+                    callback=callback,
+                    run=run,
+                    claim=claimed,
+                    error=exc,
                 )
-
-                transition_execution_attempt(
-                    attempt.pk,
-                    ExecutionAttemptState.FAILED,
-                    last_error_code="callback_rejected",
-                    last_error=str(exc.detail),
-                    callback_received_at=callback_received_at,
+            else:
+                self._release_callback_claim(
+                    claim=claimed,
+                    error_code="callback_processing_retryable",
+                    error=exc.detail,
                 )
             return Response(
                 {"error": exc.detail},
                 status=exc.status_code,
             )
+        return self._apply_callback_claim(
+            callback=callback,
+            run=run,
+            claim=claimed,
+            output_envelope=output_envelope,
+        )
 
+    @staticmethod
+    def _terminal_receipt_response(receipt: CallbackReceipt) -> Response:
+        """Return the stable acknowledgement for an already-terminal delivery."""
+        was_rejected = receipt.status == CallbackReceiptStatus.REJECTED
+        return Response(
+            {
+                "message": (
+                    "Callback already rejected"
+                    if was_rejected
+                    else "Callback already processed"
+                ),
+                "idempotent_replayed": True,
+                "original_received_at": receipt.received_at.isoformat(),
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @staticmethod
+    def _callback_claim_stale_before(now: datetime) -> datetime:
+        """Return the takeover boundary for a crashed callback processor."""
+        seconds = getattr(
+            settings,
+            "VALIDATION_CALLBACK_PROCESSING_STALE_SECONDS",
+            10 * 60,
+        )
+        return now - timedelta(seconds=max(1, int(seconds)))
+
+    def _claim_callback_processing(
+        self,
+        callback: _CallbackRequest,
+        run: ValidationRun,
+        attempt: ExecutionAttempt,
+    ) -> _CallbackProcessingClaim | Response:
+        """Claim external callback work without retaining any database lock."""
+        now = timezone.now()
+        token = uuid.uuid4()
+        with transaction.atomic():
+            locked_run = ValidationRun.objects.select_for_update().get(pk=run.pk)
+            locked_attempt = (
+                ExecutionAttempt.objects.select_for_update()
+                .select_related("step_run")
+                .get(pk=attempt.pk)
+            )
+            receipt = (
+                CallbackReceipt.objects.select_for_update()
+                .filter(callback_id=callback.callback_id)
+                .first()
+            )
+            if receipt is None:
+                receipt = CallbackReceipt.objects.create(
+                    callback_id=callback.callback_id,
+                    validation_run=locked_run,
+                    execution_attempt=locked_attempt,
+                    status=CallbackReceiptStatus.PROCESSING,
+                    result_uri=callback.result_uri or "",
+                )
+            elif (
+                receipt.execution_attempt_id != locked_attempt.pk
+                or receipt.validation_run_id != locked_run.pk
+                or receipt.result_uri != (callback.result_uri or "")
+            ):
+                logger.error(
+                    "Callback receipt identity conflict",
+                    extra={
+                        "run_id": str(locked_run.pk),
+                        "attempt_id": str(locked_attempt.pk),
+                        "receipt_id": str(receipt.pk),
+                    },
+                )
+                return Response(
+                    {"error": "Callback receipt identity conflict"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            if receipt.status != CallbackReceiptStatus.PROCESSING:
+                return self._terminal_receipt_response(receipt)
+            current_step = locked_run.current_step_run
+            if (
+                locked_attempt.is_terminal
+                or locked_run.status in VALIDATION_RUN_TERMINAL_STATUSES
+                or current_step is None
+                or current_step.pk != locked_attempt.step_run_id
+            ):
+                self._complete_receipt(receipt)
+                return self._late_callback_response(callback, locked_run)
+            if (
+                receipt.processing_token is not None
+                and receipt.processing_started_at is not None
+                and receipt.processing_started_at
+                > self._callback_claim_stale_before(now)
+            ):
+                return Response(
+                    {
+                        "message": "Callback is being processed by another request",
+                        "retry": True,
+                    },
+                    status=status.HTTP_409_CONFLICT,
+                )
+
+            receipt.processing_token = token
+            receipt.processing_started_at = now
+            receipt.delivery_count += 1
+            receipt.last_error_code = ""
+            receipt.last_error = ""
+            receipt.save(
+                update_fields=[
+                    "processing_token",
+                    "processing_started_at",
+                    "delivery_count",
+                    "last_error_code",
+                    "last_error",
+                ]
+            )
+            return _CallbackProcessingClaim(
+                receipt_id=receipt.pk,
+                processing_token=token,
+                attempt_id=locked_attempt.pk,
+            )
+
+    @staticmethod
+    def _release_callback_claim(
+        *,
+        claim: _CallbackProcessingClaim,
+        error_code: str,
+        error: str,
+    ) -> None:
+        """Release retryable work only when the exact processing token matches."""
+        CallbackReceipt.objects.filter(
+            pk=claim.receipt_id,
+            status=CallbackReceiptStatus.PROCESSING,
+            processing_token=claim.processing_token,
+        ).update(
+            processing_token=None,
+            processing_started_at=None,
+            last_error_code=error_code[:64],
+            last_error=error[:2000],
+        )
+
+    def _reject_callback_claim(
+        self,
+        *,
+        callback: _CallbackRequest,
+        run: ValidationRun,
+        claim: _CallbackProcessingClaim,
+        error: _CallbackProcessingError,
+    ) -> None:
+        """Commit a permanent rejection and fence the producing attempt."""
         from validibot.validations.constants import ExecutionAttemptState
         from validibot.validations.services.execution_attempts import (
             transition_execution_attempt,
         )
 
-        transition_execution_attempt(
-            attempt.pk,
-            ExecutionAttemptState.COMPLETED,
-            provider_started_at=_coerce_optional_timing_at(
-                getattr(output_envelope.timing, "started_at", None)
-            ),
-            provider_finished_at=_coerce_optional_timing_at(
-                getattr(output_envelope.timing, "finished_at", None)
-            ),
-            callback_received_at=callback_received_at,
-            output_envelope_uri=callback.result_uri or "",
-            output_envelope_sha256=output_envelope_sha256(output_envelope),
+        callback_received_at = timezone.now()
+        with transaction.atomic():
+            ValidationRun.objects.select_for_update().get(pk=run.pk)
+            ExecutionAttempt.objects.select_for_update().get(pk=claim.attempt_id)
+            receipt = CallbackReceipt.objects.select_for_update().get(
+                pk=claim.receipt_id
+            )
+            if (
+                receipt.status != CallbackReceiptStatus.PROCESSING
+                or receipt.processing_token != claim.processing_token
+            ):
+                return
+            transition_execution_attempt(
+                claim.attempt_id,
+                ExecutionAttemptState.FAILED,
+                last_error_code="callback_rejected",
+                last_error=error.detail,
+                callback_received_at=callback_received_at,
+            )
+            self._reject_receipt(receipt, error.detail)
+
+    def _apply_callback_claim(
+        self,
+        *,
+        callback: _CallbackRequest,
+        run: ValidationRun,
+        claim: _CallbackProcessingClaim,
+        output_envelope: ValidationOutputEnvelope,
+    ) -> Response:
+        """Atomically apply verified output under the exact processing claim."""
+        from validibot.validations.constants import ExecutionAttemptState
+        from validibot.validations.services.execution_attempts import (
+            transition_execution_attempt,
         )
 
-        self._mark_receipt_completed(callback, receipt, run)
+        callback_received_at = timezone.now()
+        try:
+            with transaction.atomic():
+                locked_run = ValidationRun.objects.select_for_update().get(pk=run.pk)
+                locked_attempt = (
+                    ExecutionAttempt.objects.select_for_update(of=("self",))
+                    .select_related("step_run__workflow_step__validator")
+                    .get(pk=claim.attempt_id)
+                )
+                receipt = CallbackReceipt.objects.select_for_update().get(
+                    pk=claim.receipt_id
+                )
+                if receipt.status != CallbackReceiptStatus.PROCESSING:
+                    return self._terminal_receipt_response(receipt)
+                if receipt.processing_token != claim.processing_token:
+                    return Response(
+                        {
+                            "message": "Callback processing ownership changed",
+                            "retry": True,
+                        },
+                        status=status.HTTP_409_CONFLICT,
+                    )
+                current_step = locked_run.current_step_run
+                if (
+                    locked_attempt.is_terminal
+                    or locked_run.status in VALIDATION_RUN_TERMINAL_STATUSES
+                    or current_step is None
+                    or current_step.pk != locked_attempt.step_run_id
+                ):
+                    self._complete_receipt(receipt)
+                    return self._late_callback_response(callback, locked_run)
+
+                step_run = locked_attempt.step_run
+                result = self._complete_step(
+                    locked_run,
+                    step_run,
+                    output_envelope,
+                )
+                self._finalize_or_stage_continuation(
+                    locked_run,
+                    result,
+                    receipt,
+                )
+                transition_execution_attempt(
+                    locked_attempt.pk,
+                    ExecutionAttemptState.COMPLETED,
+                    provider_started_at=_coerce_optional_timing_at(
+                        getattr(output_envelope.timing, "started_at", None)
+                    ),
+                    provider_finished_at=_coerce_optional_timing_at(
+                        getattr(output_envelope.timing, "finished_at", None)
+                    ),
+                    callback_received_at=callback_received_at,
+                    output_envelope_uri=callback.result_uri or "",
+                    output_envelope_sha256=output_envelope_sha256(output_envelope),
+                )
+                self._complete_receipt(receipt)
+        except Exception as exc:
+            self._release_callback_claim(
+                claim=claim,
+                error_code="callback_apply_failed",
+                error=str(exc),
+            )
+            raise
 
         logger.info(
             "Processed callback for run %s, step status=%s",
             callback.run_id,
             result.step_status,
         )
-
         return Response(
             {"message": "Callback processed successfully"},
             status=status.HTTP_200_OK,
@@ -659,14 +722,15 @@ class ValidationCallbackService:
     # ── Step 1: Resolve the active step run ───────────────────────────
 
     @staticmethod
-    def _resolve_active_step_run(
+    def _resolve_attempt_step_run(
         run: ValidationRun,
+        attempt: ExecutionAttempt,
     ) -> tuple[ValidationStepRun, Any]:
-        """
-        Find the active (RUNNING/PENDING) step run and its validator.
+        """Resolve the active step directly from authenticated attempt identity.
 
-        We use select_related rather than run.current_step_run because we
-        need step_run.workflow_step.validator in subsequent steps.
+        A callback must never select whichever step happens to be current. Its
+        producing attempt already names the only logical step whose output it
+        may complete.
 
         Returns:
             (step_run, validator) tuple.
@@ -679,10 +743,10 @@ class ValidationCallbackService:
                 "workflow_step__validator",
             )
             .filter(
+                pk=attempt.step_run_id,
                 validation_run=run,
                 status__in=[StepStatus.RUNNING, StepStatus.PENDING],
             )
-            .order_by("step_order")
             .first()
         )
 
@@ -923,74 +987,34 @@ class ValidationCallbackService:
 
     # ── Step 4: Resume next step or finalize the run ──────────────────
 
-    def _finalize_or_resume(
+    def _finalize_or_stage_continuation(
         self,
         run: ValidationRun,
         result: _StepCompletionResult,
+        receipt: CallbackReceipt,
     ) -> None:
-        """
-        Either enqueue the next workflow step or finalize the run.
+        """Commit durable resume work or finalize the run in this transaction.
 
-        If more steps remain and the current step passed, enqueue a resume
-        task for the next step. Otherwise, finalize the run with the
-        appropriate status, error category, timing, summary, and evidence hash.
+        Queue contact is intentionally absent here. The continuation service
+        registers an ``on_commit`` fast path and the watchdog repairs any
+        committed row lost before that callback can run.
         """
         remaining_steps = run.workflow.steps.filter(
             order__gt=result.step_run.step_order,
         ).exists()
 
         if remaining_steps and result.step_status == StepStatus.PASSED:
-            self._enqueue_next_step(run, result.step_run)
+            from validibot.validations.services.validation_continuation import (
+                stage_validation_run_continuation,
+            )
+
+            stage_validation_run_continuation(
+                validation_run=run,
+                completed_step_run=result.step_run,
+                callback_receipt=receipt,
+            )
         else:
             self._finalize_run(run, result)
-
-    @staticmethod
-    def _enqueue_next_step(
-        run: ValidationRun,
-        step_run: ValidationStepRun,
-    ) -> None:
-        """Enqueue a Cloud Task to resume the workflow after the completed step.
-
-        Passes the completed step's order so the orchestrator can filter with
-        ``order__gt`` to find the next step. This avoids the fragile ``+ 1``
-        assumption — WorkflowStep.order uses gapped numbering (10, 20, 30…)
-        so ``step_order + 1`` would produce a value that doesn't correspond
-        to any real step.
-        """
-        from validibot.core.tasks import enqueue_validation_run
-
-        if not ValidationRun.objects.filter(
-            pk=run.pk,
-            status__in=[
-                ValidationRunStatus.PENDING,
-                ValidationRunStatus.RUNNING,
-            ],
-        ).exists():
-            logger.info(
-                "Not enqueuing the next step for terminal run %s",
-                run.id,
-            )
-            return
-
-        # NOTE: resume_from_step here is the *completed* step's order, not
-        # the next step's order. The orchestrator uses order__gt (not __gte)
-        # to skip it and start from the next one. This avoids fabricating a
-        # step order value that doesn't exist in the database — WorkflowStep
-        # uses gapped numbering (10, 20, 30…).
-        #
-        # user_id can be NULL if the run was created via API without user
-        # context. Pass 0 to signal "no user" — execute_workflow_steps()
-        # handles this gracefully.
-        enqueue_validation_run(
-            validation_run_id=run.id,
-            user_id=run.user_id or 0,
-            resume_from_step=step_run.step_order,
-        )
-        logger.info(
-            "Enqueued resume task for run %s after step_order %s",
-            run.id,
-            step_run.step_order,
-        )
 
     def _finalize_run(
         self,
@@ -1113,63 +1137,40 @@ class ValidationCallbackService:
     # ── Step 5: Receipt bookkeeping ───────────────────────────────────
 
     @staticmethod
-    def _mark_receipt_completed(
-        callback: _CallbackRequest,
-        receipt: CallbackReceipt,
-        run: ValidationRun,
-    ) -> None:
-        """
-        Update receipt status from PROCESSING to COMPLETED.
-
-        The receipt tracks callback processing state, not step outcome.
-        A failure here is logged but does not fail the request — the run
-        is already in a consistent state.
-        """
-        try:
-            receipt.status = CallbackReceiptStatus.COMPLETED
-            receipt.validation_run = run
-            receipt.save(update_fields=["status", "validation_run"])
-            logger.debug(
-                "Updated callback receipt %s to status %s",
-                callback.callback_id,
-                receipt.status,
-            )
-        except Exception:
-            logger.warning(
-                "Failed to update callback receipt for %s",
-                callback.callback_id,
-                exc_info=True,
-            )
+    def _complete_receipt(receipt: CallbackReceipt) -> None:
+        """Commit successful callback consumption and release its claim."""
+        receipt.status = CallbackReceiptStatus.COMPLETED
+        receipt.processing_token = None
+        receipt.processing_started_at = None
+        receipt.last_error_code = ""
+        receipt.last_error = ""
+        receipt.save(
+            update_fields=[
+                "status",
+                "processing_token",
+                "processing_started_at",
+                "last_error_code",
+                "last_error",
+            ]
+        )
 
     @staticmethod
-    def _mark_receipt_rejected(
-        callback: _CallbackRequest,
-        receipt: CallbackReceipt,
-        run: ValidationRun,
-    ) -> None:
-        """
-        Move a receipt to the terminal REJECTED state after a permanent error.
-
-        Mirrors :meth:`_mark_receipt_completed`, but records that the callback
-        was permanently rejected (a non-retryable 4xx error) so a Cloud Tasks
-        retry short-circuits in the idempotency guard instead of re-running the
-        doomed processing. A failure to update the receipt is logged but does
-        not change the response — the error status is already being returned.
-        """
-        try:
-            receipt.status = CallbackReceiptStatus.REJECTED
-            receipt.validation_run = run
-            receipt.save(update_fields=["status", "validation_run"])
-            logger.info(
-                "Marked callback receipt %s as REJECTED (permanent error)",
-                callback.callback_id,
-            )
-        except Exception:
-            logger.warning(
-                "Failed to update callback receipt for %s",
-                callback.callback_id,
-                exc_info=True,
-            )
+    def _reject_receipt(receipt: CallbackReceipt, error: str) -> None:
+        """Commit a permanent callback rejection and release its claim."""
+        receipt.status = CallbackReceiptStatus.REJECTED
+        receipt.processing_token = None
+        receipt.processing_started_at = None
+        receipt.last_error_code = "callback_rejected"
+        receipt.last_error = error[:2000]
+        receipt.save(
+            update_fields=[
+                "status",
+                "processing_token",
+                "processing_started_at",
+                "last_error_code",
+                "last_error",
+            ]
+        )
 
     # ── Submission purge ──────────────────────────────────────────────
 

@@ -5034,6 +5034,14 @@ class PdfStepConfigForm(BaseStepConfigForm):
     supports_execution_profile = True
     artifact_input_contract_keys = ("pdf_document",)
 
+    _DISCOVERY_KIND_CHOICES = [
+        ("embedded_files_name_tree", _("Embedded-files name tree")),
+        ("file_specification", _("File specification")),
+        ("associated_file", _("Associated file")),
+        ("file_attachment_annotation", _("File-attachment annotation")),
+        ("rich_media_asset", _("Rich-media asset")),
+    ]
+
     profile = forms.ChoiceField(
         label=_("Inspection profile"),
         choices=[
@@ -5094,6 +5102,23 @@ class PdfStepConfigForm(BaseStepConfigForm):
         max_length=255,
         initial="application/xml",
     )
+    selected_xml_detected_media_type = forms.CharField(
+        label=_("Exact detected media type"),
+        required=False,
+        max_length=255,
+        help_text=_("Optional, for example application/xml."),
+    )
+    selected_xml_discovery_kinds = forms.MultipleChoiceField(
+        label=_("Required discovery routes"),
+        required=False,
+        choices=_DISCOVERY_KIND_CHOICES,
+        help_text=_("The member must be reachable through every selected route."),
+    )
+    selected_xml_rich_media_asset_name = forms.CharField(
+        label=_("Exact rich-media asset name"),
+        required=False,
+        max_length=512,
+    )
     select_json = forms.BooleanField(
         label=_("Expose one embedded JSON document to a later step"),
         required=False,
@@ -5121,6 +5146,22 @@ class PdfStepConfigForm(BaseStepConfigForm):
         max_length=255,
         initial="application/json",
     )
+    selected_json_detected_media_type = forms.CharField(
+        label=_("Exact detected JSON media type"),
+        required=False,
+        max_length=255,
+    )
+    selected_json_discovery_kinds = forms.MultipleChoiceField(
+        label=_("Required JSON discovery routes"),
+        required=False,
+        choices=_DISCOVERY_KIND_CHOICES,
+        help_text=_("The member must be reachable through every selected route."),
+    )
+    selected_json_rich_media_asset_name = forms.CharField(
+        label=_("Exact JSON rich-media asset name"),
+        required=False,
+        max_length=512,
+    )
     select_step_p21 = forms.BooleanField(
         label=_("Expose one embedded STEP Part 21 file to a later step"),
         required=False,
@@ -5147,6 +5188,32 @@ class PdfStepConfigForm(BaseStepConfigForm):
         required=False,
         max_length=255,
         initial="model/step",
+    )
+    selected_step_p21_detected_media_type = forms.CharField(
+        label=_("Exact detected STEP media type"),
+        required=False,
+        max_length=255,
+    )
+    selected_step_p21_discovery_kinds = forms.MultipleChoiceField(
+        label=_("Required STEP discovery routes"),
+        required=False,
+        choices=_DISCOVERY_KIND_CHOICES,
+        help_text=_("The member must be reachable through every selected route."),
+    )
+    selected_step_p21_rich_media_asset_name = forms.CharField(
+        label=_("Exact STEP rich-media asset name"),
+        required=False,
+        max_length=512,
+    )
+    selected_step_p21_file_schema = forms.CharField(
+        label=_("Exact STEP FILE_SCHEMA identifiers"),
+        required=False,
+        max_length=16_384,
+        widget=forms.Textarea(attrs={"rows": 3}),
+        help_text=_(
+            "Enter one exact Part 21 header identifier per line. This selects by "
+            "declared schema; it does not validate the model against EXPRESS."
+        ),
     )
 
     def __init__(self, *args, step=None, **kwargs):
@@ -5178,6 +5245,18 @@ class PdfStepConfigForm(BaseStepConfigForm):
             "declared_media_type",
             "application/xml",
         )
+        self.fields["selected_xml_detected_media_type"].initial = selector.get(
+            "detected_media_type",
+            "",
+        )
+        self.fields["selected_xml_discovery_kinds"].initial = selector.get(
+            "discovery_kinds",
+            [],
+        )
+        self.fields["selected_xml_rich_media_asset_name"].initial = selector.get(
+            "rich_media_asset_name",
+            "",
+        )
         for selector_key, default_media_type in (
             ("selected_json", "application/json"),
             ("selected_step_p21", "model/step"),
@@ -5201,6 +5280,32 @@ class PdfStepConfigForm(BaseStepConfigForm):
                 "declared_media_type",
                 default_media_type,
             )
+            self.fields[f"{selector_key}_detected_media_type"].initial = selector.get(
+                "detected_media_type",
+                "",
+            )
+            self.fields[f"{selector_key}_discovery_kinds"].initial = selector.get(
+                "discovery_kinds",
+                [],
+            )
+            self.fields[f"{selector_key}_rich_media_asset_name"].initial = selector.get(
+                "rich_media_asset_name",
+                "",
+            )
+        step_selector = config.get("selected_step_p21") or {}
+        self.fields["selected_step_p21_file_schema"].initial = "\n".join(
+            step_selector.get("step_file_schema") or [],
+        )
+
+    def clean_selected_step_p21_file_schema(self) -> str:
+        """Normalize and bound the exact schema identifiers as line-oriented text."""
+        raw_value = self.cleaned_data.get("selected_step_p21_file_schema") or ""
+        identifiers = [line.strip() for line in raw_value.splitlines() if line.strip()]
+        if len(identifiers) > 128:  # noqa: PLR2004
+            raise forms.ValidationError(
+                _("Define no more than 128 STEP FILE_SCHEMA identifiers."),
+            )
+        return "\n".join(dict.fromkeys(identifiers))
 
     def clean(self):
         """Require at least one exact key for every enabled typed output."""
@@ -5211,22 +5316,38 @@ class PdfStepConfigForm(BaseStepConfigForm):
                 "selected_xml_root_qname",
                 "selected_xml_af_relationship",
                 "selected_xml_declared_media_type",
+                "selected_xml_detected_media_type",
+                "selected_xml_discovery_kinds",
+                "selected_xml_rich_media_asset_name",
             ),
             "json": (
                 "selected_json_filename",
                 "selected_json_af_relationship",
                 "selected_json_declared_media_type",
+                "selected_json_detected_media_type",
+                "selected_json_discovery_kinds",
+                "selected_json_rich_media_asset_name",
             ),
             "step_p21": (
                 "selected_step_p21_filename",
                 "selected_step_p21_af_relationship",
                 "selected_step_p21_declared_media_type",
+                "selected_step_p21_detected_media_type",
+                "selected_step_p21_discovery_kinds",
+                "selected_step_p21_rich_media_asset_name",
+                "selected_step_p21_file_schema",
             ),
         }
         labels = {"xml": "XML", "json": "JSON", "step_p21": "STEP"}
+
+        def has_exact_value(field_name: str) -> bool:
+            """Treat selected lists and non-blank text as authored match keys."""
+            value = cleaned.get(field_name)
+            return bool(value.strip()) if isinstance(value, str) else bool(value)
+
         for suffix, match_fields in selector_fields.items():
             if cleaned.get(f"select_{suffix}") and not any(
-                (cleaned.get(name) or "").strip() for name in match_fields
+                has_exact_value(name) for name in match_fields
             ):
                 self.add_error(
                     match_fields[0],

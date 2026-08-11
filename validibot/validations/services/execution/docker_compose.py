@@ -606,10 +606,9 @@ class DockerComposeExecutionBackend(ExecutionBackend):
                 ),
             )
 
-            # Track the FMU model resource so we can override the
-            # envelope's ``input_files[0].uri`` (FMU envelopes use the
-            # special ``input_file_uris["fmu_model_uri"]`` key, not the
-            # generic resource_uri_overrides path).
+            # Track the FMU model resource so the declared ``fmu_model`` port
+            # can receive its container-visible identity through the SYSTEM or
+            # workflow-resource adapter.
             if (
                 validator_type_upper == ValidationType.FMU
                 and sr.role == WorkflowStepResource.FMU_MODEL

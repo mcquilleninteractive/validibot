@@ -46,12 +46,19 @@ class TestDispatcher(TaskDispatcher):
         )
 
         try:
-            service = ValidationRunService()
-            service.execute_workflow_steps(
-                validation_run_id=str(request.validation_run_id),
-                user_id=request.user_id,
-                resume_from_step=request.resume_from_step,
-            )
+            if request.continuation_id is not None:
+                from validibot.validations.services.validation_continuation import (
+                    execute_validation_run_continuation,
+                )
+
+                execute_validation_run_continuation(request.continuation_id)
+            else:
+                service = ValidationRunService()
+                service.execute_workflow_steps(
+                    validation_run_id=str(request.validation_run_id),
+                    user_id=request.user_id,
+                    resume_from_step=request.resume_from_step,
+                )
             return TaskDispatchResponse(task_id=None, is_sync=True)
         except Exception as exc:
             logger.exception(

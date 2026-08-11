@@ -648,6 +648,40 @@ class TestCommandHandle(SimpleTestCase):
     """Tests for the full handle() method with mocked DB queries."""
 
     @patch(f"{CMD_PATH}.ValidationRun")
+    def test_watchdog_repairs_continuations_even_without_stuck_runs(
+        self,
+        mock_run_model,
+    ):
+        """Scheduled maintenance redelivers work independently of run timeout."""
+        mock_qs = MagicMock()
+        mock_qs.count.return_value = 0
+        _wire_stuck_runs_qs(mock_run_model, mock_qs)
+        report = MagicMock(
+            examined=1,
+            dispatched=1,
+            already_dispatched=0,
+            busy=0,
+            not_required=0,
+            failed=0,
+        )
+        out = StringIO()
+        cmd = Command()
+        cmd.stdout = out
+        cmd.style = MagicMock()
+        cmd.style.SUCCESS = lambda value: value
+
+        with patch.object(
+            cmd,
+            "_repair_continuations",
+            return_value=report,
+        ) as repair:
+            cmd.handle(timeout_minutes=30, dry_run=False, batch_size=25)
+
+        repair.assert_called_once_with(limit=25, dry_run=False)
+        assert "Continuation repair" in out.getvalue()
+        assert "No runs stuck" in out.getvalue()
+
+    @patch(f"{CMD_PATH}.ValidationRun")
     def test_no_stuck_runs_reports_clean(self, mock_run_model):
         """Command should report no stuck runs when none exist."""
         mock_qs = MagicMock()
@@ -662,7 +696,12 @@ class TestCommandHandle(SimpleTestCase):
         cmd.style.WARNING = lambda x: x
 
         # Simulate handle() with empty queryset
-        cmd.handle(timeout_minutes=30, dry_run=False, batch_size=100)
+        with patch.object(
+            cmd,
+            "_repair_continuations",
+            return_value=MagicMock(examined=0),
+        ):
+            cmd.handle(timeout_minutes=30, dry_run=False, batch_size=100)
 
         output = out.getvalue()
         assert "No runs stuck" in output
@@ -710,7 +749,14 @@ class TestCommandHandle(SimpleTestCase):
         cmd.style.SUCCESS = lambda x: x
         cmd.style.WARNING = lambda x: x
 
-        with patch.object(cmd, "_get_active_step_run", return_value=step_run):
+        with (
+            patch.object(cmd, "_get_active_step_run", return_value=step_run),
+            patch.object(
+                cmd,
+                "_repair_continuations",
+                return_value=MagicMock(examined=0),
+            ),
+        ):
             cmd.handle(timeout_minutes=30, dry_run=False, batch_size=100)
 
         output = out.getvalue()
@@ -780,6 +826,11 @@ class TestCommandHandle(SimpleTestCase):
                 "validibot.validations.services.run_admission."
                 "emit_validation_run_finalized"
             ) as mock_finalize,
+            patch.object(
+                cmd,
+                "_repair_continuations",
+                return_value=MagicMock(examined=0),
+            ),
         ):
             cmd.handle(timeout_minutes=30, dry_run=False, batch_size=100)
 
@@ -835,6 +886,11 @@ class TestCommandHandle(SimpleTestCase):
                 "validibot.validations.services.run_admission."
                 "emit_validation_run_finalized"
             ) as mock_finalize,
+            patch.object(
+                cmd,
+                "_repair_continuations",
+                return_value=MagicMock(examined=0),
+            ),
         ):
             cmd.handle(timeout_minutes=30, dry_run=False, batch_size=100)
 
@@ -867,7 +923,12 @@ class TestCommandHandle(SimpleTestCase):
         cmd.style.SUCCESS = lambda x: x
         cmd.style.WARNING = lambda x: x
 
-        cmd.handle(timeout_minutes=30, dry_run=True, batch_size=100)
+        with patch.object(
+            cmd,
+            "_repair_continuations",
+            return_value=MagicMock(examined=0),
+        ):
+            cmd.handle(timeout_minutes=30, dry_run=True, batch_size=100)
 
         output = out.getvalue()
         assert "DRY RUN" in output

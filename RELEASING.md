@@ -15,9 +15,18 @@ checksums, and a GitHub artifact attestation.
    ```
 
 The release recipe confirms that local `main` equals `origin/main`, checks that
-the pinned `validibot-shared` version is current on PyPI, creates an SSH-signed
+the pinned `validibot-shared` version is current on PyPI, and runs `just
+release-check`. That gate covers both Python locks, Python and MCP checks,
+frontend type checking/tests/generated bundles, explicit locked dependency
+audits, and the successful `ci.yml` push run for the exact release commit. The
+recipe confirms those checks left the worktree clean, creates an SSH-signed
 `vX.Y.Z` tag, verifies the tag locally against the signer allowlist on
 `origin/main`, and pushes only that tag.
+
+Run `just release-check` alone to inspect every prerequisite without creating a
+tag. `just check` is the local integration subset; `just audit` remains a
+separate networked operation because advisory data changes independently of the
+checkout.
 
 The release workflow then independently:
 

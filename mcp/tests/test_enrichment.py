@@ -122,7 +122,10 @@ class TestBuildValidationSummary:
             "steps": [
                 {
                     "name": "Schema Check",
-                    "validator": {"name": "JSON Schema", "validation_type": "JSON_SCHEMA"},
+                    "validator": {
+                        "name": "JSON Schema",
+                        "validation_type": "JSON_SCHEMA",
+                    },
                 },
             ],
         }
@@ -136,11 +139,17 @@ class TestBuildValidationSummary:
             "steps": [
                 {
                     "name": "Schema Check",
-                    "validator": {"name": "JSON Schema", "validation_type": "JSON_SCHEMA"},
+                    "validator": {
+                        "name": "JSON Schema",
+                        "validation_type": "JSON_SCHEMA",
+                    },
                 },
                 {
                     "name": "Simulation",
-                    "validator": {"name": "EnergyPlus", "validation_type": "ENERGYPLUS"},
+                    "validator": {
+                        "name": "EnergyPlus",
+                        "validation_type": "ENERGYPLUS",
+                    },
                 },
             ],
         }

@@ -1839,11 +1839,29 @@ def build_pdf_config(form: PdfStepConfigForm) -> dict[str, Any]:
                 "af_relationship": (
                     cleaned.get(f"{selector_key}_af_relationship") or ""
                 ).strip(),
+                "detected_media_type": (
+                    cleaned.get(f"{selector_key}_detected_media_type") or ""
+                ).strip(),
+                "discovery_kinds": list(
+                    cleaned.get(f"{selector_key}_discovery_kinds") or []
+                ),
+                "rich_media_asset_name": (
+                    cleaned.get(f"{selector_key}_rich_media_asset_name") or ""
+                ).strip(),
             }
             if suffix == "xml":
                 selector["xml_root_qname"] = (
                     cleaned.get("selected_xml_root_qname") or ""
                 ).strip()
+            if suffix == "step_p21":
+                file_schema_text = (
+                    cleaned.get("selected_step_p21_file_schema") or ""
+                ).strip()
+                selector["step_file_schema"] = [
+                    identifier.strip()
+                    for identifier in file_schema_text.splitlines()
+                    if identifier.strip()
+                ]
         config[selector_key] = selector
     return config
 

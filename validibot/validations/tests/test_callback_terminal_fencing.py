@@ -61,7 +61,7 @@ class TestCallbackTerminalFencing:
         )
         service = ValidationCallbackService()
 
-        with patch.object(service, "_process_callback") as process:
+        with patch.object(service, "_download_and_validate_envelope") as download:
             response = service.process(
                 payload={
                     "run_id": str(run.id),
@@ -74,7 +74,7 @@ class TestCallbackTerminalFencing:
 
         assert response.status_code == status.HTTP_200_OK
         assert response.data["late_callback_ignored"] is True
-        process.assert_not_called()
+        download.assert_not_called()
 
     def test_finalization_compare_and_set_preserves_concurrent_cancel(self):
         """A cancel winning after callback admission must remain terminal.

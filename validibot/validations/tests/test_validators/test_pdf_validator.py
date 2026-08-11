@@ -8,6 +8,7 @@ earlier-step choices in the XML validator form.
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
 from validibot.submissions.constants import SubmissionDataFormat
 from validibot.validations.constants import ADVANCED_VALIDATION_TYPES
@@ -23,12 +24,19 @@ from validibot.validations.tests.factories import ValidatorFactory
 from validibot.validations.validators.pdf.config import config
 from validibot.workflows.forms import PdfStepConfigForm
 from validibot.workflows.forms import XmlSchemaStepConfigForm
+from validibot.workflows.step_configs import PdfStepConfig
 from validibot.workflows.tests.factories import WorkflowFactory
 from validibot.workflows.tests.factories import WorkflowStepFactory
 from validibot.workflows.views_helpers import build_pdf_config
 
 pytestmark = pytest.mark.django_db
 EXPECTED_ARTIFACT_OUTPUT_COUNT = 6
+
+
+def test_pdf_step_config_rejects_a_deadline_above_the_backend_ceiling() -> None:
+    """Machine-authored configs cannot promise work beyond the PDF hard limit."""
+    with pytest.raises(ValidationError, match="less than or equal to 300"):
+        PdfStepConfig(execution_timeout_seconds=301)
 
 
 def _file_port(
@@ -135,14 +143,21 @@ def test_pdf_form_builds_exact_typed_selectors_and_file_source() -> None:
             "selected_xml_filename": "asset-handover.xml",
             "selected_xml_root_qname": "{urn:example:asset}handover",
             "selected_xml_declared_media_type": "application/xml",
+            "selected_xml_detected_media_type": "application/xml",
+            "selected_xml_discovery_kinds": [
+                "embedded_files_name_tree",
+                "associated_file",
+            ],
             "select_json": "on",
             "selected_json_required": "on",
             "selected_json_filename": "asset-index.json",
             "selected_json_declared_media_type": "application/json",
+            "selected_json_rich_media_asset_name": "asset-index",
             "select_step_p21": "on",
             "selected_step_p21_required": "on",
             "selected_step_p21_filename": "assembly.p21",
             "selected_step_p21_declared_media_type": "model/step",
+            "selected_step_p21_file_schema": ("AP242_FIXTURE\nCONFIG_CONTROL_DESIGN"),
         },
         workflow=workflow,
         validator=validator,
@@ -157,6 +172,9 @@ def test_pdf_form_builds_exact_typed_selectors_and_file_source() -> None:
         "original_filename": "asset-handover.xml",
         "declared_media_type": "application/xml",
         "af_relationship": "",
+        "detected_media_type": "application/xml",
+        "discovery_kinds": ["embedded_files_name_tree", "associated_file"],
+        "rich_media_asset_name": "",
         "xml_root_qname": "{urn:example:asset}handover",
     }
     assert built_config["selected_json"] == {
@@ -164,13 +182,62 @@ def test_pdf_form_builds_exact_typed_selectors_and_file_source() -> None:
         "original_filename": "asset-index.json",
         "declared_media_type": "application/json",
         "af_relationship": "",
+        "detected_media_type": "",
+        "discovery_kinds": [],
+        "rich_media_asset_name": "asset-index",
     }
     assert built_config["selected_step_p21"] == {
         "required": True,
         "original_filename": "assembly.p21",
         "declared_media_type": "model/step",
         "af_relationship": "",
+        "detected_media_type": "",
+        "discovery_kinds": [],
+        "rich_media_asset_name": "",
+        "step_file_schema": ["AP242_FIXTURE", "CONFIG_CONTROL_DESIGN"],
     }
+
+
+def test_pdf_form_round_trips_every_exact_selector_field() -> None:
+    """Editing a step must preserve every selector the backend can evaluate."""
+    workflow = WorkflowFactory()
+    validator = ValidatorFactory(validation_type=ValidationType.PDF)
+    step = WorkflowStepFactory(
+        workflow=workflow,
+        validator=validator,
+        config={
+            "selected_json": {
+                "required": True,
+                "discovery_kinds": ["rich_media_asset"],
+                "original_filename": "index.json",
+                "declared_media_type": "application/json",
+                "detected_media_type": "application/json",
+                "af_relationship": "Data",
+                "rich_media_asset_name": "asset-index",
+            },
+            "selected_step_p21": {
+                "required": True,
+                "original_filename": "assembly.p21",
+                "step_file_schema": ["AP242_FIXTURE", "CONFIG_CONTROL_DESIGN"],
+            },
+        },
+    )
+
+    form = PdfStepConfigForm(
+        step=step,
+        workflow=workflow,
+        validator=validator,
+        proposed_order=step.order,
+    )
+
+    assert form.fields["selected_json_discovery_kinds"].initial == ["rich_media_asset"]
+    assert form.fields["selected_json_detected_media_type"].initial == (
+        "application/json"
+    )
+    assert form.fields["selected_json_rich_media_asset_name"].initial == ("asset-index")
+    assert form.fields["selected_step_p21_file_schema"].initial == (
+        "AP242_FIXTURE\nCONFIG_CONTROL_DESIGN"
+    )
 
 
 def test_xml_form_offers_selected_xml_but_not_pdf_inventory() -> None:

@@ -55,7 +55,7 @@ repos:
   # May 2026: v0.15.0 vs local 0.15.13 disagreed on S603 noqa
   # necessity for shacl/engine.py subprocess calls.
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.15.16
+    rev: v0.16.1
     hooks:
       # Linter
       - id: ruff-check

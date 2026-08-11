@@ -24,8 +24,10 @@ logger = logging.getLogger(__name__)
 
 def enqueue_validation_run(
     validation_run_id: UUID | str,
-    user_id: int,
+    user_id: int | None,
     resume_from_step: int | None = None,
+    continuation_id: UUID | str | None = None,
+    task_id: str | None = None,
 ) -> str | None:
     """
     Dispatch a validation run execution task.
@@ -41,10 +43,12 @@ def enqueue_validation_run(
 
     Args:
         validation_run_id: ID of the ValidationRun to execute.
-        user_id: ID of the user who initiated the run.
+        user_id: ID of the user who initiated the run, if one exists.
         resume_from_step: Step order of the last completed step. The
             orchestrator uses ``order__gt`` to skip it and start from the
             next one. None for initial execution.
+        continuation_id: Durable continuation authorizing a callback resume.
+        task_id: Optional deterministic queue identity for idempotent dispatch.
 
     Returns:
         Task identifier if applicable, None for sync execution.
@@ -56,6 +60,8 @@ def enqueue_validation_run(
         validation_run_id=validation_run_id,
         user_id=user_id,
         resume_from_step=resume_from_step,
+        continuation_id=continuation_id,
+        task_id=task_id,
     )
 
     dispatcher = get_task_dispatcher()

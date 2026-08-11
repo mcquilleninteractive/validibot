@@ -95,14 +95,10 @@ class GoogleCloudTasksDispatcher(TaskDispatcher):
             queue_path,
         )
 
-        # Human-readable identifier for logging only. We deliberately do NOT
-        # set this as the Cloud Tasks ``Task.name``: a deterministic task name
-        # would make Cloud Tasks de-duplicate by name, but it would also block
-        # legitimate re-dispatch of the same run (e.g. a retry after a transient
-        # failure) for as long as the completed-task tombstone lives. Launch
-        # idempotency is already handled upstream — the launcher checks
-        # ``step_run.output`` for an existing job before relaunching — so
-        # name-based dedup here would add risk without benefit.
+        # Human-readable identifier for logging only. Ordinary run launches let
+        # Cloud Tasks allocate the name so an explicit later retry remains
+        # possible. Durable continuations supply ``request.task_id`` because
+        # repeated dispatch of the *same committed work row* must converge.
         if request.resume_from_step is not None:
             task_name = (
                 f"validation-run-{request.validation_run_id}"
@@ -137,6 +133,7 @@ class GoogleCloudTasksDispatcher(TaskDispatcher):
                 oidc_service_account=service_account,
                 oidc_audience=worker_url,
                 dispatch_deadline_seconds=self._get_dispatch_deadline_seconds(),
+                task_id=request.task_id,
             )
             logger.info(
                 "Cloud Task created: %s for validation_run_id=%s",

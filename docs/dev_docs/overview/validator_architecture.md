@@ -57,15 +57,15 @@ class InputFileItem(BaseModel):
     name: str                    # Filename (e.g., "model.idf")
     uri: str                     # Where to download the file
     mime_type: str               # MIME type for format detection
-    role: str                    # Semantic role (e.g., "primary-model", "weather")
-    port_key: str | None         # Declared Validibot file port, if any
+    role: str | None             # Optional descriptive backend metadata
+    port_key: str                # Required declared Validibot file port
 
 class ResourceFileItem(BaseModel):
     """An auxiliary resource file needed by the validator."""
     id: str                      # Resource UUID
     type: str                    # Resource type (e.g., "energyplus_weather")
     uri: str                     # Where to download the resource
-    port_key: str | None         # Declared Validibot file port, if any
+    port_key: str                # Required declared Validibot file port
 
 class ValidatorInfo(BaseModel):
     """Information about the validator being run."""
@@ -240,9 +240,10 @@ When a non-primary file port is bound to a submitted file, Django stores it as a
 `SubmissionInputFile` row keyed by workflow step and port. Dispatch then copies
 that file into the attempt bundle and passes its complete identity—URI, exact
 size, SHA-256, and provider storage version—to the envelope builder under the
-port key. The primary submitted payload keeps using the historical
-`Submission` content/file fields and the `primary_file_uri` internal key, but
-that key now maps to a strict identity object rather than a bare URI.
+port key. The primary submitted payload remains stored on `Submission`.
+Attempt materialization may use `primary_file_uri` as an internal adapter key,
+but the envelope item always carries the declared port key and the backend
+never sees or interprets that adapter convention.
 
 Artifact-port resolution writes `ResolvedInputTrace` rows just like scalar input
 resolution. The snapshot records the selected submitted file, workflow
@@ -257,10 +258,10 @@ builder formats that descriptor but does not choose a source independently.
 
 On the backend side, use
 `validibot_shared.validations.file_ports.select_input_file()` or
-`select_resource_file()`. The helper matches the exact `port_key`, permits an
-older role/type only for an item whose own port key is absent, rejects ambiguous
-matches, and never depends on list order. Do not implement a new
-`input_files[0]` or `port_key == expected or role == legacy` matcher.
+`select_resource_file()`. The helper matches the required exact `port_key`,
+rejects missing or ambiguous matches, and never depends on list order. A role
+or resource type is descriptive metadata only. Do not implement a new
+`input_files[0]` or role/type fallback matcher.
 
 The full step form and generic Inputs modal both obtain file-source controls
 from `BaseStepConfigForm`. Validator-specific forms may arrange those fields or

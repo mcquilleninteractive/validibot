@@ -85,6 +85,14 @@ The doctor command's VB001-VB099 range checks these.
 | `VALIDATOR_RETAIN_HOURS` | How long stopped validator containers are kept before `cleanup` removes them. Default: `24`. |
 | `VALIDATOR_TIMEOUT_SECONDS` | Outer per-validator timeout and stuck-run watchdog deadline. Validators can request shorter via their manifest. |
 | `CELERY_VISIBILITY_TIMEOUT_SECONDS` | Redis redelivery window. Default: `3600`; it must remain greater than Celery's 30-minute hard task limit so a healthy long task is not delivered twice. |
+| `VALIDATION_CALLBACK_PROCESSING_STALE_SECONDS` | Callback storage/verification ownership window. Default: `600`; a duplicate may take over only after this age. |
+| `VALIDATION_CONTINUATION_DISPATCH_STALE_SECONDS` | Producer-claim repair window for callback-driven workflow resumption. Default: `300`. |
+| `VALIDATION_CONTINUATION_EXECUTION_STALE_SECONDS` | Worker-claim repair window. Default: `2100`, intentionally longer than Celery's hard task limit. |
+
+The existing scheduled `cleanup_stuck_runs` command also repairs durable
+workflow continuations before evaluating run timeouts. Keep that schedule
+enabled: it closes the process-death window between committing callback output
+and delivering the next workflow step.
 
 ### 7. Pro and signing
 

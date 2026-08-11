@@ -45,8 +45,8 @@ class TaskDispatchRequest:
     validation_run_id: UUID | str
     """ID of the ValidationRun to execute."""
 
-    user_id: int
-    """ID of the user who initiated the run."""
+    user_id: int | None
+    """ID of the initiating user, or None for a system-created run."""
 
     resume_from_step: int | None = None
     """Step order of the last completed step (None for initial execution).
@@ -57,12 +57,21 @@ class TaskDispatchRequest:
     fabricated ``order + 1``.
     """
 
+    continuation_id: UUID | str | None = None
+    """Durable continuation record authorizing this resume, when applicable."""
+
+    task_id: str | None = None
+    """Optional deterministic transport identity supplied by durable work."""
+
     def to_payload(self) -> dict:
         """Convert to JSON-serializable payload for task queues."""
         return {
             "validation_run_id": str(self.validation_run_id),
             "user_id": self.user_id,
             "resume_from_step": self.resume_from_step,
+            "continuation_id": (
+                str(self.continuation_id) if self.continuation_id is not None else None
+            ),
         }
 
 

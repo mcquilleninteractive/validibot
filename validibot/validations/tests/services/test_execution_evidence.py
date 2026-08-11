@@ -28,7 +28,13 @@ from validibot.workflows.tests.factories import WorkflowStepResourceFactory
 pytestmark = pytest.mark.django_db
 
 
-def _envelope(*, sha256: str, uri: str = "file:///private/model.idf"):
+def _envelope(
+    *,
+    sha256: str,
+    uri: str = "file:///private/model.idf",
+    port_key: str = "primary_model",
+    role: str = "primary-model",
+):
     """Build the minimal envelope-shaped object required by the projector."""
     return SimpleNamespace(
         context=SimpleNamespace(
@@ -39,8 +45,8 @@ def _envelope(*, sha256: str, uri: str = "file:///private/model.idf"):
             InputFileItem(
                 name="model.idf",
                 mime_type=SupportedMimeType.ENERGYPLUS_IDF,
-                role="primary-model",
-                port_key="primary_model",
+                role=role,
+                port_key=port_key,
                 uri=uri,
                 size_bytes=123,
                 sha256=sha256,
@@ -90,6 +96,31 @@ class TestBuildInputEvidenceSnapshot:
         assert private_uri not in serialized
         assert "raw-secret-that-must-not-persist" not in serialized
         assert "uri" not in snapshot["input_files"][0]
+
+    def test_primary_relationship_uses_the_declared_port_not_the_role(self):
+        """Descriptive labels cannot reclassify evidence-bound input bytes."""
+        digest = "a" * 64
+        submission = SubmissionFactory()
+        _set_original_submission_identity(submission, sha256=digest)
+        step = WorkflowStepFactory(workflow=submission.workflow)
+
+        exact = build_input_evidence_snapshot(
+            _envelope(sha256=digest, role="unrelated-description"),
+            submission=submission,
+            step=step,
+        )
+        unrelated = build_input_evidence_snapshot(
+            _envelope(
+                sha256=digest,
+                port_key="weather_file",
+                role="primary-model",
+            ),
+            submission=submission,
+            step=step,
+        )
+
+        assert exact["input_relationships"][0]["target_port_key"] == "primary_model"
+        assert unrelated["input_relationships"] == []
 
     def test_template_snapshot_records_both_original_sources_and_executed_bytes(self):
         """Template parameters and template file both point to the generated IDF."""

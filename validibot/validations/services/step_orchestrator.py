@@ -30,11 +30,13 @@ from __future__ import annotations
 
 import logging
 from collections import Counter
+from dataclasses import dataclass
+from enum import Enum
+from enum import auto
 from typing import TYPE_CHECKING
 from typing import Any
 from typing import cast
 
-from django.apps import apps
 from django.db import transaction
 from django.utils import timezone
 from django.utils.translation import gettext as _
@@ -46,9 +48,11 @@ from validibot.validations.constants import Severity
 from validibot.validations.constants import StepStatus
 from validibot.validations.constants import ValidationRunErrorCategory
 from validibot.validations.constants import ValidationRunStatus
-from validibot.validations.models import ValidationFinding
 from validibot.validations.models import ValidationRun
 from validibot.validations.models import ValidationStepRun
+from validibot.validations.services.deferred_credentials import (
+    finalize_deferred_signed_credentials,
+)
 from validibot.validations.services.findings_persistence import normalize_issue
 from validibot.validations.services.findings_persistence import persist_findings
 from validibot.validations.services.models import ValidationRunTaskResult
@@ -74,6 +78,22 @@ GENERIC_EXECUTION_ERROR = _(
 )
 
 RUN_CANCELED_MESSAGE = _("Run canceled by user.")
+
+
+class _StepRunDisposition(Enum):
+    """Decision produced while admitting one logical step for execution."""
+
+    EXECUTE = auto()
+    TERMINAL = auto()
+    IN_PROGRESS = auto()
+
+
+@dataclass(frozen=True, slots=True)
+class _StepRunAdmission:
+    """Authoritative step row and the only safe action for this delivery."""
+
+    step_run: ValidationStepRun
+    disposition: _StepRunDisposition
 
 
 class StepOrchestrator:
@@ -232,13 +252,19 @@ class StepOrchestrator:
                 if _was_cancelled():
                     cancelled = True
                     break
-                step_run, should_execute = self._start_step_run(
+                admission = self._start_step_run(
                     validation_run=validation_run,
                     workflow_step=wf_step,
                 )
+                step_run = admission.step_run
 
-                # Skip already-completed steps (idempotency on retry)
-                if not should_execute:
+                if admission.disposition is _StepRunDisposition.IN_PROGRESS:
+                    # Another delivery already owns this logical step. Never
+                    # skip past it or reinterpret RUNNING as permission to
+                    # repeat an inline validator/action side effect.
+                    pending_async = True
+                    break
+                if admission.disposition is _StepRunDisposition.TERMINAL:
                     # If the step failed, we should stop (same as failure)
                     if step_run.status == StepStatus.FAILED:
                         overall_failed = True
@@ -489,8 +515,9 @@ class StepOrchestrator:
         stamp_evidence_manifest(validation_run)
 
         if validation_run.status == ValidationRunStatus.SUCCEEDED:
-            if self._finalize_deferred_signed_credentials(
+            if finalize_deferred_signed_credentials(
                 validation_run=validation_run,
+                finalize_step_run=self._finalize_step_run,
             ):
                 summary_record = build_run_summary_record(
                     validation_run=validation_run,
@@ -541,27 +568,19 @@ class StepOrchestrator:
         *,
         validation_run: ValidationRun,
         workflow_step: WorkflowStep,
-    ) -> tuple[ValidationStepRun, bool]:
+    ) -> _StepRunAdmission:
         """
         Get or create a ValidationStepRun entry for the step.
 
-        This method is idempotent to handle task queue retries. If a step run
-        already exists for this (validation_run, workflow_step) pair, it
-        returns the existing one. If the existing step run is already terminal
-        (PASSED, FAILED, SKIPPED), the caller should skip re-execution.
-
-        A RUNNING step is treated as a crashed prior attempt: its findings
-        are cleared and it is re-executed. This is safe because async
-        validators (which leave steps RUNNING legitimately) are resumed via
-        ``resume_from_step`` which skips the already-running step. If this
-        method encounters a RUNNING step, it's because the worker crashed
-        before finalizing it — not because a container is still executing.
+        A task delivery may create the row and execute it exactly once. Later
+        deliveries observe either its terminal result or active ownership. A
+        RUNNING/PENDING row is never reinterpreted as a crashed worker because
+        that would repeat inline validators and side-effecting actions. The
+        watchdog owns recovery of genuinely abandoned work.
 
         Returns:
-            Tuple of (step_run, should_execute):
-            - step_run: The ValidationStepRun instance
-            - should_execute: True if the step should be executed (new or
-              RUNNING). False if already terminal (PASSED, FAILED, SKIPPED).
+            A step admission containing the authoritative row and one of:
+            EXECUTE, TERMINAL, or IN_PROGRESS.
 
         See Also:
             ADR-001: Idempotent Step Execution on Retry
@@ -577,58 +596,36 @@ class StepOrchestrator:
                 },
             )
 
-            if not created:
-                # Re-read with a row lock so the terminal-status check
-                # and the finding cleanup below are atomic. This is
-                # defense-in-depth: the primary guard against duplicate
-                # resume tasks is CallbackReceipt idempotency in the
-                # callback service. The lock here prevents a narrow
-                # race if two workers somehow both reach this point
-                # for the same step, but it does NOT fully prevent
-                # duplicate execution — the lock is released at the
-                # end of this block, before the step actually runs.
-                step_run = ValidationStepRun.objects.select_for_update().get(
-                    id=step_run.id
+            if created:
+                return _StepRunAdmission(
+                    step_run=step_run,
+                    disposition=_StepRunDisposition.EXECUTE,
                 )
 
-                if step_run.status in {
-                    StepStatus.PASSED,
-                    StepStatus.FAILED,
-                    StepStatus.SKIPPED,
-                }:
-                    # Already terminal - skip execution
-                    logger.info(
-                        "Step run %s already terminal (status=%s), skipping",
-                        step_run.id,
-                        step_run.status,
-                    )
-                    return step_run, False
-
-                # A RUNNING step with attempt history can represent live or
-                # acceptance-ambiguous provider work. Never reinterpret it as
-                # a crashed task and launch a second provider execution.
-                if step_run.execution_attempts.exists():
-                    logger.info(
-                        "Step run %s already has execution-attempt history; "
-                        "automatic task redelivery cannot relaunch it",
-                        step_run.id,
-                    )
-                    return step_run, False
-
-                # A step without attempt history failed before it could claim
-                # provider work, so resetting its local bookkeeping is safe.
+            step_run = ValidationStepRun.objects.select_for_update().get(id=step_run.id)
+            if step_run.status in {
+                StepStatus.PASSED,
+                StepStatus.FAILED,
+                StepStatus.SKIPPED,
+            }:
                 logger.info(
-                    "Step run %s is RUNNING (retry scenario), "
-                    "clearing findings and resetting timer",
+                    "Step run %s already terminal (status=%s), skipping",
                     step_run.id,
+                    step_run.status,
                 )
-                step_run.started_at = timezone.now()
-                step_run.save(update_fields=["started_at"])
-                ValidationFinding.objects.filter(
-                    validation_step_run=step_run,
-                ).delete()
+                return _StepRunAdmission(
+                    step_run=step_run,
+                    disposition=_StepRunDisposition.TERMINAL,
+                )
 
-            return step_run, True
+            logger.info(
+                "Step run %s is already active; duplicate delivery will wait",
+                step_run.id,
+            )
+            return _StepRunAdmission(
+                step_run=step_run,
+                disposition=_StepRunDisposition.IN_PROGRESS,
+            )
 
     def _finalize_step_run(
         self,
@@ -714,153 +711,6 @@ class StepOrchestrator:
             assertion_failures=0,
             assertion_total=0,
         )
-
-    def _finalize_deferred_signed_credentials(
-        self,
-        *,
-        validation_run: ValidationRun,
-    ) -> bool:
-        """Issue deferred signed credentials after the run has finalized.
-
-        Returns True when the helper changes persisted findings or flips the
-        run status, signaling that the run summary should be rebuilt before the
-        output hash is stamped.
-        """
-        signed_step_runs = list(
-            ValidationStepRun.objects.select_related(
-                "workflow_step",
-                "workflow_step__action",
-                "workflow_step__action__definition",
-            )
-            .filter(
-                validation_run=validation_run,
-                workflow_step__action__definition__type=(
-                    CredentialActionType.SIGNED_CREDENTIAL
-                ),
-            )
-            .order_by("step_order", "pk")
-        )
-        if not signed_step_runs:
-            return False
-
-        if not apps.is_installed("validibot_pro"):
-            logger.error(
-                "Signed credential steps exist for run %s but validibot_pro "
-                "is not in INSTALLED_APPS during deferred issuance.",
-                validation_run.id,
-            )
-            message = _(
-                "Signed credential support is not installed on this instance.",
-            )
-            summary_needs_rebuild = False
-            for step_run in signed_step_runs:
-                summary_needs_rebuild = (
-                    self._record_deferred_signed_credential_failure(
-                        validation_run=validation_run,
-                        step_run=step_run,
-                        message=message,
-                    )
-                    or summary_needs_rebuild
-                )
-            return summary_needs_rebuild
-
-        # Pro is installed — safe to import the credential issuance module.
-        from validibot_pro.credentials import issuance as credential_issuance
-
-        summary_needs_rebuild = False
-        for step_run in signed_step_runs:
-            try:
-                credential = credential_issuance.issue_credential(step_run)
-            except credential_issuance.CredentialIssuanceError as exc:
-                logger.warning(
-                    "Deferred credential issuance failed for run %s step %s: %s",
-                    validation_run.id,
-                    step_run.id,
-                    exc,
-                )
-                summary_needs_rebuild = (
-                    self._record_deferred_signed_credential_failure(
-                        validation_run=validation_run,
-                        step_run=step_run,
-                        message=str(exc),
-                    )
-                    or summary_needs_rebuild
-                )
-                continue
-            except Exception as exc:
-                logger.exception(
-                    "Unexpected deferred credential issuance failure for "
-                    "run %s step %s.",
-                    validation_run.id,
-                    step_run.id,
-                )
-                summary_needs_rebuild = (
-                    self._record_deferred_signed_credential_failure(
-                        validation_run=validation_run,
-                        step_run=step_run,
-                        message=str(exc),
-                    )
-                    or summary_needs_rebuild
-                )
-                continue
-
-            stats = dict(step_run.output or {})
-            stats["credential_issuance"] = "issued"
-            stats["credential_id"] = str(credential.id)
-            step_run.output = stats
-            step_run.save(update_fields=["output"])
-
-        return summary_needs_rebuild
-
-    def _record_deferred_signed_credential_failure(
-        self,
-        *,
-        validation_run: ValidationRun,
-        step_run: ValidationStepRun,
-        message: str,
-    ) -> bool:
-        """Persist a deferred issuance failure on the credential step run."""
-        action = getattr(step_run.workflow_step, "action", None)
-        failure_mode = getattr(
-            action,
-            "failure_mode",
-            ActionFailureMode.ADVISORY,
-        )
-        severity = (
-            Severity.WARNING
-            if failure_mode == ActionFailureMode.ADVISORY
-            else Severity.ERROR
-        )
-        persist_findings(
-            validation_run=validation_run,
-            step_run=step_run,
-            issues=[
-                ValidationIssue(
-                    path="",
-                    message=message,
-                    severity=severity,
-                    code="credential_issuance_failed",
-                ),
-            ],
-        )
-        stats = dict(step_run.output or {})
-        stats["credential_issuance"] = "failed"
-        self._finalize_step_run(
-            step_run=step_run,
-            status=StepStatus.FAILED,
-            stats=stats,
-            error=message,
-        )
-
-        if failure_mode == ActionFailureMode.BLOCKING:
-            validation_run.status = ValidationRunStatus.FAILED
-            validation_run.error = _("Signed credential issuance failed.")
-            validation_run.error_category = ValidationRunErrorCategory.RUNTIME_ERROR
-            validation_run.save(
-                update_fields=["status", "error", "error_category"],
-            )
-
-        return True
 
     # ---------- Step dispatch ----------
 

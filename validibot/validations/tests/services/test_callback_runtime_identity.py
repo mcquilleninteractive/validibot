@@ -6,11 +6,11 @@ execution. These focused tests ensure a valid attempt nonce cannot be replayed
 by a different otherwise-allowlisted service account.
 """
 
-from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 from rest_framework import status
+from rest_framework.response import Response
 
 from validibot.validations.constants import ExecutionDeploymentDeactivationCause
 from validibot.validations.constants import ExecutionRoutingMode
@@ -154,12 +154,12 @@ def test_managed_callback_rejects_a_different_allowlisted_runtime_identity():
 
 
 @pytest.mark.django_db
-@patch.object(ValidationCallbackService, "_process_callback")
+@patch.object(ValidationCallbackService, "_claim_callback_processing")
 def test_managed_callback_accepts_the_exact_snapshot_runtime_identity(
-    process_callback,
+    claim_callback,
 ):
     """The selected deployment identity may proceed after its nonce also matches."""
-    process_callback.return_value = SimpleNamespace(status_code=status.HTTP_200_OK)
+    claim_callback.return_value = Response(status=status.HTTP_200_OK)
     attempt = _managed_attempt()
 
     response = ValidationCallbackService().process(
@@ -168,4 +168,4 @@ def test_managed_callback_accepts_the_exact_snapshot_runtime_identity(
     )
 
     assert response.status_code == status.HTTP_200_OK
-    process_callback.assert_called_once()
+    claim_callback.assert_called_once()

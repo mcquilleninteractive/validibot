@@ -26,6 +26,7 @@ import pytest
 from django.core.files.uploadedfile import SimpleUploadedFile
 from validibot_shared.canonicalization import compute_callback_nonce_commitment
 from validibot_shared.energyplus.envelopes import EnergyPlusInputEnvelope
+from validibot_shared.pdf import PdfInputEnvelope
 from validibot_shared.schematron.envelopes import SchematronInputEnvelope
 from validibot_shared.shacl.envelopes import SHACLInputEnvelope
 from validibot_shared.validations.envelopes import ResourceFileItem
@@ -79,6 +80,7 @@ TEST_CALLBACK_NONCE = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
 TEST_CALLBACK_NONCE_COMMITMENT = compute_callback_nonce_commitment(
     TEST_CALLBACK_NONCE,
 )
+EXPECTED_PDF_MAX_EXECUTION_SECONDS = 300
 
 
 # ==============================================================================
@@ -191,6 +193,7 @@ def _make_weather_resource(
     return ResourceFileItem(
         id="resource-weather-123",
         type="energyplus_weather",
+        port_key="weather_file",
         uri=uri,
         name="weather.epw",
         size_bytes=18,
@@ -554,6 +557,76 @@ def _build_energyplus_file_port_run():
     return run, step, primary_port, weather_port, weather_resource
 
 
+def _build_pdf_file_port_run():
+    """Create a PDF run whose complete selector config crosses the boundary."""
+    validator = ValidatorFactory(validation_type=ValidationType.PDF, version=2)
+    step = WorkflowStepFactory(
+        validator=validator,
+        name="Inspect PDF package",
+        order=10,
+        config={
+            "profile": "safe_static_package_v1",
+            "emit_extracted_files_bundle": True,
+            "selected_xml": {
+                "required": True,
+                "original_filename": "handover.xml",
+            },
+            "selected_json": {
+                "required": False,
+                "rich_media_asset_name": "asset-index",
+            },
+            "selected_step_p21": {
+                "required": True,
+                "step_file_schema": ["AP242_FIXTURE"],
+            },
+        },
+    )
+    submission = SubmissionFactory(
+        workflow=step.workflow,
+        org=step.workflow.org,
+        content="%PDF-2.0\n% fixture",
+        file_type=SubmissionFileType.BINARY,
+        original_filename="package.pdf",
+    )
+    run = ValidationRunFactory(
+        workflow=step.workflow,
+        org=step.workflow.org,
+        submission=submission,
+    )
+    _create_step_run_with_attempt(
+        validation_run=run,
+        workflow_step=step,
+        step_order=step.order,
+        status=StepStatus.PENDING,
+    )
+    port = StepIODefinitionFactory(
+        validator=validator,
+        workflow_step=None,
+        contract_key="pdf_document",
+        native_name="pdf_document",
+        direction=StepIODirection.INPUT,
+        origin_kind=StepIOOriginKind.CATALOG,
+        source_kind=StepIOSourceKind.PAYLOAD_PATH,
+        data_type=CatalogValueType.ARTIFACT_REF,
+        io_medium=StepIOMedium.ARTIFACT,
+        artifact_kind=ArtifactKind.FILE,
+        media_type="application/pdf",
+        data_format=SubmissionDataFormat.PDF,
+        accepted_data_formats=[SubmissionDataFormat.PDF],
+        accepted_media_types=["application/pdf"],
+        metadata={"accepted_extensions": ["pdf"]},
+        envelope_channel=EnvelopeChannel.INPUT_FILES,
+        role="pdf-document",
+        min_items=1,
+        max_items=1,
+        allowed_source_scopes=[
+            BindingSourceScope.SUBMISSION_FILE,
+            BindingSourceScope.UPSTREAM_ARTIFACT,
+        ],
+    )
+    return run, step, port
+
+
 # ==============================================================================
 # Envelope structure — verifies all sections are populated correctly
 # ==============================================================================
@@ -753,6 +826,7 @@ class TestMultipleResourceFiles:
         library = ResourceFileItem(
             id="resource-lib-456",
             type="energyplus_library",
+            port_key="library_file",
             uri="gs://test-bucket/library.dat",
             name="library.dat",
             size_bytes=18,
@@ -1506,11 +1580,54 @@ class TestEnergyPlusFilePortMaterialization:
 
 
 # ==============================================================================
+# PDF package file-port and selector materialization
+# ==============================================================================
+# PDF has three independent optional typed outputs. This boundary test protects
+# them from being silently dropped while the submitted carrier is resolved by
+# its required file-port key.
+# ==============================================================================
+
+
+class TestPdfFilePortMaterialization:
+    """Tests for the complete application-to-PDF-backend input contract."""
+
+    def test_all_selectors_and_bounded_deadline_reach_the_pdf_envelope(self):
+        """No fixed selector may disappear when Django builds the attempt."""
+        run, step, port = _build_pdf_file_port_run()
+        StepInputBindingFactory(
+            workflow_step=step,
+            io_definition=port,
+            source_scope=BindingSourceScope.SUBMISSION_FILE,
+            source_data_path="primary",
+        )
+
+        envelope = _build_test_input_envelope(
+            run,
+            callback_url="http://localhost/callback/",
+            callback_id=None,
+            execution_bundle_uri="file:///validibot/output",
+            input_file_uris={
+                "primary_file_uri": "file:///validibot/input/package.pdf",
+            },
+        )
+
+        assert isinstance(envelope, PdfInputEnvelope)
+        assert envelope.input_files[0].port_key == "pdf_document"
+        assert envelope.inputs.selected_xml.original_filename == "handover.xml"
+        assert envelope.inputs.selected_json.rich_media_asset_name == "asset-index"
+        assert envelope.inputs.selected_step_p21.step_file_schema == ["AP242_FIXTURE"]
+        assert envelope.inputs.emit_extracted_files_bundle is True
+        assert (
+            envelope.inputs.limits.max_execution_seconds
+            == EXPECTED_PDF_MAX_EXECUTION_SECONDS
+        )
+
+
+# ==============================================================================
 # SHACL data-graph file-port materialization
 # ==============================================================================
-# SHACL historically received the submitted RDF file through ``primary_file_uri``.
-# The artifact-port contract makes the conceptual input explicit as
-# ``data_graph`` while preserving the same backend envelope shape.
+# The artifact-port contract names the RDF ``data_graph`` explicitly and keeps
+# its envelope identity independent of list position or backend role labels.
 # ==============================================================================
 
 
@@ -1997,8 +2114,15 @@ class TestFMUInputBindings:
 
     def test_no_declared_fmu_inputs_produces_empty_input_values(self):
         """A step with no declared FMU inputs should launch with an empty map."""
-        run, _step = _build_fmu_run(
+        run, step = _build_fmu_run(
             submission_content='{"accidental": "must-not-enter-envelope"}',
+        )
+        fmu_port = _make_fmu_model_port(step.validator)
+        StepInputBindingFactory(
+            workflow_step=step,
+            io_definition=fmu_port,
+            source_scope=BindingSourceScope.WORKFLOW_RESOURCE,
+            source_data_path=FMU_MODEL_RESOURCE,
         )
 
         envelope = _build_test_input_envelope(
@@ -2014,6 +2138,13 @@ class TestFMUInputBindings:
     def test_declared_fmu_input_without_binding_fails_closed(self):
         """Declared inputs require bindings; raw submission JSON is not a fallback."""
         run, step = _build_fmu_run(submission_content='{"panel_area": 150.0}')
+        fmu_port = _make_fmu_model_port(step.validator)
+        StepInputBindingFactory(
+            workflow_step=step,
+            io_definition=fmu_port,
+            source_scope=BindingSourceScope.WORKFLOW_RESOURCE,
+            source_data_path=FMU_MODEL_RESOURCE,
+        )
         StepIODefinitionFactory(
             workflow_step=step,
             validator=None,
@@ -2039,6 +2170,13 @@ class TestFMUInputBindings:
                 '{"building": {"panel_area": 150.0}, '
                 '"accidental": "must-not-enter-envelope"}'
             ),
+        )
+        fmu_port = _make_fmu_model_port(step.validator)
+        StepInputBindingFactory(
+            workflow_step=step,
+            io_definition=fmu_port,
+            source_scope=BindingSourceScope.WORKFLOW_RESOURCE,
+            source_data_path=FMU_MODEL_RESOURCE,
         )
         io_definition = StepIODefinitionFactory(
             workflow_step=step,

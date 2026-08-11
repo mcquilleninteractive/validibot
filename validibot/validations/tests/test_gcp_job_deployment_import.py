@@ -163,7 +163,7 @@ def test_command_imports_one_backend_without_changing_routes(
     """One backend import must leave every compatible deployment inactive."""
     settings.GCP_PROJECT_ID = PROJECT_ID
     settings.GCP_REGION = REGION
-    ValidatorFactory(
+    validator = ValidatorFactory(
         validation_type=ValidationType.FMU,
         execution_backend_slug="fmu",
         execution_runtime_contract="validibot-execution-v1",
@@ -180,8 +180,15 @@ def test_command_imports_one_backend_without_changing_routes(
         f"--job-name={job_name}",
     )
 
-    route = ValidatorExecutionDeployment.objects.get()
+    routes = ValidatorExecutionDeployment.objects.all()
+    route = routes.get(validator=validator)
     assert route.validator.validation_type == ValidationType.FMU
-    assert route.routing_role == ExecutionDeploymentRoutingRole.INACTIVE
+    assert set(routes.values_list("validator__execution_backend_slug", flat=True)) == {
+        "fmu"
+    }
+    assert set(routes.values_list("routing_role", flat=True)) == {
+        ExecutionDeploymentRoutingRole.INACTIVE
+    }
+    assert jobs_client_class.return_value.get_job.call_count == routes.count()
     requested = jobs_client_class.return_value.get_job.call_args.kwargs["name"]
     assert requested.endswith(f"/jobs/{job_name}")

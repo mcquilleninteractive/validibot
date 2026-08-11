@@ -144,6 +144,7 @@ def _make_weather_resource(
         id="resource-weather-123",
         name="weather.epw",
         type="energyplus_weather",
+        port_key="weather_file",
         **_file_identity(uri).envelope_fields(),
     )
 

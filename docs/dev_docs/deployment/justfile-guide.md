@@ -212,7 +212,8 @@ lifecycle. The commands are submodule-scoped under `gcp mcp`:
 
 ```bash
 just gcp mcp setup prod      # First-time: create MCP SA + IAM bindings
-just gcp mcp build           # Build + push MCP image to Artifact Registry
+just mcp build-local         # Build local MCP image; never pushes
+just gcp mcp build-push      # Build + push MCP image to Artifact Registry
 just gcp mcp deploy prod     # Deploy MCP image to Cloud Run
 just gcp mcp secrets prod    # Upload .mcp → mcp-env Secret Manager secret
 just gcp mcp lb-add prod mcp.yourdomain.com  # Wire MCP into the LB
@@ -222,8 +223,10 @@ just gcp mcp test            # Run MCP pytest suite locally (no GCP calls)
 ```
 
 Same module is also reachable as `just mcp ...` at the top level;
-`just mcp test` and `just mcp test-e2e` are the natural entry points
-for local test runs.
+`just mcp check`, `just mcp test`, and `just mcp test-e2e` are the natural
+entry points for local verification. `just mcp build` remains a compatibility
+alias for the historical build-and-push behavior; use `build-local` or
+`build-push` in new automation so publication is explicit.
 
 ### Self-hosted Docker Compose
 

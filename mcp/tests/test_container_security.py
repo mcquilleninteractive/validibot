@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 MCP_DOCKERFILE = REPO_ROOT / "compose" / "production" / "mcp" / "Dockerfile"
 MCP_DOCKERIGNORE = REPO_ROOT / "mcp" / ".dockerignore"
 EXPECTED_UV_IMAGE = (
@@ -18,8 +18,7 @@ EXPECTED_UV_IMAGE = (
     "sha256:b46b03ddfcfbf8f547af7e9eaefdf8a39c8cebcba7c98858d3162bd28cf536f6"
 )
 EXPECTED_PYTHON_IMAGE = (
-    "python:3.13-slim@"
-    "sha256:6771159cd4fa5d9bba1258caf0b82e6b73458c694d178ad97c5e925c2d0e1a91"
+    "python:3.13-slim@sha256:6771159cd4fa5d9bba1258caf0b82e6b73458c694d178ad97c5e925c2d0e1a91"
 )
 EXPECTED_PYTHON_STAGE_COUNT = 2
 

@@ -17,11 +17,7 @@ from typing import TYPE_CHECKING, Any
 from validibot_mcp import auth, client
 from validibot_mcp.errors import MCPToolError
 from validibot_mcp.gating import check_global_enabled
-from validibot_mcp.refs import (
-    RUN_REF_MEMBER_KIND,
-    build_member_run_ref,
-    parse_run_ref,
-)
+from validibot_mcp.refs import RUN_REF_MEMBER_KIND, build_member_run_ref, parse_run_ref
 from validibot_mcp.tools import format_error
 
 if TYPE_CHECKING:

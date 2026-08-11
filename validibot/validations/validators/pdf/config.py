@@ -122,7 +122,7 @@ config = ValidatorConfig(
         _output_port(
             slug="pdf_inventory",
             label="PDF package inventory",
-            description="Canonical validibot.pdf_inventory.v1 JSON report.",
+            description="Canonical validibot.pdf_inventory.v2 JSON report.",
             data_format=SubmissionDataFormat.JSON,
             media_type="application/json",
             artifact_kind=ArtifactKind.REPORT,

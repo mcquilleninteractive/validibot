@@ -766,6 +766,18 @@ VALIDATION_RESULT_MAX_BYTES = env.int(
     default=25 * 1024 * 1024,  # 25 MB
 )
 
+# A callback processor owns storage download and verification using a durable
+# token instead of retaining database locks. Another delivery may take over
+# only after this window; it should comfortably exceed a normal output fetch.
+VALIDATION_CALLBACK_PROCESSING_STALE_SECONDS = env.int(
+    "VALIDATION_CALLBACK_PROCESSING_STALE_SECONDS",
+    default=10 * 60,
+)
+if VALIDATION_CALLBACK_PROCESSING_STALE_SECONDS <= 0:
+    raise ImproperlyConfigured(
+        "VALIDATION_CALLBACK_PROCESSING_STALE_SECONDS must be greater than zero."
+    )
+
 # Submission settings
 SUBMISSION_INLINE_MAX_BYTES = 10_000_000  # 10MB
 SUBMISSION_FILE_MAX_BYTES = 1_000_000_000  # 1GB
@@ -1210,6 +1222,33 @@ if not (
 ):
     raise ImproperlyConfigured(
         "CLOUD_TASKS_DISPATCH_DEADLINE_SECONDS must be between 15 and 1800."
+    )
+
+# Callback-driven workflow resumption is durable in PostgreSQL. These leases
+# bound takeover of a crashed queue producer or worker; neither is a business
+# timeout, and both operations remain safe under at-least-once redelivery.
+VALIDATION_CONTINUATION_DISPATCH_STALE_SECONDS = env.int(
+    "VALIDATION_CONTINUATION_DISPATCH_STALE_SECONDS",
+    default=5 * 60,
+)
+VALIDATION_CONTINUATION_EXECUTION_STALE_SECONDS = env.int(
+    "VALIDATION_CONTINUATION_EXECUTION_STALE_SECONDS",
+    # Exceeds the self-hosted Celery hard limit (30 minutes) as well as the
+    # default GCP orchestration request. A healthy synchronous Docker step must
+    # not be mistaken for an abandoned continuation.
+    default=35 * 60,
+)
+if VALIDATION_CONTINUATION_DISPATCH_STALE_SECONDS <= 0:
+    raise ImproperlyConfigured(
+        "VALIDATION_CONTINUATION_DISPATCH_STALE_SECONDS must be greater than zero."
+    )
+if (
+    VALIDATION_CONTINUATION_EXECUTION_STALE_SECONDS
+    <= CLOUD_TASKS_DISPATCH_DEADLINE_SECONDS
+):
+    raise ImproperlyConfigured(
+        "VALIDATION_CONTINUATION_EXECUTION_STALE_SECONDS must exceed "
+        "CLOUD_TASKS_DISPATCH_DEADLINE_SECONDS."
     )
 
 # Provider queue for request-driven validator Services. This is deliberately

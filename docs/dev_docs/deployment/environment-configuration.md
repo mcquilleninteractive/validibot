@@ -473,6 +473,9 @@ quickly the transport decides a delivery was lost:
 |---|---:|---|---|
 | `CELERY_VISIBILITY_TIMEOUT_SECONDS` | `3600` | Self-hosted Redis | Must exceed `CELERY_TASK_TIME_LIMIT` (1800 seconds), otherwise Redis can deliver a healthy long task to another worker. |
 | `CLOUD_TASKS_DISPATCH_DEADLINE_SECONDS` | `600` | GCP | Bounds the short application-worker HTTP orchestration request; accepted range is 15–1800 seconds. Validator compute runs separately in a selected Service or retained Job. |
+| `VALIDATION_CALLBACK_PROCESSING_STALE_SECONDS` | `600` | All | Bounds ownership of callback storage download and verification. A duplicate delivery receives a retryable conflict before this age and may fence a stale processor afterward. Must be greater than zero. |
+| `VALIDATION_CONTINUATION_DISPATCH_STALE_SECONDS` | `300` | All | Delay before the watchdog may take over a continuation producer that claimed work but did not record queue acceptance. Must be greater than zero. |
+| `VALIDATION_CONTINUATION_EXECUTION_STALE_SECONDS` | `2100` | All | Delay before the watchdog may redeliver a continuation whose worker disappeared. It must exceed `CLOUD_TASKS_DISPATCH_DEADLINE_SECONDS`; the default also exceeds the self-hosted Celery hard task limit. |
 | `GCP_VALIDATOR_TASK_QUEUE_NAME` | empty | GCP | Separate stage-level queue used only for bounded validator Service deliveries. Production convention: `<app>-validator-provider`. |
 | `GCP_VALIDATOR_TASK_INVOKER_SERVICE_ACCOUNT` | empty | GCP | Dedicated OIDC principal with `run.invoker` only on registered private validator Services. Use `<app>-val-invoker-<stage>@<project>.iam.gserviceaccount.com`; `init-stage` derives this abbreviated name to stay within Google's 30-character service-account ID limit. Upload the Django environment after setting it. |
 | `GCP_VALIDATOR_TASK_DISPATCH_DEADLINE_SECONDS` | `1800` | GCP | Exact Cloud Tasks HTTP deadline for validator Service requests; changing it requires revisiting the Service transport contract. |
@@ -480,6 +483,12 @@ quickly the transport decides a delivery was lost:
 
 Transport retries never authorize a second provider launch after an attempt
 has reached `DISPATCHING`, `RUNNING`, or `UNKNOWN`.
+
+Callback-driven resumption follows the same at-least-once rule. PostgreSQL
+commits a `ValidationRunContinuation` with the completed callback step;
+`transaction.on_commit()` provides the fast delivery path, and the scheduled
+`cleanup_stuck_runs` watchdog repairs pending or stale claims. Duplicate
+workers stop at an active step rather than re-running or skipping past it.
 
 GCP validator storage controls are deliberately absent from this table because
 they are not operator choices. Every GCS + Cloud Run attempt uses a

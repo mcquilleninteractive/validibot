@@ -28,7 +28,7 @@ from .conftest import SAMPLE_API_KEY, SAMPLE_WORKFLOW_SLIM
 ORG = "acme-corp"
 
 
-@pytest.fixture()
+@pytest.fixture
 def authenticated(monkeypatch):
     """Simulate an authenticated MCP request with a manual bearer token."""
 

@@ -29,10 +29,7 @@ from __future__ import annotations
 
 import pytest
 
-from validibot_mcp.client import (
-    _encode_ref,
-    get_authenticated_workflow_detail,
-)
+from validibot_mcp.client import _encode_ref, get_authenticated_workflow_detail
 
 # A traversal payload that, interpolated unencoded into
 # ``/api/v1/mcp/workflows/{ref}/``, would normalise to

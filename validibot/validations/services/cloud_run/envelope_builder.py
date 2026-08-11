@@ -24,6 +24,7 @@ from validibot_shared.fmu.envelopes import FMUInputs
 from validibot_shared.fmu.envelopes import FMUSimulationConfig
 from validibot_shared.pdf import PdfInputEnvelope
 from validibot_shared.pdf import PdfInputs
+from validibot_shared.pdf import PdfProcessingLimits
 from validibot_shared.portfolio_manager import PortfolioManagerInputs
 from validibot_shared.portfolio_manager import build_portfolio_manager_input_envelope
 from validibot_shared.portfolio_manager import mime_type_for_portfolio_manager_filename
@@ -43,7 +44,6 @@ from validibot_shared.validations.envelopes import WorkflowInfo
 from validibot.validations.constants import PORTFOLIO_MANAGER_MAX_SUBMISSION_BYTES
 from validibot.validations.constants import BindingSourceScope
 from validibot.validations.constants import EnvelopeChannel
-from validibot.validations.constants import ResourceFileType
 from validibot.validations.constants import StepIOMedium
 from validibot.validations.constants import ValidationType
 from validibot.validations.services import artifact_ports
@@ -253,123 +253,6 @@ def _filename_from_uri(uri: str) -> str:
     return Path(unquote(path)).name
 
 
-def resolve_step_resources(
-    step,
-    *,
-    role: str | None = None,
-    resource_uri_overrides: dict[str, FileIdentity] | None = None,
-) -> list[ResourceFileItem]:
-    """Resolve a step's ``WorkflowStepResource`` rows to ``ResourceFileItem`` objects.
-
-    Queries the relational ``step.step_resources`` reverse relation (FK-backed)
-    rather than parsing UUID strings from the JSON config. This provides
-    referential integrity: stale or unauthorized references are impossible
-    because the FK is PROTECT on ``ValidatorResourceFile``.
-
-    For catalog-reference resources, the ``ResourceFileItem.id`` and ``type``
-    come from the underlying ``ValidatorResourceFile``. For step-owned files,
-    the ``id`` is the ``WorkflowStepResource.pk`` and ``type`` is the
-    ``resource_type`` field on the record itself.
-
-    Args:
-        step: WorkflowStep instance with ``step_resources`` relation.
-        role: If provided, only return resources matching this role
-              (e.g., ``WorkflowStepResource.WEATHER_FILE``).
-        resource_uri_overrides: Optional mapping of ``resource_id`` to the
-            complete identity of the container-visible materialized file.
-            When provided and a resource's id is in the dict, the override is
-            used instead of
-            ``WorkflowStepResource.get_storage_uri()``. This is the
-            workspace-aware path used by the local Docker dispatch:
-            ``WorkflowStepResource.get_storage_uri()`` returns
-            ``MEDIA_ROOT``-rooted host paths that are not visible inside
-            the attempt-scoped container, so the dispatch layer materialises
-            each resource into the workspace and overrides the URI
-            here to point at
-            the resource below the attempt's container input path. Cloud Run
-            leaves this argument as ``None`` and gets the original
-            ``gs://`` URI from the model.
-
-    Returns:
-        List of ``ResourceFileItem`` objects with resolved storage URIs.
-    """
-
-    queryset = step.step_resources.select_related("validator_resource_file")
-    if role:
-        queryset = queryset.filter(role=role)
-
-    return [
-        _build_step_resource_item(
-            step_resource=step_resource,
-            resource_uri_overrides=resource_uri_overrides,
-        )
-        for step_resource in queryset
-    ]
-
-
-def _step_resource_metadata(step_resource) -> tuple[str, str, str]:
-    """Return the stable ID, type, and filename without opening resource bytes."""
-    if step_resource.is_catalog_reference:
-        resource = step_resource.validator_resource_file
-        return str(resource.id), resource.resource_type, resource.filename
-    return (
-        str(step_resource.pk),
-        step_resource.resource_type,
-        step_resource.filename or Path(step_resource.step_resource_file.name).name,
-    )
-
-
-def _build_step_resource_item(
-    *,
-    step_resource,
-    resource_uri_overrides: dict[str, FileIdentity] | None,
-    identity_override: FileIdentity | None = None,
-) -> ResourceFileItem:
-    """Build one strict resource item from stored or materialized identity data."""
-    resource_id, resource_type, name = _step_resource_metadata(step_resource)
-    identity = identity_override
-    if identity is None and resource_uri_overrides:
-        identity = resource_uri_overrides.get(resource_id)
-    if identity is None:
-        identity = _stored_step_resource_identity(step_resource)
-
-    return ResourceFileItem(
-        id=resource_id,
-        name=name,
-        type=resource_type,
-        **identity.envelope_fields(),
-    )
-
-
-def _stored_step_resource_identity(step_resource) -> FileIdentity:
-    """Resolve a managed resource's durable digest and provider version."""
-    if step_resource.is_catalog_reference:
-        source = step_resource.validator_resource_file
-        expected_sha256 = source.content_hash
-    else:
-        expected_sha256 = step_resource.content_hash
-
-    uri = step_resource.get_storage_uri()
-    if uri.startswith("gs://"):
-        from validibot.validations.services.cloud_run.gcs_client import (
-            get_gcs_file_identity,
-        )
-
-        return get_gcs_file_identity(uri=uri, sha256=expected_sha256)
-    if uri.startswith("file://"):
-        identity = local_file_identity(
-            path=Path(unquote(urlparse(uri).path)),
-            uri=uri,
-        )
-        if expected_sha256 and identity.sha256 != expected_sha256:
-            msg = f"Managed resource bytes no longer match their stored digest: {uri}"
-            raise ValueError(msg)
-        return identity
-
-    msg = f"Unsupported managed-resource URI for immutable input: {uri}"
-    raise ValueError(msg)
-
-
 def _resolve_energyplus_file_port_items(
     *,
     run,
@@ -377,12 +260,8 @@ def _resolve_energyplus_file_port_items(
     step_config: dict,
     input_file_uris: dict[str, FileIdentity] | None,
     resource_uri_overrides: dict[str, FileIdentity] | None,
-) -> tuple[list[InputFileItem], list[ResourceFileItem]] | None:
-    """Resolve declared EnergyPlus artifact input ports into envelope items.
-
-    Returns ``None`` when the validator has no declared artifact input ports,
-    allowing unsynced tests/dev databases to keep using the legacy path.
-    """
+) -> tuple[list[InputFileItem], list[ResourceFileItem]]:
+    """Resolve declared EnergyPlus artifact input ports into envelope items."""
 
     from validibot.validations.constants import StepIODirection
     from validibot.validations.constants import StepIOMedium
@@ -398,7 +277,8 @@ def _resolve_energyplus_file_port_items(
         )
     }
     if not ports:
-        return None
+        msg = f"EnergyPlus validator {step.validator_id} has no declared file ports"
+        raise ValueError(msg)
 
     bindings = {
         binding.io_definition.contract_key: binding
@@ -639,7 +519,7 @@ def _resolve_input_file_artifact_port_item(
     input_file_uris: dict[str, FileIdentity] | None,
     contract_key: str,
     item_builder,
-) -> tuple[InputFileItem, str] | None:
+) -> tuple[InputFileItem, str]:
     """Resolve one declared input-files artifact port into an envelope item."""
 
     from validibot.validations.constants import StepIODirection
@@ -658,7 +538,11 @@ def _resolve_input_file_artifact_port_item(
         .first()
     )
     if port is None:
-        return None
+        msg = (
+            f"Validator {step.validator_id} has no declared artifact port "
+            f"'{contract_key}'"
+        )
+        raise ValueError(msg)
 
     binding = (
         StepInputBinding.objects.filter(
@@ -732,13 +616,8 @@ def _resolve_resource_file_artifact_port_items(
     step,
     contract_key: str,
     resource_uri_overrides: dict[str, FileIdentity] | None,
-) -> list[ResourceFileItem] | None:
-    """Resolve one declared workflow-resource port with traceable provenance.
-
-    ``None`` means the validator catalog has not been synced and lets callers
-    use their narrow legacy fallback. An empty list is a successfully resolved
-    optional port with no assigned resource.
-    """
+) -> list[ResourceFileItem]:
+    """Resolve one declared workflow-resource port with traceable provenance."""
     from validibot.validations.constants import StepIODirection
     from validibot.validations.constants import StepIOMedium
     from validibot.validations.models import StepInputBinding
@@ -755,7 +634,11 @@ def _resolve_resource_file_artifact_port_items(
         .first()
     )
     if port is None:
-        return None
+        msg = (
+            f"Validator {step.validator_id} has no declared resource port "
+            f"'{contract_key}'"
+        )
+        raise ValueError(msg)
 
     binding = (
         StepInputBinding.objects.filter(
@@ -934,7 +817,7 @@ def _resolve_fmu_file_port_item(
     validator,
     input_file_uris: dict[str, FileIdentity] | None,
     resource_uri_overrides: dict[str, FileIdentity] | None,
-) -> tuple[InputFileItem, dict] | None:
+) -> tuple[InputFileItem, dict]:
     """Resolve the declared FMU model artifact port into an input file item."""
 
     from validibot.validations.constants import StepIODirection
@@ -953,7 +836,8 @@ def _resolve_fmu_file_port_item(
         .first()
     )
     if port is None:
-        return None
+        msg = f"FMU validator {validator.id} has no declared fmu_model port"
+        raise ValueError(msg)
 
     binding = (
         StepInputBinding.objects.filter(
@@ -1267,8 +1151,8 @@ def build_input_envelope(
     if validator.validation_type == ValidationType.ENERGYPLUS:
         timestep_per_hour = step_config.get("timestep_per_hour", 4)
         idf_checks = list(step_config.get("idf_checks", []))
-        # Missing legacy keys retain the historical behavior (full simulation).
-        # Newly saved direct-mode forms write an explicit false for preflight.
+        # Full simulation is the contract default; preflight-only steps store
+        # an explicit false value.
         run_simulation = bool(step_config.get("run_simulation", True))
         review_profile = step_config.get("review_profile", "standard")
         resolved_file_ports = _resolve_energyplus_file_port_items(
@@ -1278,72 +1162,14 @@ def build_input_envelope(
             input_file_uris=input_file_uris,
             resource_uri_overrides=resource_uri_overrides,
         )
-        if resolved_file_ports is not None:
-            input_files, resource_files = resolved_file_ports
-            if not any(item.port_key == "primary_model" for item in input_files):
-                msg = f"Step {step.id} has no primary_model file port resolved"
-                raise ValueError(msg)
-            if run_simulation and not any(
-                item.port_key == "weather_file"
-                for item in [*input_files, *resource_files]
-            ):
-                msg = f"Step {step.id} has no weather_file port resolved"
-                raise ValueError(msg)
-
-            return build_energyplus_input_envelope(
-                run_id=str(run.id),
-                validator=validator,
-                org_id=str(run.org.id),
-                org_name=run.org.name,
-                workflow_id=str(run.workflow.id),
-                step_id=str(step.id),
-                step_name=step.name,
-                model_file=None,
-                input_files=input_files,
-                resource_files=resource_files,
-                callback_url=callback_url,
-                callback_id=callback_id,
-                callback_nonce=callback_nonce,
-                callback_nonce_commitment=callback_nonce_commitment,
-                execution_bundle_uri=execution_bundle_uri,
-                execution_attempt_id=execution_attempt_id,
-                step_run_id=step_run_id,
-                expected_output_uri=expected_output_uri,
-                timestep_per_hour=timestep_per_hour,
-                idf_checks=idf_checks,
-                run_simulation=run_simulation,
-                review_profile=review_profile,
-                skip_callback=skip_callback,
-            )
-
-        model_file = (input_file_uris or {}).get("primary_file_uri")
-        if model_file is None:
-            msg = f"Step {step.id} has no immutable primary file identity"
+        input_files, resource_files = resolved_file_ports
+        if not any(item.port_key == "primary_model" for item in input_files):
+            msg = f"Step {step.id} has no primary_model file port resolved"
             raise ValueError(msg)
-
-        # Resolve resource files from relational WorkflowStepResource rows.
-        # Exclude MODEL_TEMPLATE resources — the template is consumed during
-        # preprocessing (in Django) and the resolved IDF is uploaded as the
-        # primary model file.  Including the template in resource_files would
-        # cause the runner to download it unnecessarily, and if the template
-        # filename matches the resolved model filename it could overwrite it.
-        from validibot.workflows.models import WorkflowStepResource
-
-        resource_files = resolve_step_resources(
-            step,
-            role=WorkflowStepResource.WEATHER_FILE,
-            resource_uri_overrides=resource_uri_overrides,
-        )
-
-        # Full simulations require weather. Conversion-only preflight does not.
-        has_weather = any(
-            rf.type == ResourceFileType.ENERGYPLUS_WEATHER for rf in resource_files
-        )
-        if run_simulation and not has_weather:
-            msg = (
-                f"Step {step.id} has no weather file configured"
-                " (no WEATHER_FILE step resource)"
-            )
+        if run_simulation and not any(
+            item.port_key == "weather_file" for item in [*input_files, *resource_files]
+        ):
+            msg = f"Step {step.id} has no weather_file port resolved"
             raise ValueError(msg)
 
         return build_energyplus_input_envelope(
@@ -1354,7 +1180,8 @@ def build_input_envelope(
             workflow_id=str(run.workflow.id),
             step_id=str(step.id),
             step_name=step.name,
-            model_file=model_file,
+            model_file=None,
+            input_files=input_files,
             resource_files=resource_files,
             callback_url=callback_url,
             callback_id=callback_id,
@@ -1371,8 +1198,6 @@ def build_input_envelope(
             skip_callback=skip_callback,
         )
     if validator.validation_type == ValidationType.FMU:
-        from validibot.workflows.models import WorkflowStepResource
-
         resolved_fmu_port = _resolve_fmu_file_port_item(
             run=run,
             step=step,
@@ -1380,50 +1205,12 @@ def build_input_envelope(
             input_file_uris=input_file_uris,
             resource_uri_overrides=resource_uri_overrides,
         )
-        if resolved_fmu_port is not None:
-            fmu_file_item, fmu_value_snapshot = resolved_fmu_port
-            sim_config = (
-                (step.config or {}).get("fmu_simulation") or {}
-                if fmu_value_snapshot.get("source")
-                == BindingSourceScope.WORKFLOW_RESOURCE
-                else {}
-            )
-        else:
-            # Legacy compatibility for unsynced dev/test databases: before
-            # ``fmu_model`` was a declared artifact port, the builder checked
-            # for a step-owned FMU resource first and then fell back to the
-            # library validator's attached FMU model.
-            fmu_resource = step.step_resources.filter(
-                role=WorkflowStepResource.FMU_MODEL,
-            ).first()
-
-            # Workspace-aware override: the local Docker dispatch passes
-            # the container-visible URI for the FMU model file via
-            # ``input_file_uris["fmu_model_uri"]``. When set, it wins over
-            # any model-derived URI. Cloud Run leaves this unset and falls
-            # through to the gs:// path.
-            overridden_fmu_file = (input_file_uris or {}).get("fmu_model_uri")
-
-            if fmu_resource:
-                # Step-level upload — use get_storage_uri() which returns
-                # gs:// in production (GCS) or file:// locally, matching
-                # what the container runner expects.
-                fmu_file = overridden_fmu_file or _stored_step_resource_identity(
-                    fmu_resource,
-                )
-                sim_config = (step.config or {}).get("fmu_simulation") or {}
-            else:
-                # Library validator — existing behavior
-                fmu_model = validator.fmu_model
-                if not fmu_model:
-                    msg = f"Validator {validator.id} has no FMU model attached"
-                    raise ValueError(msg)
-                fmu_file = overridden_fmu_file or _stored_fmu_model_identity(fmu_model)
-                sim_config = {}
-            fmu_file_item = _build_fmu_input_file_item(
-                "fmu_model",
-                fmu_file,
-            )
+        fmu_file_item, fmu_value_snapshot = resolved_fmu_port
+        sim_config = (
+            (step.config or {}).get("fmu_simulation") or {}
+            if fmu_value_snapshot.get("source") == BindingSourceScope.WORKFLOW_RESOURCE
+            else {}
+        )
 
         # Build simulation config, only overriding fields that have values.
         # The shared FMUSimulationConfig has non-optional defaults for
@@ -1614,23 +1401,16 @@ def build_input_envelope(
                 rdf_format=shacl_inputs.rdf_format,
             ),
         )
-        data_graph_item = None
-        if resolved_data_graph is not None:
-            data_graph_item, source_scope = resolved_data_graph
-            if source_scope == BindingSourceScope.UPSTREAM_ARTIFACT:
-                shacl_inputs = _shacl_inputs_for_upstream_data_graph_uri(
-                    shacl_inputs,
-                    data_graph_item.uri,
-                )
-                data_graph_item.mime_type = mime_type_for_rdf_format(
-                    shacl_inputs.rdf_format,
-                )
-            submission_file = FileIdentity.from_envelope_item(data_graph_item)
-        else:
-            submission_file = (input_file_uris or {}).get("primary_file_uri")
-            if submission_file is None:
-                msg = f"Step {step.id} has no immutable primary file for SHACL"
-                raise ValueError(msg)
+        data_graph_item, source_scope = resolved_data_graph
+        if source_scope == BindingSourceScope.UPSTREAM_ARTIFACT:
+            shacl_inputs = _shacl_inputs_for_upstream_data_graph_uri(
+                shacl_inputs,
+                data_graph_item.uri,
+            )
+            data_graph_item.mime_type = mime_type_for_rdf_format(
+                shacl_inputs.rdf_format,
+            )
+        submission_file = FileIdentity.from_envelope_item(data_graph_item)
 
         envelope = build_shacl_input_envelope(
             run_id=str(run.id),
@@ -1655,8 +1435,7 @@ def build_input_envelope(
             expected_output_uri=expected_output_uri,
             skip_callback=skip_callback,
         )
-        if data_graph_item is not None:
-            envelope.input_files = [data_graph_item]
+        envelope.input_files = [data_graph_item]
         return envelope
 
     if validator.validation_type == ValidationType.SCHEMATRON:
@@ -1689,15 +1468,8 @@ def build_input_envelope(
             contract_key="xml_document",
             item_builder=_build_schematron_input_file_item,
         )
-        xml_document_item = None
-        if resolved_xml_document is not None:
-            xml_document_item, _source_scope = resolved_xml_document
-            submission_file = FileIdentity.from_envelope_item(xml_document_item)
-        else:
-            submission_file = (input_file_uris or {}).get("primary_file_uri")
-            if submission_file is None:
-                msg = f"Step {step.id} has no immutable primary file for Schematron"
-                raise ValueError(msg)
+        xml_document_item, _source_scope = resolved_xml_document
+        submission_file = FileIdentity.from_envelope_item(xml_document_item)
 
         schematron_envelope = build_schematron_input_envelope(
             run_id=str(run.id),
@@ -1722,8 +1494,7 @@ def build_input_envelope(
             expected_output_uri=expected_output_uri,
             skip_callback=skip_callback,
         )
-        if xml_document_item is not None:
-            schematron_envelope.input_files = [xml_document_item]
+        schematron_envelope.input_files = [xml_document_item]
         return schematron_envelope
 
     if validator.validation_type == ValidationType.PDF:
@@ -1735,30 +1506,28 @@ def build_input_envelope(
             contract_key="pdf_document",
             item_builder=_build_pdf_input_file_item,
         )
-        pdf_item = None
-        if resolved_pdf is not None:
-            pdf_item, _source_scope = resolved_pdf
-            pdf_file = FileIdentity.from_envelope_item(pdf_item)
-        else:
-            pdf_file = (input_file_uris or {}).get("primary_file_uri")
-            if pdf_file is None:
-                msg = f"Step {step.id} has no immutable PDF input"
-                raise ValueError(msg)
-            pdf_item = InputFileItem(
-                name=_filename_from_uri(pdf_file.uri) or "document.pdf",
-                mime_type=SupportedMimeType.APPLICATION_PDF,
-                role="pdf-document",
-                port_key="pdf_document",
-                **pdf_file.envelope_fields(),
-            )
+        pdf_item, _source_scope = resolved_pdf
 
+        from validibot.validations.services.execution.deployments import (
+            effective_execution_budget_seconds,
+        )
+
+        pdf_config = step.config or {}
         pdf_inputs = PdfInputs.model_validate(
             {
-                "profile": (step.config or {}).get("profile", "inventory_v1"),
+                "profile": pdf_config.get("profile", "inventory_v1"),
                 "emit_extracted_files_bundle": bool(
-                    (step.config or {}).get("emit_extracted_files_bundle", False)
+                    pdf_config.get("emit_extracted_files_bundle", False)
                 ),
-                "selected_xml": (step.config or {}).get("selected_xml"),
+                "selected_xml": pdf_config.get("selected_xml"),
+                "selected_json": pdf_config.get("selected_json"),
+                "selected_step_p21": pdf_config.get("selected_step_p21"),
+                "limits": PdfProcessingLimits(
+                    max_execution_seconds=min(
+                        effective_execution_budget_seconds(step=step),
+                        300,
+                    )
+                ),
             }
         )
         context = ExecutionContext.model_validate(
@@ -1803,22 +1572,8 @@ def build_input_envelope(
             contract_key="portfolio_manager_report",
             item_builder=_build_portfolio_manager_input_file_item,
         )
-        report_item = None
-        if resolved_report is not None:
-            report_item, _source_scope = resolved_report
-            portfolio_submission_file = FileIdentity.from_envelope_item(report_item)
-        else:
-            portfolio_submission_file = (input_file_uris or {}).get(
-                "primary_file_uri",
-            )
-            if portfolio_submission_file is None:
-                msg = (
-                    f"Step {step.id} has no immutable primary file for "
-                    "Portfolio Manager"
-                )
-                raise ValueError(msg)
-
-        from validibot.workflows.models import WorkflowStepResource
+        report_item, _source_scope = resolved_report
+        portfolio_submission_file = FileIdentity.from_envelope_item(report_item)
 
         ebl_resources = _resolve_resource_file_artifact_port_items(
             run=run,
@@ -1826,18 +1581,10 @@ def build_input_envelope(
             contract_key="expected_buildings_list",
             resource_uri_overrides=resource_uri_overrides,
         )
-        if ebl_resources is None:
-            ebl_resources = resolve_step_resources(
-                step,
-                role=WorkflowStepResource.EXPECTED_BUILDINGS_LIST,
-                resource_uri_overrides=resource_uri_overrides,
-            )
         if len(ebl_resources) > 1:
             msg = f"Step {step.id} has more than one Expected Buildings List"
             raise ValueError(msg)
         ebl_resource = ebl_resources[0] if ebl_resources else None
-        if ebl_resource is not None:
-            ebl_resource.port_key = "expected_buildings_list"
 
         config = step.config or {}
         resolved_inputs = current_step_run.input_values or {}
@@ -1935,8 +1682,7 @@ def build_input_envelope(
             context=context,
             expected_buildings_list=ebl_resource,
         )
-        if report_item is not None:
-            portfolio_envelope.input_files = [report_item]
+        portfolio_envelope.input_files = [report_item]
         return portfolio_envelope
 
     msg = f"Unsupported validator type: {validator.validation_type}"

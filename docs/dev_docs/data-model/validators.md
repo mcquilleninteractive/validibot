@@ -11,6 +11,9 @@ The platform ships with stock validation types such as:
 - **ENERGYPLUS** — advanced simulation validators with IDF/simulation options and catalog entries.
 - **FMU** — simulation validators backed by FMI/FMU metadata and execution.
 - **SHACL** — RDF graph validators backed by SHACL shapes and ontology resources.
+- **SCHEMATRON** — XML validators backed by Schematron rules compiled in the isolated backend.
+- **PORTFOLIO_MANAGER** — bounded building-report validation for XLS, XLSX, XML, and ZIP carriers.
+- **PDF** — bounded, non-rendering PDF package inventory and exact extraction of selected XML, JSON, and STEP Part 21 members.
 - **THERM** — thermal-bridge validation support for THERM workflows.
 - **AI_ASSIST** — template-driven AI validations (policy check, critic, etc.).
 - **CUSTOM_VALIDATOR** — organization-defined validators registered via the custom validator UI (displayed as “Custom Basic Validator”).

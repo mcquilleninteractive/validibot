@@ -35,7 +35,7 @@ from validibot_mcp.license_check import LicenseCheckError, verify_license_or_die
 pytestmark = pytest.mark.asyncio(loop_scope="module")
 
 
-@pytest.fixture()
+@pytest.fixture
 def api_base_url(monkeypatch) -> str:
     """Point settings at a known test API URL and return it.
 

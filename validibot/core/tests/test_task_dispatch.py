@@ -89,6 +89,7 @@ class TaskDispatchRequestTests(TestCase):
         self.assertEqual(payload["validation_run_id"], "abc-123")
         self.assertEqual(payload["user_id"], 42)
         self.assertIsNone(payload["resume_from_step"])
+        self.assertIsNone(payload["continuation_id"])
 
     def test_to_payload_with_resume_step(self):
         """Test payload conversion with resume_from_step."""
@@ -114,3 +115,22 @@ class TaskDispatchRequestTests(TestCase):
 
         self.assertEqual(payload["validation_run_id"], str(run_id))
         self.assertIsInstance(payload["validation_run_id"], str)
+
+    def test_to_payload_serializes_durable_continuation_identity(self):
+        """HTTP dispatch must preserve the database work record across transport."""
+        import uuid
+
+        continuation_id = uuid.uuid4()
+        request = TaskDispatchRequest(
+            validation_run_id=uuid.uuid4(),
+            user_id=None,
+            resume_from_step=20,
+            continuation_id=continuation_id,
+            task_id="validation-continuation-stable",
+        )
+
+        payload = request.to_payload()
+
+        self.assertEqual(payload["continuation_id"], str(continuation_id))
+        self.assertIsNone(payload["user_id"])
+        self.assertNotIn("task_id", payload)
