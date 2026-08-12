@@ -1,8 +1,9 @@
 """Contracts linking local ``just`` commands to protected-main CI.
 
-Validibot has two independently resolved Python applications (Django and MCP),
-plus generated frontend assets. These tests prevent release helpers or the
-aggregate branch-protection check from silently omitting one of those surfaces.
+Validibot has one Python application containing Django and the embedded MCP
+surface, plus generated frontend assets. These tests prevent release helpers
+or the aggregate branch-protection check from silently omitting a shipped
+surface or accidentally restoring the retired standalone MCP runtime.
 """
 
 import tomllib
@@ -10,24 +11,22 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 JUSTFILE = REPO_ROOT / "justfile"
-MCP_JUSTFILE = REPO_ROOT / "just" / "mcp" / "mod.just"
 GCP_JUSTFILE = REPO_ROOT / "just" / "gcp" / "mod.just"
 CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 PRECOMMIT_CONFIG = REPO_ROOT / ".pre-commit-config.yaml"
 PYPROJECT = REPO_ROOT / "pyproject.toml"
-EXPECTED_RUNTIME_COUNT = 2
-MINIMUM_MCP_FROZEN_COMMAND_COUNT = 5
+EXPECTED_RUNTIME_COUNT = 1
 
 
 def test_root_check_covers_every_locally_owned_runtime():
-    """The advertised integration gate must include Django, frontend, and MCP."""
+    """The advertised gate must test the integrated backend and frontend."""
     justfile = JUSTFILE.read_text(encoding="utf-8")
 
     assert (
         "check: lock-check format-check lint typecheck test frontend-check" in justfile
     )
-    assert "just mcp check" in justfile
-    assert "cd mcp && uv lock --check" in justfile
+    assert "just mcp check" not in justfile
+    assert "cd mcp && uv lock --check" not in justfile
     assert "ruff check --exclude '*.md' ." in justfile
     assert "ruff format --check --exclude '*.md' ." in justfile
     assert "npm test -- --passWithNoTests=false" in justfile
@@ -48,30 +47,16 @@ def test_local_and_precommit_ruff_versions_match():
     assert f"rev: v{ruff_version}" in precommit_config
 
 
-def test_mcp_check_uses_its_frozen_environment_and_container_contract():
-    """MCP verification must not rely on Django's environment or skip its image."""
-    justfile = MCP_JUSTFILE.read_text(encoding="utf-8")
-
-    assert "check: lock-check format-check lint test" in justfile
-    assert (
-        justfile.count("uv run --frozen --extra dev")
-        >= MINIMUM_MCP_FROZEN_COMMAND_COUNT
-    )
-    assert "pytest -xvs tests/" in justfile
-
-
-def test_ci_requires_the_standalone_mcp_job():
-    """Branch protection must fail if MCP code, lock, audit, or tests fail."""
+def test_ci_exercises_mcp_inside_the_django_runtime():
+    """Branch protection must test MCP without rebuilding a second runtime."""
     workflow = CI_WORKFLOW.read_text(encoding="utf-8")
     aggregate = workflow.split("\n  ci:\n", maxsplit=1)[1]
 
-    assert "\n  mcp:\n" in workflow
-    assert "uv sync --frozen --extra dev" in workflow
-    assert "Test MCP and its production container contract" in workflow
-    assert "pytest -xvs tests/" in workflow
-    assert "      - mcp" in aggregate
-    assert "MCP_RESULT: ${{ needs.mcp.result }}" in aggregate
-    assert '"$MCP_RESULT"' in aggregate
+    assert "\n  mcp:\n" not in workflow
+    assert "working-directory: mcp" not in workflow
+    assert "uv run --frozen --group dev --extra docker-runner pytest" in workflow
+    assert "      - mcp" not in aggregate
+    assert "MCP_RESULT:" not in aggregate
 
 
 def test_dependency_audits_consume_exported_lockfiles():
@@ -101,12 +86,9 @@ def test_release_requires_exact_commit_ci_and_a_clean_post_check_tree():
     assert "Release checks changed the working tree" in justfile
 
 
-def test_mcp_deployment_uses_explicit_build_and_push_semantics():
-    """New automation must state when an MCP build will publish registry bytes."""
-    mcp_justfile = MCP_JUSTFILE.read_text(encoding="utf-8")
+def test_gcp_automation_does_not_restore_a_standalone_mcp_build():
+    """GCP must publish MCP only as part of the canonical web application."""
     gcp_justfile = GCP_JUSTFILE.read_text(encoding="utf-8")
 
-    assert "build-local:" in mcp_justfile
-    assert "build-push: _require-gcp-config" in mcp_justfile
-    assert "build: build-push" in mcp_justfile
-    assert "just gcp mcp build-push" in gcp_justfile
+    assert "just gcp mcp build" not in gcp_justfile
+    assert "just gcp mcp build-push" not in gcp_justfile

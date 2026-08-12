@@ -174,19 +174,8 @@ _not-implemented:
 # Build & Push (STUB)
 # =============================================================================
 #
-# CROSS-TARGET CONVENTION: ``ENABLE_MCP_SERVER``
-#
-# When this module is implemented, the MCP build and deploy recipes must
-# short-circuit unless ``ENABLE_MCP_SERVER`` is set to a truthy value
-# (``true``/``1``/``yes``). The GCP module in validibot-cloud/ and the
-# docker-compose module in this repo follow the same pattern so any
-# higher-level "deploy everything" script can safely invoke an MCP build
-# without knowing whether that deployment runs MCP.
-#
-# The runtime license gate inside the MCP server itself (see
-# ../validibot/mcp/src/validibot_mcp/license_check.py) enforces that MCP
-# only serves traffic on Pro-licensed deployments, so the env var is the
-# build-time half of the gate and the license check is the runtime half.
+# A future AWS web target should serve ``config.asgi:application`` so the Pro
+# feature gate can mount embedded MCP without an extra image or service.
 
 # Build Docker image for AWS (linux/amd64 platform)
 build: _not-implemented

@@ -25,31 +25,7 @@ VALIDIBOT_COMMERCIAL_PACKAGE=
 VALIDIBOT_COMMERCIAL_NETRC=
 
 
-# -- 2. Recipe-level knobs --------------------------------------------------
-#
-# ENABLE_MCP_SERVER
-# -----------------
-# The self-hosted Compose stack defines the MCP service behind the
-# ``mcp`` Compose profile. ``just self-hosted`` recipes read
-# this variable to decide whether to include the container in ``build``,
-# ``up``, and related lifecycle commands.
-#
-# Requires validibot-pro (or enterprise) to be set in
-# VALIDIBOT_COMMERCIAL_PACKAGE above — the MCP server calls
-# ``GET /api/v1/license/features/`` at startup and refuses to boot if
-# ``mcp_server`` isn't advertised.
-#
-#   true   — include MCP container
-#   false  — omit MCP (default)
-ENABLE_MCP_SERVER=false
-
-# Host port used only by a reverse proxy or diagnostics running on this VM.
-# docker-compose.production.yml fixes the host bind to 127.0.0.1 so the MCP
-# server cannot be exposed as public plaintext by an environment-file typo.
-MCP_HOST_PORT=8001
-
-
-# -- 3. Validator container engine ------------------------------------------
+# -- 2. Validator container engine ------------------------------------------
 #
 # Host path to the Docker-compatible API socket mounted into the worker.
 # Fresh installs default to the rootless Docker socket for the deployment

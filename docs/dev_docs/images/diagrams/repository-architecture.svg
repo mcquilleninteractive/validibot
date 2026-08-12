@@ -4,11 +4,12 @@
      aria-labelledby="repository-architecture-title repository-architecture-description">
   <title id="repository-architecture-title">Complete Validibot project architecture</title>
   <desc id="repository-architecture-description">
-    The community repository contains the Django application, its MCP helper
-    API, and the FastMCP server. Thin Pro and Enterprise packages register
-    licenses and features. Validibot Cloud imports Pro and overlays settings on
-    Django. The community application and validator backends use
-    validibot-shared, while the CLI and MCP server access Django over REST.
+    The community repository contains the Django application and the official
+    MCP SDK endpoint embedded in its ASGI process. Thin Pro and Enterprise
+    packages register licenses and features. Validibot Cloud imports Pro and
+    overlays settings on Django. The community application and validator
+    backends use validibot-shared, while the CLI accesses Django over REST and
+    MCP tools call Django application services directly.
   </desc>
   <defs>
     <style>
@@ -52,12 +53,12 @@
   <text class="detail" x="560" y="274">REST API</text>
 
   <rect class="node" x="770" y="180" width="225" height="105" rx="14"/>
-  <text class="label" x="882.5" y="220">MCP helper API</text>
-  <text class="detail" x="882.5" y="249">/api/v1/mcp/*</text>
+  <text class="label" x="882.5" y="220">Django services</text>
+  <text class="detail" x="882.5" y="249">auth · policy · launch</text>
 
   <rect class="node" x="770" y="325" width="225" height="80" rx="14"/>
-  <text class="label" x="882.5" y="360">FastMCP server</text>
-  <text class="detail" x="882.5" y="383">mcp/ sibling project</text>
+  <text class="label" x="882.5" y="360">Embedded MCP</text>
+  <text class="detail" x="882.5" y="383">official SDK · ASGI /mcp</text>
 
   <rect class="node" x="55" y="180" width="225" height="105" rx="14"/>
   <text class="label" x="167.5" y="221">validibot-cli</text>
@@ -65,7 +66,7 @@
 
   <rect class="node" x="55" y="345" width="225" height="105" rx="14"/>
   <text class="label" x="167.5" y="386">AI agents</text>
-  <text class="detail" x="167.5" y="415">through FastMCP</text>
+  <text class="detail" x="167.5" y="415">Streamable HTTP + OAuth</text>
 
   <rect class="node-green" x="1165" y="125" width="275" height="115" rx="14"/>
   <text class="label" x="1302.5" y="167">validibot-shared</text>
@@ -96,10 +97,10 @@
   <text class="edge-label" x="337" y="219">REST</text>
 
   <path class="edge" d="M 280 397.5 H 770"/>
-  <text class="edge-label" x="525" y="383">REST</text>
+  <text class="edge-label" x="525" y="383">MCP</text>
 
   <path class="edge" d="M 882.5 325 V 285"/>
-  <text class="edge-label" x="923" y="310">REST</text>
+  <text class="edge-label" x="923" y="310">direct</text>
 
   <path class="edge" d="M 725 220 C 935 100, 1040 170, 1165 182"/>
   <text class="edge-label" x="952" y="124">uses</text>

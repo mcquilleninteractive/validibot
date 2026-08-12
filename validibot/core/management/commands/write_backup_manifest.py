@@ -140,7 +140,7 @@ class Command(BaseCommand):
             help=(
                 "Repeatable. Records a Secret Manager resource and the "
                 "version active at backup time. Pass ``--secret-manager-"
-                "version django-env=17 --secret-manager-version mcp-env=4``."
+                "version django-env=17 --secret-manager-version worker-env=4``."
             ),
         )
         parser.add_argument(

@@ -74,6 +74,7 @@ class TestIsSensitiveSetting:
         ],
     )
     def test_credential_name_triggers_redaction(self, name):
+        """Known credential-bearing settings must never escape into a bundle."""
         assert is_sensitive_setting(name) is True
 
     @pytest.mark.parametrize(
@@ -91,6 +92,7 @@ class TestIsSensitiveSetting:
         ],
     )
     def test_non_credential_name_passes(self, name):
+        """Operational settings must remain visible enough to diagnose failures."""
         assert is_sensitive_setting(name) is False
 
     @pytest.mark.parametrize(
@@ -140,6 +142,7 @@ class TestLooksLikeSecretValue:
         ],
     )
     def test_secret_shapes_are_flagged(self, value):
+        """Value inspection catches secrets whose setting name appears harmless."""
         assert looks_like_secret_value(value) is True
 
     @pytest.mark.parametrize(
@@ -156,6 +159,7 @@ class TestLooksLikeSecretValue:
         ],
     )
     def test_normal_values_pass(self, value):
+        """Ordinary diagnostic values should not be destroyed by over-redaction."""
         assert looks_like_secret_value(value) is False
 
     def test_non_string_returns_false(self):
@@ -176,6 +180,7 @@ class TestRedactSettingValue:
     """The name+value redaction is the public single-call API."""
 
     def test_name_match_redacts_regardless_of_value_type(self):
+        """Sensitive names are authoritative even for structured or benign values."""
         # A sensitive name redacts even if the value is a list / dict /
         # nothing-that-looks-like-a-secret.
         assert redact_setting_value("API_KEY", "anything") == REDACTED_SENTINEL
@@ -193,6 +198,7 @@ class TestRedactSettingValue:
         assert redact_setting_value("DEBUG_HOOK", synthetic_jwt) == REDACTED_SENTINEL
 
     def test_normal_value_passes(self):
+        """Safe values retain their native types for useful support diagnostics."""
         # Booleans pass through unchanged — assert by equality, not by
         # ``is`` (ruff FBT003 flags boolean literals in positional args).
         assert redact_setting_value("DEBUG", value=False) is False
@@ -237,6 +243,7 @@ class TestSchemaVersion:
         }
 
     def test_default_schema_version_is_v1(self):
+        """Support tooling needs every new snapshot to declare the v1 schema."""
         snapshot = SupportBundleAppSnapshot(**self._minimal_kwargs())
         assert snapshot.schema_version == "validibot.support-bundle.v1"
         assert snapshot.schema_version == SUPPORT_BUNDLE_SCHEMA_VERSION
@@ -278,6 +285,7 @@ class TestStrictShape:
         }
 
     def test_unknown_top_level_field_rejected(self):
+        """Unknown fields must expose producer/consumer drift rather than disappear."""
         with pytest.raises(ValidationError):
             SupportBundleAppSnapshot(
                 **self._minimal_kwargs(),
@@ -306,11 +314,13 @@ class TestRedactedSetting:
         assert s.redacted is False
 
     def test_redacted_value_is_sentinel(self):
+        """A stable sentinel lets operators distinguish redaction from missing data."""
         s = RedactedSetting(name="SECRET_KEY", value=REDACTED_SENTINEL, redacted=True)
         assert s.value == REDACTED_SENTINEL
         assert s.redacted is True
 
     def test_unknown_field_rejected(self):
+        """Strict rows prevent unreviewed data from entering support bundles."""
         with pytest.raises(ValidationError):
             RedactedSetting(
                 name="X",
@@ -336,6 +346,7 @@ class TestLogTextRedaction:
     """
 
     def test_bearer_tokens_are_redacted(self):
+        """Authorization tokens are credentials and must not leave the deployment."""
         # Bearer in an Authorization header — the Authorization-header
         # pattern catches the whole line and replaces with
         # ``Authorization: [REDACTED]``. The standalone Bearer pattern
@@ -358,6 +369,7 @@ class TestLogTextRedaction:
         assert "Bearer [REDACTED]" in redacted
 
     def test_authorization_header_redacted_regardless_of_scheme(self):
+        """Non-Bearer authentication schemes can still carry reusable secrets."""
         log = "X-API-Key: super-secret-token-value-here-please"
         redacted = redact_text_for_bundle(log)
         assert "super-secret-token-value-here-please" not in redacted
@@ -435,13 +447,13 @@ class TestLogTextRedaction:
         assert "[REDACTED]" in redacted
 
     def test_validibot_service_identity_header_is_redacted(self):
-        """Cloud Run OIDC identity tokens forwarded between MCP and the API."""
+        """Compatibility-route Cloud Run identity tokens remain sensitive."""
         log = "X-Validibot-Service-Identity: eyJhbGciOiJSUzI1NiJ9.body.sig"
         redacted = redact_text_for_bundle(log)
         assert "eyJhbGciOiJSUzI1NiJ9.body.sig" not in redacted
 
     def test_mcp_and_user_identity_headers_are_redacted(self):
-        """MCP service-key + forwarded user-identity headers."""
+        """Legacy adapter keys and forwarded user identities remain sensitive."""
         log = (
             "X-MCP-Service-Key: local-dev-secret-abc123\n"
             "X-Validibot-Api-Token: token-for-user-42-do-not-leak\n"
@@ -459,6 +471,7 @@ class TestLogTextRedaction:
         assert "dXNlcjpwYXNz" not in redacted
 
     def test_jwt_anywhere_in_text_is_redacted(self):
+        """JWTs embedded in arbitrary exception text remain sensitive."""
         # JWT in the middle of a stack trace.
         log = (
             "ERROR fetching: token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
@@ -469,6 +482,7 @@ class TestLogTextRedaction:
         assert "[REDACTED-JWT]" in redacted
 
     def test_pem_blocks_are_redacted_multiline(self):
+        """Multiline private keys must be removed without erasing surrounding logs."""
         # Synthetic PEM, no real key material. detect-private-key
         # excludes this file via .pre-commit-config.yaml.
         log = (
@@ -490,6 +504,7 @@ class TestLogTextRedaction:
         assert "Done." in redacted
 
     def test_url_embedded_basic_auth_redacts_credential_only(self):
+        """URL credentials are removed while retaining the endpoint for diagnosis."""
         log = "Connecting to postgres://operator:hunter2@db.internal:5432/validibot"
         redacted = redact_text_for_bundle(log)
         assert "operator:hunter2" not in redacted
@@ -500,6 +515,7 @@ class TestLogTextRedaction:
         assert "[REDACTED]" in redacted
 
     def test_long_hex_strings_are_redacted_but_image_digests_pass(self):
+        """Secret-like hex is scrubbed without hiding public image identifiers."""
         digest_body = "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"
         log = (
             "SECRET_KEY value: 0123456789abcdef0123456789abcdef0123456789abcdef\n"
@@ -514,6 +530,7 @@ class TestLogTextRedaction:
         assert f"sha256:{digest_body}" in redacted
 
     def test_key_value_patterns_with_sensitive_names(self):
+        """Inline configuration fragments need the same name-based protection."""
         log = "config: DATABASE_PASSWORD=hunter2; OIDC_CLIENT_SECRET=def456; DEBUG=True"
         redacted = redact_text_for_bundle(log)
         assert "hunter2" not in redacted
@@ -536,6 +553,7 @@ class TestLogTextRedaction:
         assert once == twice
 
     def test_normal_log_lines_pass_through(self):
+        """Useful run diagnostics survive when they contain no secret material."""
         log = (
             "2026-05-06T14:30:22Z INFO Validation run started run_id=abc123\n"
             "2026-05-06T14:30:23Z INFO Validation run completed status=SUCCEEDED\n"
@@ -568,6 +586,7 @@ class TestStandaloneRedactorPatternDrift:
     """
 
     def test_standalone_output_matches_canonical(self):
+        """Host-side redaction must remain byte-for-byte aligned with Django."""
         import subprocess
         from pathlib import Path
 
@@ -577,7 +596,7 @@ class TestStandaloneRedactorPatternDrift:
 
         # Representative input touching every pattern category, including
         # the trust-boundary headers added in the P1 review (cookie,
-        # x402, service-identity, MCP service key, user-sub).
+        # x402, service identity, legacy adapter key, and user subject).
         digest_body = "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"
         test_input = (
             "Authorization: Bearer abc123def456\n"

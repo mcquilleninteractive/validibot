@@ -11,13 +11,18 @@ Usage:
         idempotent_actions = ["create", "start_validation"]
 """
 
+from __future__ import annotations
+
 import hashlib
 import json
 import logging
-from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import timedelta
 from functools import wraps
 from http import HTTPStatus
+from typing import TYPE_CHECKING
 from typing import Any
+from typing import Literal
 
 from django.db import IntegrityError
 from django.db import transaction
@@ -29,6 +34,12 @@ from validibot.core.models import IdempotencyKey
 from validibot.core.models import IdempotencyKeyStatus
 
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from validibot.users.models import Organization
+    from validibot.validations.models import ValidationRun
 
 
 # Header name (Django normalizes to HTTP_IDEMPOTENCY_KEY)
@@ -42,6 +53,24 @@ class IdempotencyError:
     KEY_TOO_LONG = "idempotency_key_too_long"
     KEY_REUSED = "idempotency_key_reused"
     KEY_IN_PROGRESS = "idempotency_key_in_progress"
+
+
+@dataclass(frozen=True)
+class IdempotencyDecision:
+    """Describe whether a transport-neutral operation should run or replay.
+
+    REST views and MCP tools share this result so retry safety is enforced by
+    the application rather than being reimplemented by each transport.
+    """
+
+    action: Literal[
+        "process",
+        "replay",
+        "conflict",
+        "hash_mismatch",
+        "process_without_idempotency",
+    ]
+    key_record: IdempotencyKey | None
 
 
 def compute_request_hash(request) -> str:
@@ -225,6 +254,46 @@ def _process_idempotency_key(
     - action: "replay" | "conflict" | "hash_mismatch" | "process"
     - key_record: The IdempotencyKey instance (if applicable)
     """
+    decision = claim_idempotency_key(
+        org=org,
+        key=key,
+        endpoint=endpoint,
+        request_hash=request_hash,
+        request_ip=get_client_ip(request),
+        user_agent=request.headers.get("user-agent", ""),
+    )
+    return {"action": decision.action, "key_record": decision.key_record}
+
+
+def claim_idempotency_key(
+    *,
+    org: Organization,
+    key: str,
+    endpoint: str,
+    request_hash: str,
+    request_ip: str | None = None,
+    user_agent: str = "",
+) -> IdempotencyDecision:
+    """Atomically claim or inspect an idempotency key for any transport.
+
+    Args:
+        org: Organization that owns the operation.
+        key: Caller-supplied retry key.
+        endpoint: Stable operation scope. Callers may include a user identity
+            here when an organization operation is principal-specific.
+        request_hash: SHA-256 fingerprint of the canonical operation inputs.
+        request_ip: Optional originating IP retained for diagnostics.
+        user_agent: Optional bounded client identifier retained for diagnostics.
+
+    Returns:
+        A decision whose action is ``process``, ``replay``, ``conflict``,
+        ``hash_mismatch``, or the defensive ``process_without_idempotency``.
+    """
+
+    if len(key) > MAX_KEY_LENGTH:
+        msg = f"Idempotency key exceeds {MAX_KEY_LENGTH} characters."
+        raise ValueError(msg)
+
     now = timezone.now()
 
     # First, try to find an existing non-expired key
@@ -238,14 +307,14 @@ def _process_idempotency_key(
     if existing:
         # Check if request hash matches
         if existing.request_hash != request_hash:
-            return {"action": "hash_mismatch", "key_record": existing}
+            return IdempotencyDecision("hash_mismatch", existing)
 
         # Check if still processing
         if existing.status == IdempotencyKeyStatus.PROCESSING:
-            return {"action": "conflict", "key_record": existing}
+            return IdempotencyDecision("conflict", existing)
 
         # Completed - return cached response
-        return {"action": "replay", "key_record": existing}
+        return IdempotencyDecision("replay", existing)
 
     # Delete any expired keys with same (org, key, endpoint) before creating new one
     IdempotencyKey.objects.filter(
@@ -264,11 +333,11 @@ def _process_idempotency_key(
                 endpoint=endpoint,
                 request_hash=request_hash,
                 status=IdempotencyKeyStatus.PROCESSING,
-                expires_at=now + timezone.timedelta(hours=IDEMPOTENCY_KEY_TTL_HOURS),
-                request_ip=get_client_ip(request),
-                user_agent=request.headers.get("user-agent", "")[:500],
+                expires_at=now + timedelta(hours=IDEMPOTENCY_KEY_TTL_HOURS),
+                request_ip=request_ip,
+                user_agent=user_agent[:500],
             )
-            return {"action": "process", "key_record": key_record}
+            return IdempotencyDecision("process", key_record)
     except IntegrityError:
         # Race condition - another request created the key first
         # Re-fetch and handle appropriately (only non-expired keys)
@@ -281,14 +350,31 @@ def _process_idempotency_key(
 
         if existing:
             if existing.request_hash != request_hash:
-                return {"action": "hash_mismatch", "key_record": existing}
+                return IdempotencyDecision("hash_mismatch", existing)
             if existing.status == IdempotencyKeyStatus.PROCESSING:
-                return {"action": "conflict", "key_record": existing}
-            return {"action": "replay", "key_record": existing}
+                return IdempotencyDecision("conflict", existing)
+            return IdempotencyDecision("replay", existing)
 
         # Key doesn't exist or is expired - something unusual happened
         # Process without idempotency
-        return {"action": "process_without_idempotency", "key_record": None}
+        return IdempotencyDecision("process_without_idempotency", None)
+
+
+def complete_idempotency_key(
+    *,
+    key_record: IdempotencyKey,
+    response_body: Any,
+    response_status: int,
+    validation_run: ValidationRun | None = None,
+) -> None:
+    """Persist a successful application result for later replay."""
+
+    key_record.status = IdempotencyKeyStatus.COMPLETED
+    key_record.response_status = response_status
+    key_record.response_body = _serialize_response_data(response_body)
+    if validation_run is not None:
+        key_record.validation_run = validation_run
+    key_record.save()
 
 
 def _serialize_response_data(data: Any) -> Any:
@@ -322,23 +408,21 @@ def _complete_idempotency_key(
     validation_run=None,
 ):
     """Update idempotency key with completed response."""
-    key_record.status = IdempotencyKeyStatus.COMPLETED
-    key_record.response_status = response.status_code
-
-    # Serialize response data for storage, handling UUIDs and other types
     try:
-        key_record.response_body = _serialize_response_data(response.data)
+        response_body = _serialize_response_data(response.data)
     except Exception:
         # Fallback: try rendering to JSON and parsing back
         try:
-            key_record.response_body = json.loads(response.rendered_content)
+            response_body = json.loads(response.rendered_content)
         except Exception:
-            key_record.response_body = {"_serialization_error": True}
+            response_body = {"_serialization_error": True}
 
-    if validation_run:
-        key_record.validation_run = validation_run
-
-    key_record.save()
+    complete_idempotency_key(
+        key_record=key_record,
+        response_body=response_body,
+        response_status=response.status_code,
+        validation_run=validation_run,
+    )
 
 
 def _extract_validation_run(response: Response):

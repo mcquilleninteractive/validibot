@@ -11,7 +11,6 @@ For the install flow, see [Install](install.md).
   .django           # Django app settings, security, validators, Pro/signing
   .postgres         # Postgres credentials and tuning
   .build            # Image versions, package index URLs
-  .mcp              # MCP server settings (Pro feature)
 ```
 
 You copy these from `.envs.example/.production/.self-hosted/` once during install. They live outside source control.
@@ -106,11 +105,13 @@ Empty for community deployments.
 | `GCP_KMS_SIGNING_KEY` | Full Google Cloud KMS key resource for GCP-hosted Pro installations. |
 | `GCP_KMS_SIGNING_KEY_VERSION` | Explicit active KMS version. Required with `GCP_KMS_SIGNING_KEY`; rotate it only after registering the candidate public key. |
 | `JWKS_PUBLIC_PATH` | Path to the public JWKS. Pro only. Served at `/.well-known/jwks.json` for credentials issued by this instance. |
-| `IDP_OIDC_MCP_RESOURCE_AUDIENCE` | MCP OAuth audience claim. Defaults to `{VALIDIBOT_MCP_BASE_URL}/mcp`. |
-| `VALIDIBOT_MCP_BASE_URL` | Public HTTPS origin for the MCP server, such as `https://mcp.example.com`. Self-hosted production has no plaintext public default. |
-| `MCP_SERVICE_KEY` | Service-to-service auth key for the MCP server calling the Validibot REST API. Self-hosted only. |
-| `MCP_OIDC_AUDIENCE` | Cloud Run OIDC audience (GCP only — self-hosted uses `MCP_SERVICE_KEY`). |
-| `ENABLE_MCP_SERVER` | `true` to include the MCP container under the `mcp` Compose profile. Build-time gate; runtime is also gated by the `mcp_server` Pro feature. |
+| `IDP_OIDC_MCP_RESOURCE_AUDIENCE` | Exact MCP OAuth resource and JWT audience. Defaults to `<SITE_URL>/mcp`. |
+| `IDP_OIDC_CHATGPT_REDIRECT_URIS` | Exact callback URI or comma-separated URIs supplied by the ChatGPT plugin builder. The client is public and has no secret. |
+| `MCP_FILE_MAX_BYTES` | Maximum downloaded ChatGPT validation file size. Default: `2500000`. |
+| `MCP_MAX_REQUEST_BODY_BYTES` | Maximum Streamable HTTP request body. Default: `4194304`. |
+| `MCP_READS_PER_MINUTE` | Shared per-principal quota across all read tools. Default: `120`. |
+| `MCP_STARTS_PER_MINUTE` | Per-principal validation-start quota. Default: `20`. |
+| `MCP_ALLOWED_ORIGINS` | Optional comma-separated additional exact browser origins. Leave empty unless required. |
 
 ### 8. Optional telemetry
 
@@ -140,28 +141,15 @@ Off by default for self-hosted.
 | `VALIDIBOT_COMMERCIAL_PACKAGE` | For Pro: `validibot-pro==<version>`. Empty for community. |
 | `VALIDIBOT_COMMERCIAL_NETRC` | Absolute path to a mode-0600 netrc containing the Pro package credentials. Empty for community. The file is mounted as a BuildKit secret and is not stored in image metadata. |
 | `VALIDATOR_CONTAINER_SOCKET` | Host path to the Docker-compatible API socket mounted into the worker. Fresh installs default to `${XDG_RUNTIME_DIR:-/run/user/1000}/docker.sock`; set an exact `/run/user/<numeric-uid>/docker.sock` path when needed. `/var/run/docker.sock` is the explicit rootful compatibility option. |
-| `MCP_HOST_PORT` | Host-loopback port used by an external reverse proxy or local diagnostics. Defaults to `8001`; the bind address is fixed to `127.0.0.1` in Compose. |
 
 For Pro, credentials live only in the netrc referenced by `.build`. Keep that
 netrc at mode 0600 and out of version control; `.build` contains its path and
 the credential-free package reference and remains gitignored.
 
-## `.mcp` — MCP server settings (Pro feature)
-
-| Setting | Purpose |
-|---|---|
-| `VALIDIBOT_LOG_LEVEL` | `INFO` for production. `DEBUG` for troubleshooting. |
-| `VALIDIBOT_API_BASE_URL` | Internal or public URL of the Django API that MCP forwards tool calls to. |
-| `VALIDIBOT_MCP_BASE_URL` | Public MCP URL used for metadata, redirects, and the default token audience. Keep it aligned with Django's value. |
-| `VALIDIBOT_OAUTH_AUTHORIZATION_SERVER_URL` | Public base URL of the Django OIDC issuer. |
-| `VALIDIBOT_OAUTH_CLIENT_ID`, `VALIDIBOT_OAUTH_CLIENT_SECRET` | Confidential client registered with Django. The secret is paired with `IDP_OIDC_MCP_SERVER_CLIENT_SECRET` in `.django`. |
-| `VALIDIBOT_MCP_SERVICE_KEY` | Shared MCP-to-Django key for self-hosting. Use the same generated value as `MCP_SERVICE_KEY` in `.django`. |
-| `VALIDIBOT_MCP_ENABLED` | Runtime kill switch. `false` makes every tool call return 503. |
-| `VALIDIBOT_OAUTH_AUTHORIZATION_ENDPOINT`, `VALIDIBOT_OAUTH_TOKEN_ENDPOINT`, `VALIDIBOT_OAUTH_REVOCATION_ENDPOINT`, `VALIDIBOT_OAUTH_JWKS_URL` | Optional complete-URL overrides if a compatible provider is routed differently. Validibot's standard paths are derived locally, without a startup discovery request. |
-
-The MCP container always listens on port `8080` inside the private Compose
-network. `MCP_HOST_PORT` controls only the loopback publication used by a host
-reverse proxy; public clients must connect through an HTTPS origin.
+The MCP implementation is embedded in the Pro Django ASGI process. There is no
+`.mcp` env file, second container, service key, internal MCP port, or
+confidential proxy client. The normal web image and `.django` environment own
+the endpoint at `<SITE_URL>/mcp`.
 
 ## Deployment targets
 

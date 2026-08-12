@@ -5,21 +5,14 @@ with all the API overrides. Keeping a focused test URLConf avoids
 unrelated optional dependencies.
 """
 
+from allauth.idp.oidc.views import configuration as oidc_server_metadata
 from django.urls import include
 from django.urls import path
 
-from validibot.idp.views import oauth_authorization_server_metadata
-from validibot.idp.views import openid_configuration_metadata
-
 urlpatterns = [
     path(
-        ".well-known/openid-configuration",
-        openid_configuration_metadata,
-        name="openid-configuration-metadata",
-    ),
-    path(
         ".well-known/oauth-authorization-server",
-        oauth_authorization_server_metadata,
+        oidc_server_metadata,
         name="oauth-authorization-server-metadata",
     ),
     path(

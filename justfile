@@ -118,23 +118,6 @@ mod local 'just/local'
 #   just gcp status-all
 mod gcp 'just/gcp'
 
-# MCP server — standalone FastMCP image operations (build, deploy,
-# secrets, logs, tests).
-#
-# Historical entry point. Prefer ``just gcp mcp <command>`` for GCP
-# work — that grammar is symmetric with ``just gcp django <command>``
-# and scopes MCP operations under their deploy target. Both paths
-# reach the same module; neither deprecates the other.
-#
-# The test recipes (``just mcp test``, ``just mcp test-e2e``) are
-# genuinely target-agnostic and stay naturally accessed via this
-# top-level mount.
-#
-# Usage:
-#   just mcp test                        # local pytest + ruff on mcp/
-#   just mcp deploy prod                 # same as ``just gcp mcp deploy prod``
-mod mcp 'just/mcp'
-
 # Amazon Web Services deployment (stub - not yet implemented)
 # Usage: just aws <command>
 # Status: Commands show "not implemented" message with implementation guidance
@@ -158,7 +141,7 @@ mod self-hosted 'just/self-hosted'
 # Pro version local development (community + validibot-pro, no cloud layer)
 # Usage: just local-pro up
 # Usage: just local-pro up --build
-# Usage: ENABLE_MCP_SERVER=true just local-pro up   # include MCP container
+# MCP is mounted automatically by the Pro ASGI application.
 mod local-pro 'just/local-pro'
 
 # Cloud version local development (layers validibot-cloud on local stack)
@@ -186,8 +169,6 @@ default:
     @echo "Platform Modules:"
     @echo "    just gcp <command>             # Google Cloud Platform"
     @echo "    just gcp django <command>      # Django-only GCP ops (e.g. secrets)"
-    @echo "    just gcp mcp <command>         # MCP-only GCP ops (secrets, deploy, ...)"
-    @echo "    just mcp <command>             # MCP operations (alias; also: local tests)"
     @echo "    just aws <command>             # AWS (not implemented)"
     @echo "    just self-hosted <command>     # Self-hosted (Docker Compose on a VM)"
     @echo ""
@@ -226,10 +207,9 @@ test *args:
     source ./set-env.sh >/dev/null 2>&1 || true
     exec .venv/bin/pytest {{args}}
 
-# Verify both Python lockfiles without changing them.
+# Verify the Python lockfile without changing it.
 lock-check:
     uv lock --check
-    cd mcp && uv lock --check
 
 # Lint Django application Python; MCP owns an independent stricter lint recipe.
 lint:
@@ -264,7 +244,7 @@ frontend-check:
         exit 1
     fi
 
-# Audit the exact locked runtime sets for Django/self-hosting and MCP.
+# Audit the exact locked runtime set for Django and its embedded MCP surface.
 audit:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -283,23 +263,8 @@ audit:
         --disable-pip \
         --strict
 
-    (
-        cd mcp
-        uv export --frozen \
-            --no-emit-project \
-            --quiet \
-            --format requirements-txt \
-            --output-file "$AUDIT_DIR/mcp.txt"
-    )
-    uvx --from pip-audit==2.10.1 pip-audit \
-        --requirement "$AUDIT_DIR/mcp.txt" \
-        --require-hashes \
-        --disable-pip \
-        --strict
-
 # Run the complete local integration gate.
 check: lock-check format-check lint typecheck test frontend-check
-    just mcp check
 
 # Require the exact main-branch commit to have a successful CI workflow.
 _require-release-ci:

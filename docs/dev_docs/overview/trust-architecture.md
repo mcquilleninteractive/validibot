@@ -55,7 +55,10 @@ The contract checks:
 10. retention policy is snapped from the workflow/channel;
 11. run source is derived from channel, not trusted from user headers.
 
-The web view, REST API, MCP helper API, and x402 run-creation path all consume this contract via the helper `views_helpers.describe_workflow_file_type_violation()`. Channel-specific behavior is expressed as policy, not as a forked implementation. A parity test matrix pins the wiring at the helper level.
+The web view, REST API, embedded MCP application service, and x402 run-creation
+path all consume the same launch contract. Channel-specific behavior is
+expressed as policy, not as a forked implementation. A parity test matrix pins
+the wiring at the helper level.
 
 ### 3. Isolation invariant
 
@@ -138,7 +141,7 @@ See [Terminology](terminology.md) for the full vocabulary.
 | Browser launch form | `LAUNCH_PAGE` |
 | REST API bearer token | `API` |
 | CLI token/user agent | `CLI` |
-| MCP helper route | `MCP` |
+| Embedded MCP tool | `MCP` |
 | x402 agent route | `X402_AGENT` |
 | Scheduled run | `SCHEDULE` |
 | Internal retry/replay | original source preserved |
@@ -149,7 +152,7 @@ If callers want to self-identify, that goes into separate `client_name`, `client
 
 x402 is a hosted-cloud payment surface, not a community self-hosting feature.
 The community repo carries the shared source enum, workflow-resolution hooks,
-and MCP protocol helpers so the open-core code paths stay coherent, but the
+and channel-neutral compatibility helpers so the open-core paths stay coherent, but the
 operational model lives in `validibot-project/docs/operations/x402-agent-payments.md`.
 
 The trust rule is simple: a payment proof never replaces Django authorization
@@ -163,7 +166,7 @@ fails closed on missing active pay-to or network/asset configuration.
 MCP HTTP/OAuth is the default agent trust path:
 
 - HTTP transport;
-- OAuth/API-token authenticated workflows;
+- OAuth-authenticated workflows;
 - resource-scoped tokens;
 - explicit user/org context;
 - no local shell execution.
@@ -210,23 +213,16 @@ Model `clean()` is useful but not enough — direct `QuerySet.update()`, data mi
 public discovery to agent-access has been dropped, so a workflow can be
 private-to-org for free yet paid-public to anonymous agents.
 
-## Cross-service env placement
+## Runtime configuration placement
 
-Trust gates that span Django and MCP must avoid duplicate non-secret values.
-The placement rule is:
+Django and MCP share one process and one `.django` environment. The canonical
+`SITE_URL` determines the default MCP resource at `<SITE_URL>/mcp`; explicit
+audience, ChatGPT callback, request bounds, and quotas also live in `.django`.
+There is no MCP-only env file or paired service credential.
 
-- Django-only runtime values live in `.django`.
-- MCP-only runtime values live in `.mcp`.
-- Non-secret values needed by both services live in `.build` and are injected
-  or stamped into each service by the deploy recipe.
-- Secrets do not move to `.build`, because GCP turns `.build` values into
-  Cloud Run `--set-env-vars`, not Secret Manager entries. Shared secrets are
-  stored as explicit paired secrets in service-specific secret files and
-  rotated together.
-
-The x402 cloud path follows this rule: active mode, pay-to address, and
-network/asset pair are authored once in `.build`; the MCP-only facilitator
-credential stays in `.mcp`; missing active pay-to is a startup error, not a
+Hosted x402 is a separate Cloud Django channel. Its active mode, pay-to,
+network/asset pair, and facilitator credentials all live in the Cloud Django
+environment. Missing active pay-to remains a startup error, not a
 secondary-source lookup.
 
 ## Configuration patterns that close trust gaps

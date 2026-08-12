@@ -1,176 +1,181 @@
 # MCP Server
 
-The Validibot MCP (Model Context Protocol) server is a standalone
-FastMCP application that exposes validation workflows to AI agents
-over the public MCP standard. This page is for contributors who want
-to understand where the code lives, how to run it locally, and how it
-gets deployed.
+Validibot exposes an authenticated Model Context Protocol endpoint from the
+normal Django ASGI application. The implementation uses the official `mcp`
+Python SDK's stateless Streamable HTTP transport at `<SITE_URL>/mcp`; there is
+no separate MCP package, image, service, port, or service-to-service proxy.
 
-For end users connecting an AI assistant to a running deployment,
-see the user-facing guide at
-[docs.validibot.com/api/mcp-integration/](https://docs.validibot.com/api/mcp-integration/).
+The source is public Community code, while serving the route is a Pro feature.
+Installing `validibot-pro` registers the `mcp_server` feature. Without that
+feature, the ASGI router does not mount `/mcp`.
 
-For the full deploy-side detail, see
-[Deploy to GCP](../deployment/deploy-gcp.md).
+Maintainers can find the architectural decision and private operational
+acceptance checklist in the adjacent `validibot-project` repository:
+`docs/adr/2026-08-12-mcp-refactor-and-improvement.md` and
+`docs/operations/mcp-server.md`.
 
-## Where the code lives
+## Code map
 
 | Concern | Path |
 |---|---|
-| FastMCP server source | `mcp/src/validibot_mcp/` |
-| Tool implementations | `mcp/src/validibot_mcp/tools/` |
-| Pydantic settings | `mcp/src/validibot_mcp/config.py` |
-| Enabled-revision license check | `mcp/src/validibot_mcp/license_check.py` |
-| OAuth/manual bearer extraction | `mcp/src/validibot_mcp/auth.py` |
-| Production Dockerfile | `compose/production/mcp/Dockerfile` |
-| `just mcp` / `just gcp mcp` recipes | `just/mcp/mod.just` |
-| Helper REST API the server proxies to | `validibot/mcp_api/` |
-| OIDC provider that issues MCP OAuth tokens | `validibot/idp/` |
+| ASGI route selection | `config/asgi.py` |
+| Official-SDK server and tool declarations | `validibot/mcp_server/server.py` |
+| Direct Django application services | `validibot/mcp_server/services.py` |
+| OAuth token verification | `validibot/mcp_server/auth.py` |
+| Opaque workflow and run references | `validibot/mcp_server/references.py` |
+| Typed tool schemas | `validibot/mcp_server/schemas.py` |
+| Per-principal quotas | `validibot/mcp_server/rate_limits.py` |
+| Protocol and application tests | `validibot/mcp_server/tests/` |
+| OAuth provider and public-client registration | `validibot/idp/` |
+| Pro feature registration | `validibot-pro/validibot_pro/license.py` |
 
-The MCP server is a separate Python project from the Django app — its
-own `pyproject.toml`, its own dependency set (`fastmcp`, `httpx`,
-`pydantic-settings`), and zero Django imports. It talks to the Django
-REST API exactly the way the CLI does.
+`validibot/mcp_api/` is not used by the embedded endpoint. It remains only as
+legacy compatibility code for the Cloud x402 agent channel and should not be
+used for new MCP work.
 
-## The two-gate model
+## Request path
 
-The MCP server is community code, but it only serves traffic on Pro+
-deployments. Two independent gates protect it:
-
-1. **Build-time:** `ENABLE_MCP_SERVER=true` (set in the stage's
-   `.build` file) tells the deploy tooling to actually build and deploy
-   the MCP container. When unset, every MCP-related `just` recipe
-   short-circuits with a "skipped" message and exits 0.
-2. **Runtime:** whenever an enabled revision starts, the server calls
-   `GET /api/v1/license/features/` against the Django API and refuses
-   to serve traffic unless `mcp_server` is in the response. That feature
-   is added by `validibot-pro`'s `License` declaration. Community-only
-   deployments that build and start the container will see it exit
-   immediately on this check. GCP maintenance is intentionally different:
-   the staged revision is internal and has `VALIDIBOT_MCP_ENABLED=false`, so
-   it can become ready while Django is offline but every tool is still closed
-   with 503. `mode-live` exposes web first, re-enables MCP, and the new
-   online revision then performs the normal license check.
-
-Both gates exist deliberately: the build-time flag keeps the MCP
-container out of stacks that don't need it; the runtime gate prevents
-serving traffic from a build that somehow got through anyway.
-
-## Two auth chains
-
-Every MCP request involves two distinct authentication hops, and they
-fail differently. Diagnostic output usually points to one or the other:
-
-### Chain 1: end user → MCP server
-
-The client (Claude Desktop, Cursor, etc.) authenticates the user via
-OAuth 2.1. We support two paths:
-
-- **OAuth with Dynamic Client Registration** (the modern path). The
-  client POSTs to `/register`, then runs `/authorize` and `/token`
-  through FastMCP's `OIDCProxy`, which forwards to Django's
-  `validibot/idp/` endpoints. The user signs in normally; the client
-  receives a JWT scoped to `validibot:mcp`.
-- **Legacy bearer token.** The user creates an API token from their
-  profile and the client sends it in the `Authorization: Bearer`
-  header. Validated by `ValidibotTokenVerifier` in
-  `mcp/src/validibot_mcp/token_verifier.py`.
-
-`OIDCProxy` uses Validibot's stable django-allauth authorize, token,
-revocation, and JWKS paths from local configuration. It does not fetch the
-issuer's discovery document during container startup, so an internal
-maintenance revision has no hidden dependency on public Django ingress.
-Operators that route a compatible provider differently can set the optional
-`VALIDIBOT_OAUTH_*_ENDPOINT` and `VALIDIBOT_OAUTH_JWKS_URL` overrides described
-in the environment configuration guide.
-
-### Chain 2: MCP server → Django REST API
-
-When a tool needs to make a backend call, the MCP server calls
-`validibot/mcp_api/` endpoints. That API requires its own service
-identity proof. We support two paths:
-
-- **Cloud Run OIDC identity tokens** (production). The MCP service
-  account mints a Google-signed token with audience equal to the
-  Django service URL. Django verifies the token + checks the SA is
-  on `MCP_OIDC_ALLOWED_SERVICE_ACCOUNTS`.
-- **Shared key** (`X-MCP-Service-Key`, local dev only). Sourced from
-  Django's `MCP_SERVICE_KEY` setting and the MCP server's
-  `VALIDIBOT_MCP_SERVICE_KEY` env var. Skip in production.
-
-The end-user identity is forwarded separately as
-`X-Validibot-User-Sub` (OIDC subject) or `X-Validibot-Api-Token`
-(legacy), which `MCPUserRouteAuthentication` resolves to
-`request.user`. The Django API never sees the MCP OAuth access token
-directly — only the MCP server does.
-
-## Running locally
-
-Three flavors of local stack support MCP:
-
-```bash
-# community-only, no MCP — the container has no place to be in this stack
-just local up
-
-# community + Pro, with MCP container behind the "mcp" Compose profile
-ENABLE_MCP_SERVER=true just local-pro up --build
-
-# community + Pro + Cloud, same MCP container
-ENABLE_MCP_SERVER=true just local-cloud up --build
+```text
+ChatGPT, Codex, or another MCP client
+  -> HTTPS <SITE_URL>/mcp
+  -> Gunicorn with UvicornWorker (production) or Uvicorn (local)
+  -> config.asgi
+  -> official SDK authentication and Streamable HTTP handler
+  -> typed MCP tool
+  -> Django application service
+  -> canonical queryset, policy, launch, and audit services
 ```
 
-`ENABLE_MCP_SERVER` can be set inline as above OR persisted in
-`.envs/.local/.build` so you don't have to repeat it. With the flag
-set, the MCP container listens on `http://localhost:8001`.
+The endpoint is stateless and returns JSON. Any worker can handle any request;
+no sticky session, Redis-backed MCP session, or second internal HTTP hop is
+required.
 
-For tests:
+## Authentication
 
-```bash
-just mcp check         # lock + format + lint + pytest + container contract
-just mcp test          # pytest + container contract, fully mocked, no GCP calls
-just mcp test-e2e      # hits a live MCP server, requires .envs/.local/.test
-```
+The MCP endpoint is an OAuth 2.1 protected resource. Django is both the
+authorization server and the application containing the resource server.
 
-## Deploying
+- The protected resource is exactly `<SITE_URL>/mcp` unless
+  `IDP_OIDC_MCP_RESOURCE_AUDIENCE` explicitly overrides it.
+- Tokens require the `validibot:mcp` scope.
+- ChatGPT uses a predefined public OAuth client with authorization code and
+  PKCE; it has no client secret.
+- django-allauth owns login, consent, authorization/token/revocation endpoints,
+  PKCE, refresh rotation, token persistence, and both discovery documents. The
+  RFC 8414 path is an alias of allauth's discovery view; Validibot only uses
+  allauth's supported adapter hook for the MCP scope, exact resource policy,
+  canonical public origin, and RFC 8707 refresh inheritance. The last hook
+  reads the exact resource retained on allauth's refresh-token row when a
+  client correctly omits `resource` on refresh.
+- The verifier checks signature algorithm, issuer, audience, subject, client,
+  scopes, resource binding, expiry, revocation, the allauth token record, and
+  the active local user.
+- OAuth protected-resource metadata is served at
+  `/.well-known/oauth-protected-resource/mcp`.
 
-On GCP:
+There is no MCP service account and no shared MCP-to-Django key in the embedded
+path. Do not add `MCP_SERVICE_KEY`, `VALIDIBOT_MCP_SERVICE_KEY`, an MCP
+confidential client, or an `mcp-env` secret for a new deployment.
 
-```bash
-source .envs/.production/.google-cloud/.just
+## Tools
 
-# First-time only — provisions the MCP service account + IAM bindings
-just gcp mcp setup prod
+The deliberately small surface contains five tools:
 
-# Per-deploy — builds the image, pushes to Artifact Registry, deploys
-# to Cloud Run. Driven by ENABLE_MCP_SERVER and VALIDIBOT_MCP_API_BASE_URL
-# in .envs/.production/.google-cloud/.build. (The MCP server no longer
-# handles x402; payment config lives in cloud Django's .django.)
-just gcp deploy-all prod    # web + worker + scheduler + MCP
-
-# Or surgically (the command name makes registry publication explicit):
-just gcp mcp build-push
-just gcp mcp deploy prod
-```
-
-For local image work that must not publish anything, use `just mcp
-build-local`. The older `just mcp build` spelling remains a compatibility alias
-for `build-push`; new scripts should use the explicit command.
-
-For docker-compose self-hosters, MCP rides along when
-`ENABLE_MCP_SERVER=true` is set in
-`.envs/.production/.self-hosted/.build` — `just self-hosted up`
-activates the `mcp` profile automatically.
-
-## Where to look when something breaks
-
-| Symptom | First place to look |
+| Tool | Purpose |
 |---|---|
-| Enabled container exits at startup | `mcp/src/validibot_mcp/license_check.py` — license gate and Django API reachability |
-| Maintenance MCP revision is not ready | Confirm `VALIDIBOT_MCP_ENABLED=false`; maintenance revisions must not call the offline API |
-| `401 invalid_token` on tool call | Django audit/JWT verification + `mcp_api/authentication.py` |
-| `Mismatching redirect URI` on OAuth | The allauth `Client` row's redirect URI vs. `VALIDIBOT_MCP_BASE_URL` (`.build` on GCP, runtime env locally/self-hosted) |
-| `Connection issue — server config` | Client-cached failure; remove the connector and re-add fresh |
-| 401 on `/api/v1/mcp/*` from MCP | `MCP_OIDC_AUDIENCE` + `MCP_OIDC_ALLOWED_SERVICE_ACCOUNTS` in `.django` |
+| `list_workflows` | Discover a bounded page of MCP-enabled workflows. |
+| `get_workflow` | Inspect one workflow's file constraints and ordered steps. |
+| `start_validation` | Start one idempotent validation from a ChatGPT attachment. |
+| `get_validation_run` | Poll a run's current state and aggregate counts. |
+| `list_validation_findings` | Read a bounded findings page after completion. |
 
-For the full configuration matrix, see
-[Environment Configuration → variable-to-file reference](../deployment/environment-configuration.md#variable-to-file-reference).
+Every declaration includes a title, description, strict input/output schemas,
+tool behavior annotations, and OAuth `securitySchemes` metadata for ChatGPT.
+`start_validation` additionally declares `_meta["openai/fileParams"] =
+["file"]`; its top-level `file` object follows OpenAI's required
+`download_url`, `file_id`, optional `mime_type`, and optional `file_name`
+schema.
+The application returns opaque references rather than database identifiers,
+applies canonical Django authorization, and records bounded audit evidence
+without file bodies, bearer tokens, or secrets.
+
+The server downloads the temporary attachment URL without forwarding cookies
+or bearer credentials. It requires credential-free HTTPS on port 443, rejects
+non-public DNS results at every redirect, streams into a conservative byte
+limit, and rechecks that limit in the launch service. Real ChatGPT text and
+binary attachment behavior remains an external acceptance gate; do not claim
+general file support until the production-like developer-mode test in the
+operations guide is complete.
+
+## Configuration
+
+All current MCP settings belong in the web application's normal Django
+environment:
+
+| Setting | Default | Purpose |
+|---|---:|---|
+| `IDP_OIDC_MCP_RESOURCE_AUDIENCE` | `<SITE_URL>/mcp` | Exact OAuth resource and JWT audience. |
+| `IDP_OIDC_CHATGPT_REDIRECT_URIS` | empty | Exact ChatGPT callback URI or URIs. |
+| `MCP_FILE_MAX_BYTES` | `2500000` | Maximum downloaded attachment size. |
+| `MCP_MAX_REQUEST_BODY_BYTES` | `4194304` | Maximum Streamable HTTP request body. |
+| `MCP_READS_PER_MINUTE` | `120` | Shared per-principal budget across all read tools. |
+| `MCP_STARTS_PER_MINUTE` | `20` | Per-principal validation-start budget. |
+| `MCP_ALLOWED_ORIGINS` | empty | Additional exact trusted browser origins. |
+
+Keep `SITE_URL`, the audience, OAuth metadata, callback registration, and the
+public route on one canonical HTTPS origin. A Pro process restart is required
+after changing the installed license or feature registration because the ASGI
+route is selected at process startup.
+
+## Running and testing locally
+
+Community mode leaves `/mcp` unmounted:
+
+```bash
+just local up
+```
+
+Pro and Cloud settings activate the embedded route on the normal web port:
+
+```bash
+just local-pro up --build
+just local-cloud up --build
+```
+
+Run the implementation and protocol suites from the Community repository:
+
+```bash
+uv run pytest -q validibot/mcp_server/tests validibot/idp/tests
+```
+
+`test_protocol_integration.py` uses the official client against the real ASGI
+application. It covers discovery, authentication, generated schemas, all five
+tools, idempotent replay, privacy-preserving errors, shared throttling, and
+audit recording. Token-verifier tests separately exercise real JWT and allauth
+record validation.
+
+## Production deployment
+
+The production web container runs the existing Django image under Gunicorn
+with `uvicorn_worker.UvicornWorker`. GCP routes `/mcp` through the same load
+balancer and Cloud Run service as normal Django traffic. Self-hosted deployments
+route it through the same reverse proxy and web container as the site.
+
+Do not create a second hostname unless the main deployment has a documented
+reason to do so. The simplest supported URL is `<SITE_URL>/mcp`.
+
+Before publication, complete the external checklist in the operations guide:
+real HTTPS OAuth from ChatGPT developer mode, representative file attachment
+tests, denied-access checks, deployment rollback, and OpenAI review assets.
+
+## Troubleshooting
+
+| Symptom | Check |
+|---|---|
+| `/mcp` is 404 | Confirm the Pro package is installed, the `mcp_server` feature is registered, and the web process was restarted. |
+| `/mcp` is 401 | Inspect the `WWW-Authenticate` metadata URL, JWT audience/scope, callback registration, and token revocation state. |
+| Host or origin rejected | Align `SITE_URL`, `ALLOWED_HOSTS`, proxy host forwarding, and any explicit `MCP_ALLOWED_ORIGINS`. |
+| Tool is not listed | Run the official-client protocol test and inspect `build_mcp_server()` registration. |
+| Tool returns `NOT_FOUND` | The reference is malformed or the authenticated user cannot access the object; the response deliberately does not distinguish those cases. |
+| Tool returns `RATE_LIMITED` | Wait for the current fixed minute window; all reads share one budget and starts use a separate budget. |
+| File is rejected | Check that the temporary URL is still valid, the file is below `MCP_FILE_MAX_BYTES`, and its type satisfies workflow policy. |

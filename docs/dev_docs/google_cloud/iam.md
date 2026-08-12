@@ -79,49 +79,18 @@ because it has no delete permission, it cannot replace an existing object.
 This prevents a compromised validator processing a malicious IDF, FMU, RDF, or
 XML document from reading another attempt through its metadata identity.
 
-### MCP Service Account
+### MCP identity
 
-Only relevant on deployments that run the MCP server. Provisioned by
-`just gcp mcp setup <stage>` when `ENABLE_MCP_SERVER=true` is set in
-`.envs/<stage>/.google-cloud/.build`.
+Embedded MCP uses the normal web service account because it runs inside the
+Django ASGI process and calls application services directly. It needs no
+dedicated service account, `run.invoker` hop, or `mcp-env` secret. End-user
+authorization comes from Validibot OAuth tokens scoped and audience-bound to
+`<SITE_URL>/mcp`.
 
-| Stage | Service Account |
-| ----- | --------------- |
-| dev | `$GCP_APP_NAME-mcp-dev` |
-| staging | `$GCP_APP_NAME-mcp-staging` |
-| prod | `$GCP_APP_NAME-mcp-prod` |
-
-**Roles granted:**
-
-| Role | Scope | Purpose |
-| ---- | ----- | ------- |
-| `roles/secretmanager.secretAccessor` | Exact stage `mcp-env` secret | Read only the MCP OAuth/runtime environment; setup removes the legacy project-wide binding |
-| `roles/run.invoker` | Django web service | Mint OIDC identity tokens to call `/api/v1/mcp/*` on Django |
-
-The MCP SA deliberately does **not** have:
-
-- `cloudsql.client` (no database access — MCP talks to Django over REST)
-- `cloudtasks.enqueuer` (no task queue access)
-- `roles/storage.objectAdmin` (no storage access)
-- KMS roles (no credential signing)
-
-`just gcp security-audit <stage>` verifies that MCP has no project-level role,
-has no user-managed key, and has exactly one `secretAccessor` binding on its
-stage `mcp-env` secret.
-
-This is the most constrained SA in the deployment. Even a full MCP
-container compromise only exposes the OAuth client secret and lets
-the attacker call Django's `/api/v1/mcp/*` surface — everything
-interesting (workflows, runs, submissions) is still gated by the
-end user's forwarded identity.
-
-For the identity-token flow to work, Django must also be configured
-to accept tokens minted by this SA. Set
-`MCP_OIDC_ALLOWED_SERVICE_ACCOUNTS` in `.envs/<stage>/.google-cloud/.django`
-to include the email. The deploy recipe stamps `MCP_OIDC_AUDIENCE` onto
-Django from `VALIDIBOT_MCP_API_BASE_URL` in `.build`; do not set it separately.
-See [Deploy to GCP — Configure MCP auth](../deployment/deploy-gcp.md)
-for the full setting list.
+Legacy deployments may still contain a retired MCP service account or secret.
+The security audit reports those resources so operators can preserve rollback
+evidence and remove them deliberately after external acceptance; new stages
+must not provision them.
 
 ## Setup
 
@@ -131,14 +100,6 @@ by `just gcp init-stage`:
 ```bash
 just gcp init-stage dev      # Creates web/worker + validator SAs + all bindings
 just gcp init-stage prod     # Same for production
-```
-
-The MCP service account is created separately — only if you're
-running MCP — by:
-
-```bash
-just gcp mcp setup dev       # Creates MCP SA + secret/run.invoker bindings
-just gcp mcp setup prod
 ```
 
 The Job half of `just gcp validator-deploy` (also available directly as

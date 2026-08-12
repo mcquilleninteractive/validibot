@@ -156,23 +156,13 @@ CREDENTIAL_ISSUER_URL=
 # Optional override. ES256 is the only algorithm currently supported.
 SIGNING_ALGORITHM=ES256
 
-# MCP HELPER API SERVICE-TO-SERVICE AUTH
+# EMBEDDED MCP OAUTH
 # ==============================================================================
-# Paired local secret used by the FastMCP server to authenticate itself to
-# Django when calling /api/v1/mcp/*. Generate one value and place it here and
-# in .envs/.local/.mcp. Without this, MCP tool calls hit the helper API and get
-# 401 on every request.
-#
-# Read by ``validibot.mcp_api.authentication.MCPServiceAuthentication``
-# as ``settings.MCP_SERVICE_KEY``. In hosted cloud production, leave
-# this empty — the auth class falls back to Cloud Run OIDC identity
-# tokens instead.
-#
-# Generate with: python -c "import secrets; print(secrets.token_urlsafe(32))"
-# Uncomment and set this when running `local-pro`/`local-cloud` with
-# ENABLE_MCP_SERVER=true. Plain `just local` has no MCP container, so it can
-# stay commented there.
-#VALIDIBOT_MCP_SERVICE_KEY=
+# local-pro and local-cloud expose the licensed endpoint at
+# http://localhost:8000/mcp. Configure a signing key and an exact client
+# callback when testing the OAuth flow; no service-to-service secret is used.
+#IDP_OIDC_PRIVATE_KEY_B64=
+#IDP_OIDC_CHATGPT_REDIRECT_URIS=
 
 # X402 AGENT PAYMENTS (cloud-only — local-cloud stack)
 # ==============================================================================

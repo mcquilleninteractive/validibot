@@ -1,7 +1,7 @@
-"""Error-code constants for the community MCP helper API.
+"""Error-code constants for the legacy Community agent HTTP adapter.
 
-Matches the machine-readable codes the FastMCP layer expects in the
-``code`` field of DRF error payloads. Cloud's agent endpoints use a
+These are the machine-readable ``code`` values in retained DRF error payloads.
+Cloud's agent endpoints use a
 parallel ``AgentRunErrorCode`` enum in ``validibot_cloud.agents.constants``
 for x402-specific failures.
 """

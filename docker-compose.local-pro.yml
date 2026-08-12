@@ -9,7 +9,6 @@
 #
 # Usage (from the community repo root):
 #   just local-pro up --build
-#   just local-pro up --build   ENABLE_MCP_SERVER=true  # + MCP container
 #
 # Under the hood that runs:
 #   docker compose \
@@ -83,31 +82,3 @@ services:
       - --loglevel=info
       - --scheduler
       - django_celery_beat.schedulers:DatabaseScheduler
-
-  mcp:
-    # Standalone FastMCP server — activated only when the "mcp" Compose
-    # profile is on (ENABLE_MCP_SERVER=true, via the just recipe).
-    # Pro supplies the ``mcp_server`` feature flag that the MCP server's
-    # startup license check requires; without pro installed the container
-    # will start but then exit with LicenseCheckError.
-    profiles: ["mcp"]
-    build:
-      context: ./mcp
-      dockerfile: ../compose/production/mcp/Dockerfile
-    depends_on:
-      web:
-        condition: service_healthy
-    networks:
-      - validibot
-    env_file:
-      - .envs/.local/.mcp
-      # No .build here: the MCP server no longer handles x402, so it needs none
-      # of .build's payment config (x402 now lives in Django's .django only).
-    ports:
-      - "8001:8080"
-    healthcheck:
-      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 8080), 2).close()"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s

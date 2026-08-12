@@ -11,20 +11,17 @@ Environment configuration uses a template-based approach:
 ├── README.md               # Quick start guide and variable reference
 ├── .local/
 │   ├── .django             # Django settings for local development
-│   ├── .build              # Optional Docker build + shared recipe/runtime knobs
-│   ├── .mcp                # Optional MCP-only container env (docker-compose MCP profile)
+│   ├── .build              # Optional Docker build knobs
 │   └── .postgres           # Postgres credentials for local development
 └── .production/
     ├── .self-hosted/       # Self-hosted (Docker Compose on a VM)
-    │   ├── .build          # Docker build args + recipe knobs (Pro/Enterprise, MCP)
-    │   ├── .django
-    │   ├── .mcp            # MCP container env (when MCP is enabled)
-    │   └── .postgres
+	    │   ├── .build          # Docker build args (Pro/Enterprise)
+	    │   ├── .django
+	    │   └── .postgres
     ├── .google-cloud/      # Google Cloud Platform deployment
-    │   ├── .build          # Deploy-time knobs (MCP API URL, build flags)
-    │   ├── .django         # Django runtime settings (uploaded to Secret Manager)
-    │   ├── .just           # Just command runner settings (sourced locally)
-    │   └── .mcp            # MCP Cloud Run env (uploaded to Secret Manager as mcp-env)
+	    │   ├── .build          # Deploy-time build flags
+	    │   ├── .django         # Django runtime settings (uploaded to Secret Manager)
+	    │   └── .just           # Just command runner settings (sourced locally)
     └── .aws/               # AWS deployment (future)
         └── .django
 
@@ -114,9 +111,9 @@ Each deployment environment uses two files:
 
 This separation keeps database credentials isolated and makes it clear which variables configure which service.
 
-### The `.build` file — build, recipe, and shared runtime knobs
+### The `.build` file — build and recipe knobs
 
-The `.build` file plays three roles, all loaded from the same file:
+The `.build` file plays two roles, both loaded from the same file:
 
 1. **Docker build-time vars.** Passed to `docker compose --env-file` for
    YAML interpolation of `${FOO}` references in the compose files. This
@@ -128,36 +125,16 @@ The `.build` file plays three roles, all loaded from the same file:
     - `VALIDIBOT_COMMERCIAL_NETRC` — absolute path to a mode-0600 netrc;
       Compose mounts it only as a BuildKit secret
 
-2. **Recipe/deploy/runtime knobs.** The `just local up` /
-   `just local-pro up` / `just local-cloud up` recipes (and the
-   production deploy recipes) source this file at the top, so shell-level
-   variables drive recipe logic **before** `docker compose` or `gcloud`
-   is invoked. The canonical example is `ENABLE_MCP_SERVER`, which
-   decides whether to activate the `mcp` Compose profile or MCP Cloud Run
-   deploy path. The shared **GCP** MCP URLs live here too: the deploy
-   recipe stamps them onto the web and MCP Cloud Run services via
-   `--set-env-vars`. (Local stacks don't need them — the MCP URL defaults
-   to `http://localhost:8001`.)
+2. **Recipe/deploy knobs.** The `just local up` /
+	   `just local-pro up` / `just local-cloud up` recipes (and the
+	   production deploy recipes) source this file at the top, so shell-level
+	   variables drive recipe logic **before** `docker compose` or `gcloud`
+	   is invoked. Hosted x402 runtime values belong in `.django`; `.build` is not
+	   mounted into application containers via `env_file`.
 
-    - `ENABLE_MCP_SERVER=true` — include the FastMCP container in the
-      stack. Flip to `true` for `local-pro` and `local-cloud`, where
-      validibot-pro is installed and satisfies the runtime license
-      gate. Ignored by `just local up` because the community compose
-      file defines no `mcp` service.
-
-3. **Shared non-secret values stamped onto GCP services.** On GCP the deploy
-   recipe stamps a few public values from this file onto the relevant Cloud Run
-   services via `--set-env-vars`, so the web and MCP revisions agree on them.
-   The MCP URLs are the concrete example: `.build` holds `VALIDIBOT_MCP_BASE_URL`
-   and `VALIDIBOT_MCP_API_BASE_URL`, stamped onto both revisions so each side
-   agrees on where the MCP server lives. (x402 payment config is **not** among
-   these — it moved to `.django` when the MCP server stopped handling payments.
-   And `.build` is no longer mounted into any container via `env_file`; local
-   stacks read it only at the recipe level.)
-
-These categories are optional — if `.build` is absent, recipes that do not
-need it no-op cleanly. For MCP or cloud-local work, the file is worth copying
-because it activates MCP and (on GCP) carries the shared MCP URLs.
+The file is optional when no commercial package or special build setting is
+needed. MCP activation does not use a build flag: the installed Pro package
+registers the feature when Django starts.
 
 Pro / Enterprise reminder: installing the wheel via category (1)
 gets the package into the image, but Django still needs the app in
@@ -172,40 +149,14 @@ can talk to Google Cloud: project ID, deploy region, app name prefix, scheduler
 timezone, and Cloud Run timeout.
 
 It is not uploaded to Secret Manager, not mounted into containers, and not
-runtime application configuration. If a value must reach Django or MCP at
-runtime, it does not belong in `.just`: put service-specific runtime values in
-`.django` or `.mcp`, and put non-secret values shared by both services in
-`.build` so the recipes can stamp them into both places. Shared secrets are the
-exception: keep them in Secret Manager-backed service files until a deliberate
-shared-secret workflow exists.
+runtime application configuration. Runtime values belong in `.django`.
 
-### The `.mcp` file — MCP container env
+### Embedded MCP configuration
 
-The MCP server runs in its own container (docker-compose) or Cloud Run
-service (GCP) with its own env mount. The `.mcp` file is where its
-settings live, separate from `.django` so the MCP image never sees
-Django-only secrets (database passwords, Stripe keys, etc.) it doesn't
-need. Contains things like `VALIDIBOT_API_BASE_URL` for local/self-hosted
-deployments and `VALIDIBOT_OAUTH_CLIENT_SECRET`. The OAuth client secret is a
-paired secret: it and `IDP_OIDC_MCP_SERVER_CLIENT_SECRET` in `.django` are two
-Secret Manager-backed copies of one generated value, rotated together. It does
-**not** carry any x402 payment config — the MCP server no longer handles
-payments, so the Coinbase CDP API credentials and the rest of the x402 settings
-live in the cloud Django secret (`.django`) instead. The public MCP URLs are
-shared across both services and live in `.build`.
-
-The MCP OAuth proxy builds the small provider map it needs from the configured
-authorization-server URL and Validibot's stable django-allauth routes. It does
-not download `/.well-known/openid-configuration` during process startup. This
-keeps maintenance deployments independent of public Django ingress. If a
-self-hosted reverse proxy exposes compatible endpoints on different paths,
-set `VALIDIBOT_OAUTH_AUTHORIZATION_ENDPOINT`,
-`VALIDIBOT_OAUTH_TOKEN_ENDPOINT`, `VALIDIBOT_OAUTH_REVOCATION_ENDPOINT`, and
-`VALIDIBOT_OAUTH_JWKS_URL` in `.mcp`; otherwise leave them unset.
-
-On GCP, `just gcp mcp secrets <stage>` uploads this file to Secret
-Manager as `mcp-env` and Cloud Run mounts it at `/secrets/.env` on
-the MCP service.
+The Pro MCP endpoint runs inside the Django ASGI process and therefore reads
+the normal `.django` environment. There is no `.mcp` file, separate secret,
+service account, or paired service credential. The canonical resource URL is
+`<SITE_URL>/mcp`.
 
 ### Variable-to-file reference
 
@@ -216,28 +167,19 @@ The quick version of "where does each variable go":
 | `DJANGO_SECRET_KEY`, `DJANGO_API_KEY_DIGEST_KEY`, `DATABASE_URL`, `SITE_URL` | `.django` | Read by Django at process startup |
 | `DJANGO_ALLOWED_HOSTS`, `DJANGO_CSRF_TRUSTED_ORIGINS` | `.django` | Hostnames accepted by Django and full HTTPS origins allowed to submit CSRF-protected requests. GCP production must include its public application origin in both forms. |
 | `IDP_OIDC_PRIVATE_KEY_B64` | `.django` | Signs JWT access tokens |
-| `IDP_OIDC_MCP_SERVER_CLIENT_SECRET` | `.django` | Paired OAuth client secret; Django verifies it when MCP exchanges codes for tokens |
-| `VALIDIBOT_MCP_BASE_URL` | `.build` on GCP; `.django`/`.mcp` for local/self-hosted runtime files | Public MCP URL. GCP stamps one `.build` value into both services; local/self-hosted compose still passes it through runtime env files. |
-| `MCP_OIDC_AUDIENCE` | `.build` (GCP, via `VALIDIBOT_MCP_API_BASE_URL`) | GCP deploy stamps the same Django API URL onto web as the MCP OIDC audience |
-| `MCP_OIDC_ALLOWED_SERVICE_ACCOUNTS` | `.django` | Django allowlists MCP Cloud Run service accounts for MCP → Django identity tokens |
+| `IDP_OIDC_MCP_RESOURCE_AUDIENCE` | `.django` | Exact embedded MCP resource and JWT audience; defaults to `<SITE_URL>/mcp`. |
+| `IDP_OIDC_CHATGPT_REDIRECT_URIS` | `.django` | Exact callback URI or URIs supplied by the ChatGPT plugin builder. |
+| `MCP_FILE_MAX_BYTES`, `MCP_MAX_REQUEST_BODY_BYTES` | `.django` | Bound downloaded validation content and total Streamable HTTP request size. |
+| `MCP_READS_PER_MINUTE`, `MCP_STARTS_PER_MINUTE` | `.django` | Separate per-principal read and validation-start budgets. |
+| `MCP_ALLOWED_ORIGINS` | `.django` | Optional additional exact browser origins. |
 | `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_HOST` | `.postgres` | Database credentials, kept isolated |
-| `VALIDIBOT_API_BASE_URL` | `.mcp` / `.build` (GCP) | MCP server's target for REST calls; GCP deploy stamps `VALIDIBOT_MCP_API_BASE_URL` into `VALIDIBOT_API_BASE_URL` |
-| `VALIDIBOT_OAUTH_CLIENT_SECRET` | `.mcp` | Paired OAuth client secret; same generated value as `IDP_OIDC_MCP_SERVER_CLIENT_SECRET`, stored in the MCP secret file |
-| `VALIDIBOT_OAUTH_AUTHORIZATION_SERVER_URL` | `.mcp` | Canonical Django/OIDC issuer base URL; required by the standalone MCP server |
-| `VALIDIBOT_OAUTH_AUTHORIZATION_ENDPOINT`, `VALIDIBOT_OAUTH_TOKEN_ENDPOINT`, `VALIDIBOT_OAUTH_REVOCATION_ENDPOINT`, `VALIDIBOT_OAUTH_JWKS_URL` | `.mcp` | Optional complete-URL overrides for non-standard compatible OIDC routing; normal Validibot deployments derive these locally from the issuer URL |
 | `VALIDIBOT_COMMERCIAL_PACKAGE`, `VALIDIBOT_COMMERCIAL_NETRC` | `.build` | Exact package reference plus a BuildKit-mounted credential file (Docker Compose only) |
-| `ENABLE_MCP_SERVER` | `.build` | Recipe-level knob; decides whether `just gcp deploy-all` and the compose MCP profile activate MCP |
 | `DRF_NUM_PROXIES` | `.django` | Trusted-proxy count for client-IP resolution in DRF throttles; must equal the inbound proxy hop count or IP rate-limits can be spoofed (too high) / over-applied (too low). Community default 1; hosted cloud 2 (behind the LB). See [reverse-proxy.md](reverse-proxy.md). |
-| `VALIDIBOT_MCP_API_BASE_URL` | `.build` (GCP) | Stamped onto MCP as `VALIDIBOT_API_BASE_URL` and onto Django as `MCP_OIDC_AUDIENCE` |
 | `VALIDIBOT_X402_*`, `VALIDIBOT_TEST_X402_*` (enabled, test-mode, network, asset, pay-to, facilitator URL, CDP key id/secret) | `.django` | **All** x402 config. x402 is cloud-only — only validibot-cloud's Django reads it (the MCP server no longer handles payments), so every value lives in the cloud Django secret alongside Stripe/audit. Only the CDP key id/secret are true secrets; the rest are non-secret but kept here so x402 has one authoring file. Not in `.build` and not stamped via `--set-env-vars`. |
 | `GCP_PROJECT_ID`, `GCP_REGION` | `.just` (GCP) | Sourced into the shell before running `just gcp` recipes |
 
-Avoid adding a non-secret variable to two files. If Django and MCP both need a
-public/runtime value, author it in `.build` and have the recipe inject or stamp
-it into both runtimes. If both sides need the same secret, do not move it to
-`.build` because `.build` becomes Cloud Run `--set-env-vars`, not Secret
-Manager. Keep paired secrets in their service-specific secret files and rotate
-them together from one generated value.
+Avoid duplicating runtime values across files. Django and embedded MCP share the
+same `.django` environment and canonical `SITE_URL`.
 
 ### DATABASE_URL Construction
 

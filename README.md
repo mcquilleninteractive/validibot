@@ -111,13 +111,13 @@ See the [API documentation](https://docs.validibot.com/api) for complete referen
 
 ### MCP Server for AI Agents
 
-Validibot ships a standalone [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server (in `mcp/`) that exposes your validation workflows to AI agents. An agent can discover workflows, submit a file, and wait for the verdict through a handful of tools:
+Validibot includes a [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) endpoint that exposes validation workflows to AI agents. It uses the official MCP Python SDK and is mounted at `<SITE_URL>/mcp` in the normal Django ASGI application:
 
-- `list_workflows` / `get_workflow_details` — discover the workflows available to the caller
-- `validate_file` — submit a file for validation and get back a run reference
-- `get_run_status` / `wait_for_run` — poll, or block until the run reaches a verdict
+- `list_workflows` / `get_workflow` — discover workflows available to the caller
+- `start_validation` — submit a bounded file with a database-idempotent request
+- `get_validation_run` / `list_validation_findings` — poll status and page through results
 
-The server is a thin protocol-translation layer: it forwards REST calls to Validibot's API (via the built-in `mcp_api` app) and carries no validation logic of its own. The source is open (AGPL-3.0), but every enabled revision checks the deployment's license at startup and only serves traffic when the `mcp_server` feature is enabled (included with Pro). A maintenance revision starts disabled and internal, then performs the same check when the deployment is brought online. See the [MCP documentation](https://dev.validibot.com/mcp/) for setup.
+The implementation is open AGPL community code and calls Django application services directly. The route is activated only when the installed license includes the Pro `mcp_server` feature; Community returns 404. No second container, hostname, private HTTP proxy, or MCP service credential is required. See the [MCP documentation](https://dev.validibot.com/mcp/) for setup.
 
 ## Quick Start
 
@@ -167,12 +167,11 @@ Validibot is designed for **deployment on your own infrastructure**. You control
 
 | Component         | Purpose                                                   |
 | ----------------- | --------------------------------------------------------- |
-| **Web**           | Django application (API + UI)                             |
+| **Web**           | Django ASGI application (UI, API, and Pro-gated MCP)      |
 | **Worker**        | Celery workers for async validation                       |
 | **PostgreSQL**    | Primary database                                          |
 | **Redis**         | Task queue broker and cache                               |
 | **Reverse Proxy** | User-provided (Caddy, Traefik, nginx) for TLS termination |
-| **MCP Server**    | *(optional, Pro)* FastMCP server exposing workflows to AI agents |
 
 ### Deployment Options
 

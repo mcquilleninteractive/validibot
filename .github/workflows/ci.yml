@@ -265,60 +265,6 @@ jobs:
       - name: Run front-end unit tests
         run: npm test -- --passWithNoTests=false
 
-  # The standalone MCP package has its own lockfile and test configuration.
-  # Keep it independent from Django's environment while making it part of the
-  # same branch-protection-facing aggregate check.
-  mcp:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: mcp
-    steps:
-      - name: Checkout Code Repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
-        with:
-          enable-cache: true
-
-      - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
-        with:
-          python-version-file: '.python-version'
-
-      - name: Install locked MCP dependencies
-        run: uv sync --frozen --extra dev
-
-      - name: Verify MCP lock and formatting
-        run: |
-          uv lock --check
-          uv run --frozen --extra dev ruff format --check \
-            src/ tests/
-
-      - name: Lint MCP
-        run: >-
-          uv run --frozen --extra dev ruff check
-          src/ tests/
-
-      - name: Audit the locked MCP runtime dependency set
-        run: |
-          uv export --frozen \
-            --no-emit-project \
-            --quiet \
-            --format requirements-txt \
-            --output-file requirements-audit.txt
-          uvx --from pip-audit==2.10.1 pip-audit \
-            --requirement requirements-audit.txt \
-            --require-hashes \
-            --disable-pip \
-            --strict
-
-      - name: Test MCP and its production container contract
-        run: uv run --frozen --extra dev pytest -xvs tests/
-
   # Branch protection requires only this stable aggregate check. Individual
   # job names can evolve without weakening the protected-main gate, while the
   # explicit result inspection ensures failed, cancelled, or skipped jobs make
@@ -333,7 +279,6 @@ jobs:
       - pytest
       - frontend-assets
       - frontend-tests
-      - mcp
     runs-on: ubuntu-latest
     steps:
       - name: Require every CI job to pass
@@ -343,7 +288,6 @@ jobs:
           PYTEST_RESULT: ${{ needs.pytest.result }}
           FRONTEND_ASSETS_RESULT: ${{ needs.frontend-assets.result }}
           FRONTEND_TESTS_RESULT: ${{ needs.frontend-tests.result }}
-          MCP_RESULT: ${{ needs.mcp.result }}
         run: |
           set -euo pipefail
           for result in \
@@ -351,8 +295,7 @@ jobs:
             "$TYPECHECK_RESULT" \
             "$PYTEST_RESULT" \
             "$FRONTEND_ASSETS_RESULT" \
-            "$FRONTEND_TESTS_RESULT" \
-            "$MCP_RESULT"
+            "$FRONTEND_TESTS_RESULT"
           do
             if [[ "$result" != "success" ]]; then
               echo "::error::At least one required CI job did not succeed."

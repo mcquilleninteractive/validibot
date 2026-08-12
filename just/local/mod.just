@@ -33,11 +33,8 @@ local_compose := "docker-compose.local.yml"
 #
 # 1. ``--env-file`` for ``docker compose`` YAML interpolation of
 #    ``${FOO}`` references (mostly Pro/Enterprise packaging build args).
-# 2. ``source``d at the top of recipe bodies that need shell-level knobs
-#    (``ENABLE_MCP_SERVER``, future recipe-level flags). The community
-#    stack has no MCP service defined, so sourcing here is forward-
-#    looking — it keeps the three local recipes symmetric and lets any
-#    future recipe-level knob flow through automatically.
+# 2. ``source``d at the top of recipe bodies that need future shell-level
+#    deployment knobs. This keeps the local recipe variants symmetric.
 #
 # Both are no-ops when the file is absent.
 local_compose_env_args := `bash -lc 'if [ -f ".envs/.local/.build" ]; then printf -- "--env-file .envs/.local/.build"; fi'`

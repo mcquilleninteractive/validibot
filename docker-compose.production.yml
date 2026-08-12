@@ -24,13 +24,12 @@
 #   COMPOSE_PROFILES=caddy just self-hosted deploy
 #
 # Architecture:
-#   - web: Main web application (Gunicorn)
+#   - web: Main Django + Pro-gated MCP application (Gunicorn/ASGI)
 #   - worker: Background task processor (Celery worker)
 #   - scheduler: Periodic task scheduler (Celery Beat)
 #   - postgres: Database
 #   - redis: Task queue broker
 #   - caddy: (profile: caddy) optional reverse proxy with auto-TLS
-#   - mcp: (profile: mcp) optional FastMCP server (Pro feature)
 #
 secrets:
   validibot_commercial_netrc:
@@ -219,9 +218,8 @@ services:
     # To enable:
     #   COMPOSE_PROFILES=caddy just self-hosted deploy
     #
-    # Caddy auto-issues Let's Encrypt certificates for SITE_URL and, when
-    # configured, VALIDIBOT_MCP_BASE_URL. Those hostnames must already resolve
-    # to this host's public IP (run
+    # Caddy auto-issues a Let's Encrypt certificate for SITE_URL. That hostname
+    # must already resolve to this host's public IP (run
     # ./deploy/self-hosted/scripts/check-dns to verify before first
     # boot). See ADR-2026-04-27 section 21 for the rationale behind
     # off-by-default + opt-in.
@@ -239,10 +237,9 @@ services:
       - ./deploy/self-hosted/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
-    # The Caddyfile reads SITE_URL and the optional
-    # VALIDIBOT_MCP_BASE_URL from the same deployment configuration as the
-    # application. Do not add empty ``environment`` overrides here: Compose
-    # gives them precedence over values loaded from env_file.
+    # The Caddyfile reads SITE_URL from the same deployment configuration as
+    # the application. Do not add an empty ``environment`` override here:
+    # Compose gives it precedence over values loaded from env_file.
     env_file:
       - .envs/.production/.self-hosted/.django
     restart: unless-stopped
@@ -252,42 +249,3 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
-
-  mcp:
-    # Validibot MCP server — exposes validation workflows to AI agents.
-    #
-    # Opt-in via the ``mcp`` Compose profile (set ENABLE_MCP_SERVER=true and
-    # `just self-hosted up` will enable it). MCP is a Pro feature: the
-    # server boots only if the deployment's license advertises the
-    # ``mcp_server`` feature, so self-hosted users without validibot-pro
-    # will see the container fail its startup license check even if the
-    # profile is active.
-    #
-    # The MCP package lives in ``mcp/`` alongside this compose file. It is
-    # a sibling Python project with no Django imports.
-    profiles: ["mcp"]
-    build:
-      context: ./mcp
-      dockerfile: ../compose/production/mcp/Dockerfile
-    depends_on:
-      web:
-        condition: service_healthy
-    networks:
-      - validibot
-    env_file:
-      - .envs/.production/.self-hosted/.mcp
-    # The host publication is a maintenance/debugging ingress for a reverse
-    # proxy on this VM, not a public plaintext endpoint. Bundled Caddy reaches
-    # ``mcp:8080`` directly over the private Compose network.
-    ports:
-      - target: 8080
-        published: "${MCP_HOST_PORT:-8001}"
-        host_ip: 127.0.0.1
-        protocol: tcp
-    healthcheck:
-      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 8080), 2).close()"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
-    restart: unless-stopped

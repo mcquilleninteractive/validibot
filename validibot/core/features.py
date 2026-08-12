@@ -62,10 +62,9 @@ class CommercialFeature(TextChoices):
     ADVANCED_ANALYTICS = "advanced_analytics", _("Advanced Analytics")
     AUDIT_LOG = "audit_log", _("Audit Log")
     SIGNED_CREDENTIALS = "signed_credentials", _("Signed Credentials")
-    # Standalone FastMCP server that exposes validation workflows to AI
-    # agents over OAuth/API tokens. The server lives in this repo under
-    # mcp/ and refuses to start unless this feature is advertised by the
-    # deployment's license (i.e. validibot-pro is installed).
+    # Embedded official-SDK MCP surface for OAuth-authenticated AI agents.
+    # Its community implementation is mounted only when a commercial package
+    # advertises this feature; Pro remains a thin activation layer.
     MCP_SERVER = "mcp_server", _("MCP Server")
     # Anonymous, x402-paid agent validation. The x402 facilitator client
     # (verify/settle against Coinbase CDP) lives in ``validibot_pro/x402/``

@@ -1,19 +1,16 @@
-"""Service-to-service authentication for the MCP helper API.
+"""Service-to-service authentication for the legacy agent HTTP adapter.
 
-The HTTP caller on these endpoints is always the standalone FastMCP
-server, not an end user. We verify the service identity first, then
-trust the additional header the MCP server adds after having validated
-the end user's bearer credential on its own side.
+The compatibility routes verify a trusted service identity before resolving an
+end user from a forwarded credential header. Embedded MCP does not use this
+authentication path.
 
 Two verification modes:
 
-* **Production:** the MCP Cloud Run (or equivalent container) mints a
+* **Production compatibility:** an allowlisted Cloud Run caller mints a
   Cloud Run OIDC identity token and sends it as ``Authorization: Bearer
   <token>``. Verified with google-auth against the configured audience.
-* **Local dev / self-hosted:** a shared secret in ``X-MCP-Service-Key``
-  is accepted as a fallback. The secret comes from the ``MCP_SERVICE_KEY``
-  Django setting and must match ``VALIDIBOT_MCP_SERVICE_KEY`` on the
-  FastMCP side.
+* **Local compatibility tests:** a shared secret in ``X-MCP-Service-Key``
+  is accepted as a fallback from the ``MCP_SERVICE_KEY`` Django setting.
 
 Cloud's x402-paid agent routes use a sibling auth class
 (``validibot_cloud.agents.authentication.AgentRouteAuthentication``)
@@ -41,10 +38,10 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class MCPAuthenticatedUserContext:
-    """Describe the end-user identity forwarded by the MCP service.
+    """Describe the end-user identity forwarded by a trusted caller.
 
-    The MCP service authenticates the end user's bearer token locally,
-    then forwards either the OIDC ``sub`` claim or a legacy Validibot
+    The caller authenticates the end user's bearer token, then forwards either
+    the OIDC ``sub`` claim or a legacy Validibot
     API token to Django over a trusted service-to-service channel. Views
     use this context to distinguish which compatibility path produced
     the Django user.
@@ -55,7 +52,7 @@ class MCPAuthenticatedUserContext:
 
 
 class MCPServiceAuthentication(BaseAuthentication):
-    """Verify that the caller is the trusted MCP service."""
+    """Verify the trusted caller of the legacy compatibility route."""
 
     def authenticate_header(self, request) -> str:
         """Advertise a challenge so authentication failures become HTTP 401."""
@@ -63,9 +60,9 @@ class MCPServiceAuthentication(BaseAuthentication):
         return 'Bearer realm="validibot-mcp-service"'
 
     def _verify_service_identity(self, request) -> None:
-        """Verify that the caller is the MCP service.
+        """Verify that the caller is an allowed compatibility service.
 
-        In production, the MCP service sends a Cloud Run OIDC identity
+        In production, the caller sends a Cloud Run OIDC identity
         token in the Authorization header. In local dev, a shared secret
         in X-MCP-Service-Key is accepted as a fallback.
 
@@ -205,10 +202,10 @@ class MCPServiceAuthentication(BaseAuthentication):
 
 
 class MCPUserRouteAuthentication(MCPServiceAuthentication):
-    """Verify the MCP service and resolve the forwarded end user.
+    """Verify the compatibility caller and resolve the forwarded end user.
 
     Used by Django endpoints that exist purely to support the
-    authenticated MCP experience. The MCP service has already validated
+    authenticated agent experience. The trusted caller has already validated
     the user's bearer credential; this class converts the forwarded
     OIDC subject or legacy API token into a concrete Django
     ``request.user``.

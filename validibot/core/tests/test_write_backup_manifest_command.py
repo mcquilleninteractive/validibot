@@ -77,6 +77,7 @@ class TestRequiredArguments:
         ],
     )
     def test_missing_required_arg_raises(self, missing_arg):
+        """The command must reject manifests that cannot support a safe restore."""
         all_args = {
             "--backup-id": "20260504T143022Z",
             "--target": "gcp",
@@ -108,6 +109,7 @@ class TestStdoutOutput:
     """Default output (``--output -``) writes valid JSON to stdout."""
 
     def test_stdout_output_is_valid_json(self):
+        """Pipelines consume stdout directly, so it must contain valid schema JSON."""
         out = StringIO()
         call_command(
             "write_backup_manifest",
@@ -175,6 +177,7 @@ class TestDbContentTypeResolution:
         ]
 
     def test_explicit_content_type_wins(self):
+        """An operator-provided media type is more authoritative than a suffix."""
         out = StringIO()
         call_command(
             "write_backup_manifest",
@@ -187,6 +190,7 @@ class TestDbContentTypeResolution:
         assert as_dict["data"]["db_dump"]["content_type"] == "application/zstd"
 
     def test_zst_extension_inferred_as_zstd(self):
+        """Self-hosted zstd dumps need an accurate type for restore tooling."""
         out = StringIO()
         call_command(
             "write_backup_manifest",
@@ -197,6 +201,7 @@ class TestDbContentTypeResolution:
         assert as_dict["data"]["db_dump"]["content_type"] == "application/zstd"
 
     def test_gz_extension_inferred_as_gzip(self):
+        """Gzip database dumps retain their conventional content type."""
         out = StringIO()
         call_command(
             "write_backup_manifest",
@@ -277,6 +282,7 @@ class TestFileOutput:
     """A local path writes the manifest to disk."""
 
     def test_writes_to_file(self, tmp_path: Path):
+        """Self-hosted recipes depend on durable local manifest output."""
         out_path = tmp_path / "manifest.json"
         call_command(
             "write_backup_manifest",
@@ -313,6 +319,7 @@ class TestSecretManagerVersionParsing:
     """``--secret-manager-version NAME=VERSION`` parses into the config component."""
 
     def test_single_pair(self):
+        """A single retained secret version must remain recoverable by name."""
         out = StringIO()
         call_command(
             "write_backup_manifest",
@@ -341,6 +348,7 @@ class TestSecretManagerVersionParsing:
         assert as_dict["config"]["secret_manager_versions"] == {"django-env": "17"}
 
     def test_multiple_pairs(self):
+        """Independent runtime secret versions must coexist without overwriting."""
         out = StringIO()
         call_command(
             "write_backup_manifest",
@@ -363,13 +371,13 @@ class TestSecretManagerVersionParsing:
             "--secret-manager-version",
             "django-env=17",
             "--secret-manager-version",
-            "mcp-env=4",
+            "worker-env=4",
             stdout=out,
         )
         as_dict = json.loads(out.getvalue())
         assert as_dict["config"]["secret_manager_versions"] == {
             "django-env": "17",
-            "mcp-env": "4",
+            "worker-env": "4",
         }
 
     def test_no_pairs_means_no_config_block(self):
@@ -465,6 +473,7 @@ class TestMediaInventoryParsing:
     """JSONL inventory files parse one BackupFileEntry per line."""
 
     def test_parses_inventory_file(self, tmp_path: Path):
+        """Every JSONL media entry must become a restorable manifest file row."""
         inventory = tmp_path / "media-inventory.jsonl"
         # Three entries, one per line, valid JSON each.  The blank
         # line at the end is intentional — the reader should ignore it.
@@ -612,6 +621,7 @@ class TestCompatibilityCapture:
     """
 
     def test_compatibility_block_populated(self):
+        """A backup without runtime compatibility evidence is unsafe to restore."""
         out = StringIO()
         call_command(
             "write_backup_manifest",

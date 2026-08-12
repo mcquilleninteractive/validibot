@@ -38,13 +38,10 @@ If you bring your own proxy:
 - set `DJANGO_SECURE_SSL_REDIRECT=true`;
 - enable HSTS via `DJANGO_SECURE_HSTS_*` settings.
 
-When MCP is enabled, give it a distinct HTTPS origin such as
-`https://mcp.example.com`. The production Compose file publishes MCP only on
-`127.0.0.1:8001`; an external host proxy forwards that loopback port, while the
-bundled Caddy service reaches `mcp:8080` over the private Compose network.
-Never publish the MCP HTTP port directly to an untrusted network. Keep
-`VALIDIBOT_MCP_BASE_URL` identical in `.django` and `.mcp` so OAuth issuance,
-redirects, and audience verification describe the same TLS-protected resource.
+On Pro, the same TLS origin and web container serve `<SITE_URL>/mcp`. Preserve
+the original HTTPS scheme and host through the proxy so OAuth metadata, JWT
+audience verification, and DNS-rebinding protection all describe the same
+resource. Do not add a second plaintext MCP port.
 
 ### 2. Use strong generated secrets
 

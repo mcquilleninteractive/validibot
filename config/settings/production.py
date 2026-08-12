@@ -81,12 +81,10 @@ ALLOWED_HOSTS = env.list("DJANGO_ALLOWED_HOSTS")
 
 # DATABASES
 # ------------------------------------------------------------------------------
-# Keep connections open for 10 minutes to reduce connection overhead through
-# the Cloud SQL Auth Proxy. CONN_HEALTH_CHECKS runs a lightweight SELECT 1
-# before reusing a connection, catching stale connections from Cloud SQL
-# restarts or proxy reconnections.
-DATABASES["default"]["CONN_MAX_AGE"] = env.int("CONN_MAX_AGE", default=600)
-DATABASES["default"]["CONN_HEALTH_CHECKS"] = True
+# Django recommends disabling persistent database connections in async mode.
+# This also keeps Cloud SQL connection growth bounded under Cloud Run's
+# concurrent-request model.
+DATABASES["default"]["CONN_MAX_AGE"] = 0
 
 # CACHES
 # ------------------------------------------------------------------------------
@@ -575,14 +573,10 @@ if DEPLOYMENT_TARGET == "gcp":
                 "dispatch."
             )
 
-    # MCP service-to-service OIDC on the ``/api/v1/mcp/*`` helper API
-    # uses ``validibot.mcp_api.authentication.MCPServiceAuthentication``.
-    # Same allowlist-plus-audience shape as the worker endpoints: if the
-    # MCP server talks to Django over OIDC (rather than the shared-secret
-    # local-dev path), both settings must resolve to non-empty values or
-    # every MCP helper call 401s. We only enforce when
-    # ``MCP_OIDC_AUDIENCE`` is set — self-hosted Pro deployments that
-    # use the shared-secret path don't need the allowlist.
+    # The legacy ``/api/v1/mcp/*`` compatibility adapter retains optional
+    # service-to-service OIDC while Cloud x402 dependencies are unwound. This
+    # is unrelated to the embedded `/mcp` endpoint. If the compatibility
+    # audience is configured, its allowlist must fail closed.
     if MCP_OIDC_AUDIENCE:  # noqa: F405
         _mcp_allowlist = [
             sa.strip().lower()

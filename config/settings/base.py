@@ -127,7 +127,7 @@ ROOT_URLCONF = "config.urls"
 # https://docs.djangoproject.com/en/dev/ref/settings/#wsgi-application
 WSGI_APPLICATION = "config.wsgi.application"
 # https://docs.djangoproject.com/en/dev/ref/settings/#asgi-application
-# ASGI_APPLICATION = "config.asgi.application"
+ASGI_APPLICATION = "config.asgi.application"
 
 GITHUB_APP_ENABLED = env.bool("GITHUB_APP_ENABLED", False)
 
@@ -185,12 +185,11 @@ LOCAL_APPS = [
     "validibot.members",
     "validibot.help",
     "validibot.notifications",
-    # Validibot OIDC customizations (custom adapter, discovery views,
+    # Validibot OIDC customizations (policy adapter, discovery alias,
     # ensure_oidc_clients management command). Required for MCP OAuth.
     "validibot.idp.apps.ValidibotIDPConfig",
-    # Community MCP helper API served under /api/v1/mcp/. The FastMCP
-    # server in mcp/ calls these endpoints — without the app registered
-    # self-hosted deployments 404 on every tool call.
+    # Legacy helper routes retained temporarily for the independent Cloud x402
+    # adapter. The embedded MCP server does not call these HTTP endpoints.
     "validibot.mcp_api.apps.MCPAPIConfig",
     # Audit log — append-only Pillar-3 observability store. Community-
     # hosted so self-hosted Pro deployments get audit logs too; the
@@ -1324,16 +1323,15 @@ TASK_OIDC_ALLOWED_SERVICE_ACCOUNTS = env.list(
 
 # OIDC PROVIDER (MCP OAuth)
 # ------------------------------------------------------------------------------
-# Validibot runs its own OIDC authorization server (via django-allauth) so the
-# standalone FastMCP server can accept JWT access tokens issued here. The
-# configuration below applies to every tier — community, Pro, Enterprise, and
-# the hosted cloud offering — with cloud overriding ``IDP_OIDC_MCP_RESOURCE_AUDIENCE``
-# and supplying the confidential MCP client's secret from Secret Manager.
+# Validibot runs its own OIDC authorization server via django-allauth. The
+# embedded official-SDK MCP resource verifies the JWT access tokens issued
+# here. Configuration applies to every tier, while only a commercial license
+# activates the MCP ASGI route.
 #
 # The `validibot.idp` app adds:
-#   * ValidibotOIDCAdapter       — stamps validibot:mcp scope + audience on JWTs
-#   * OIDC discovery views        — /.well-known/openid-configuration etc.
-#   * ensure_oidc_clients command — idempotent bootstrap of Claude + MCP clients
+#   * ValidibotOIDCAdapter       — exact resource policy + canonical metadata
+#   * RFC 8414 discovery alias   — reuses allauth's official discovery view
+#   * ensure_oidc_clients command — idempotent bootstrap of public agent clients
 #
 # Store the signing key PEM base64-encoded (``base64 < key.pem | tr -d '\n'``)
 # to avoid multiline escaping pain in env files and secret stores.
@@ -1342,6 +1340,13 @@ TASK_OIDC_ALLOWED_SERVICE_ACCOUNTS = env.list(
 # file suppression directive for rationale.
 import base64 as _idp_base64
 
+from validibot.idp.constants import CHATGPT_OIDC_CLIENT_ID as _IDP_CHATGPT_CLIENT_ID
+from validibot.idp.constants import CHATGPT_OIDC_CLIENT_NAME as _IDP_CHATGPT_CLIENT_NAME
+from validibot.idp.constants import CHATGPT_OIDC_GRANT_TYPES as _IDP_CHATGPT_GRANT_TYPES
+from validibot.idp.constants import (
+    CHATGPT_OIDC_RESPONSE_TYPES as _IDP_CHATGPT_RESPONSE_TYPES,
+)
+from validibot.idp.constants import CHATGPT_OIDC_SCOPES as _IDP_CHATGPT_SCOPES
 from validibot.idp.constants import CLAUDE_OIDC_CLIENT_ID as _IDP_CLAUDE_CLIENT_ID
 from validibot.idp.constants import CLAUDE_OIDC_CLIENT_NAME as _IDP_CLAUDE_CLIENT_NAME
 from validibot.idp.constants import CLAUDE_OIDC_GRANT_TYPES as _IDP_CLAUDE_GRANT_TYPES
@@ -1352,13 +1357,6 @@ from validibot.idp.constants import (
     CLAUDE_OIDC_RESPONSE_TYPES as _IDP_CLAUDE_RESPONSE_TYPES,
 )
 from validibot.idp.constants import CLAUDE_OIDC_SCOPES as _IDP_CLAUDE_SCOPES
-from validibot.idp.constants import MCP_SERVER_OIDC_CLIENT_ID as _IDP_MCP_CLIENT_ID
-from validibot.idp.constants import MCP_SERVER_OIDC_CLIENT_NAME as _IDP_MCP_CLIENT_NAME
-from validibot.idp.constants import MCP_SERVER_OIDC_GRANT_TYPES as _IDP_MCP_GRANT_TYPES
-from validibot.idp.constants import (
-    MCP_SERVER_OIDC_RESPONSE_TYPES as _IDP_MCP_RESPONSE_TYPES,
-)
-from validibot.idp.constants import MCP_SERVER_OIDC_SCOPES as _IDP_MCP_SCOPES
 from validibot.idp.constants import normalize_oidc_values as _idp_normalize
 
 
@@ -1380,6 +1378,7 @@ def _decode_idp_pem_from_env(b64_value: str) -> str:
 IDP_OIDC_ADAPTER = "validibot.idp.adapter.ValidibotOIDCAdapter"
 IDP_OIDC_ACCESS_TOKEN_FORMAT = "jwt"
 IDP_OIDC_ROTATE_REFRESH_TOKEN = True
+IDP_OIDC_DCR_ENABLED = False
 IDP_OIDC_AUTHORIZATION_CODE_EXPIRES_IN = env.int(
     "IDP_OIDC_AUTHORIZATION_CODE_EXPIRES_IN",
     default=60,
@@ -1392,27 +1391,21 @@ IDP_OIDC_PRIVATE_KEY = _decode_idp_pem_from_env(
     env.str("IDP_OIDC_PRIVATE_KEY_B64", default=""),
 )
 
-# Public base URL of this deployment's MCP server. Self-hosted Pro operators
-# set this to whatever hostname their reverse proxy terminates TLS at; the
-# local compose stack defaults to the port-mapped ``http://localhost:8001``.
-# The same value is passed to the FastMCP server as ``VALIDIBOT_MCP_BASE_URL``.
-# Reading it from a single env var keeps the audience claim on OIDC tokens
-# and the audience check inside the MCP server in lockstep without asking
-# the operator to remember two settings.
-VALIDIBOT_MCP_BASE_URL = env.str(
-    "VALIDIBOT_MCP_BASE_URL",
-    default="http://localhost:8001",
-)
-
-# MCP resource audience stamped onto JWT access tokens by the OIDC adapter.
-# Derived from VALIDIBOT_MCP_BASE_URL so a single env override lines up
-# OAuth issuance on the Django side and audience validation on the MCP
-# side. Cloud overrides this in validibot_cloud/settings/_cloud_common.py
-# to use the hosted ``https://mcp.validibot.com/mcp`` value.
+# The embedded MCP resource shares the normal application origin. allauth
+# persists the RFC 8707 resource through authorization and token exchange, and
+# the resource server accepts exactly this value as the JWT audience.
 IDP_OIDC_MCP_RESOURCE_AUDIENCE = env.str(
     "IDP_OIDC_MCP_RESOURCE_AUDIENCE",
-    default=f"{VALIDIBOT_MCP_BASE_URL.rstrip('/')}/mcp",
+    default=f"{SITE_URL.rstrip('/')}/mcp",
 )
+MCP_FILE_MAX_BYTES = env.int("MCP_FILE_MAX_BYTES", default=2_500_000)
+MCP_MAX_REQUEST_BODY_BYTES = env.int(
+    "MCP_MAX_REQUEST_BODY_BYTES",
+    default=4_194_304,
+)
+MCP_READS_PER_MINUTE = env.int("MCP_READS_PER_MINUTE", default=120)
+MCP_STARTS_PER_MINUTE = env.int("MCP_STARTS_PER_MINUTE", default=20)
+MCP_ALLOWED_ORIGINS = env.list("MCP_ALLOWED_ORIGINS", default=[])
 
 # ── Claude Desktop public client ─────────────────────────────────────────
 IDP_OIDC_CLAUDE_CLIENT_ID = env.str(
@@ -1439,36 +1432,32 @@ IDP_OIDC_CLAUDE_SKIP_CONSENT = env.bool(
     default=False,
 )
 
-# ── MCP server confidential client ───────────────────────────────────────
-# ensure_oidc_clients only creates this client when a secret is configured;
-# absent a secret the MCP server falls back to the legacy API-token flow.
-IDP_OIDC_MCP_SERVER_CLIENT_ID = env.str(
-    "IDP_OIDC_MCP_SERVER_CLIENT_ID",
-    default=_IDP_MCP_CLIENT_ID,
+# ── ChatGPT plugin public client ─────────────────────────────────────────
+# The plugin builder displays an installation-specific callback URI. Configure
+# it here, then run ``ensure_oidc_clients``. No client secret is used.
+IDP_OIDC_CHATGPT_CLIENT_ID = env.str(
+    "IDP_OIDC_CHATGPT_CLIENT_ID",
+    default=_IDP_CHATGPT_CLIENT_ID,
 )
-IDP_OIDC_MCP_SERVER_CLIENT_NAME = env.str(
-    "IDP_OIDC_MCP_SERVER_CLIENT_NAME",
-    default=_IDP_MCP_CLIENT_NAME,
+IDP_OIDC_CHATGPT_CLIENT_NAME = env.str(
+    "IDP_OIDC_CHATGPT_CLIENT_NAME",
+    default=_IDP_CHATGPT_CLIENT_NAME,
 )
-IDP_OIDC_MCP_SERVER_CLIENT_SECRET = env.str(
-    "IDP_OIDC_MCP_SERVER_CLIENT_SECRET",
-    default="",
-)
-IDP_OIDC_MCP_SERVER_REDIRECT_URIS = _idp_normalize(
+IDP_OIDC_CHATGPT_REDIRECT_URIS = _idp_normalize(
     tuple(
         env.list(
-            "IDP_OIDC_MCP_SERVER_REDIRECT_URIS",
-            # Derive the default from VALIDIBOT_MCP_BASE_URL so self-hosted
-            # Pro operators don't accidentally advertise the hosted Validibot
-            # MCP callback URL (``https://mcp.validibot.com/auth/callback``).
-            # Cloud overrides via the explicit env var.
-            default=[f"{VALIDIBOT_MCP_BASE_URL.rstrip('/')}/auth/callback"],
+            "IDP_OIDC_CHATGPT_REDIRECT_URIS",
+            default=[],
         ),
     ),
 )
-IDP_OIDC_MCP_SERVER_SCOPES = _idp_normalize(_IDP_MCP_SCOPES)
-IDP_OIDC_MCP_SERVER_GRANT_TYPES = _IDP_MCP_GRANT_TYPES
-IDP_OIDC_MCP_SERVER_RESPONSE_TYPES = _IDP_MCP_RESPONSE_TYPES
+IDP_OIDC_CHATGPT_SCOPES = _idp_normalize(_IDP_CHATGPT_SCOPES)
+IDP_OIDC_CHATGPT_GRANT_TYPES = _IDP_CHATGPT_GRANT_TYPES
+IDP_OIDC_CHATGPT_RESPONSE_TYPES = _IDP_CHATGPT_RESPONSE_TYPES
+IDP_OIDC_CHATGPT_SKIP_CONSENT = env.bool(
+    "IDP_OIDC_CHATGPT_SKIP_CONSENT",
+    default=False,
+)
 
 # ── Audit log retention + archival ───────────────────────────────────
 # Read by the ``enforce_audit_retention`` management command, which
@@ -1519,31 +1508,30 @@ AUDIT_ARCHIVE_GCS_KMS_KEY = env.str("AUDIT_ARCHIVE_GCS_KMS_KEY", default="")
 # resolution. Rarely needed in production.
 AUDIT_ARCHIVE_GCS_PROJECT_ID = env.str("AUDIT_ARCHIVE_GCS_PROJECT_ID", default="")
 
-# ── MCP helper API service-to-service auth ───────────────────────────
-# Read by ``validibot.mcp_api.authentication.MCPServiceAuthentication``.
-# Locally, the FastMCP server and Django share a long random string via
-# ``VALIDIBOT_MCP_SERVICE_KEY``. In production (hosted cloud), this env
-# var is empty and the auth class falls back to verifying Cloud Run
-# OIDC identity tokens against ``MCP_OIDC_AUDIENCE`` instead.
+# ── Legacy agent compatibility route authentication ──────────────────
+# Read only by ``validibot.mcp_api.authentication`` for the compatibility
+# `/api/v1/mcp/*` HTTP adapter still exercised by Cloud x402 code. Embedded MCP
+# does not use these settings. The shared-key mode is local-test compatibility;
+# hosted compatibility callers use Cloud Run OIDC.
 MCP_SERVICE_KEY = env("VALIDIBOT_MCP_SERVICE_KEY", default="")
 
 # Expected audience on Cloud Run OIDC identity tokens. Defaults empty
 # so the OIDC verification path is off by default — the shared-secret
-# path covers local dev and self-hosted Pro. Cloud settings override
-# this with the deployment's Django API URL.
+# path covers local compatibility tests. Cloud settings can supply the legacy
+# adapter's Django API URL.
 MCP_OIDC_AUDIENCE = env.str("MCP_OIDC_AUDIENCE", default="")
 
 # Service-account allowlist for Cloud Run OIDC identity tokens. A
 # valid Google-signed token with the right audience is necessary but
 # not sufficient — any Google SA that can mint a token with our
 # audience would pass ``verify_oauth2_token``. The allowlist narrows
-# that to our own MCP-invoker SA(s).
+# that to explicitly retained compatibility callers.
 #
 # Accepts a comma-separated env var OR a Python list (e.g. from a
 # cloud settings module): both flow through the same set-of-strings
 # normaliser in the auth class. Community leaves this empty; a
-# production GCP deployment populates it with the SAs that run the
-# MCP container. An empty allowlist with the OIDC path active is a
+# production GCP deployment may populate it during the compatibility period.
+# An empty allowlist with the OIDC path active is a
 # deployment error — the auth class logs and fails closed.
 MCP_OIDC_ALLOWED_SERVICE_ACCOUNTS = env.list(
     "MCP_OIDC_ALLOWED_SERVICE_ACCOUNTS",

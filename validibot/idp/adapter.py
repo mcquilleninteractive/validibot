@@ -3,23 +3,42 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from typing import Any
+from urllib.parse import urlsplit
 
 from allauth.idp.oidc.adapter import DefaultOIDCAdapter
+from allauth.idp.oidc.models import Token as OIDCToken
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.utils.translation import gettext_lazy as _
+
+from validibot.idp.constants import MCP_OIDC_SCOPE
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
+    from allauth.idp.oidc.models import Client as OIDCClient
+    from django.contrib.auth.base_user import AbstractBaseUser
+
+_SERVER_ENDPOINT_KEYS = (
+    "authorization_endpoint",
+    "device_authorization_endpoint",
+    "end_session_endpoint",
+    "jwks_uri",
+    "registration_endpoint",
+    "revocation_endpoint",
+    "token_endpoint",
+    "userinfo_endpoint",
+)
+
 
 class ValidibotOIDCAdapter(DefaultOIDCAdapter):
-    """Customize issuer, scope labels, and MCP audience claims for Validibot.
+    """Customize the issuer, scope label, and MCP resource policy.
 
     This adapter sits at the boundary between django-allauth's generic OIDC
-    provider and Validibot's MCP-specific needs. The Validibot Django app
-    remains the authorization server, but the emitted metadata and JWT
-    access tokens need a stable issuer based on the app hostname plus an
-    audience claim for the MCP resource.
+    provider and Validibot's MCP-specific needs. django-allauth carries RFC
+    8707 resources through the authorization and token flows and derives JWT
+    audiences from them; this adapter only restricts which resource is valid.
 
     Lives in the community repo so self-hosted Pro deployments can issue
     tokens that their MCP server will accept. Cloud overrides the MCP
@@ -28,7 +47,7 @@ class ValidibotOIDCAdapter(DefaultOIDCAdapter):
 
     scope_display = {
         **DefaultOIDCAdapter.scope_display,
-        "validibot:mcp": _("Use Validibot workflows through the MCP server"),
+        MCP_OIDC_SCOPE: _("Use Validibot workflows through the MCP server"),
     }
 
     def get_issuer(self) -> str:
@@ -44,20 +63,36 @@ class ValidibotOIDCAdapter(DefaultOIDCAdapter):
             return site_url
         return super().get_issuer()
 
+    def validate_resource_uris(self, *, uris: list[str], **kwargs: Any) -> None:
+        """Allow omission or the one exact MCP resource identifier.
+
+        allauth represents an omitted resource as an empty list. That is
+        necessary on refresh, where it restores the resource grant retained on
+        the refresh token. Every explicitly supplied resource remains exact.
+        """
+
+        expected = str(settings.IDP_OIDC_MCP_RESOURCE_AUDIENCE).rstrip("/")
+        if uris and uris != [expected]:
+            raise ValidationError(
+                _("The requested OAuth resource is not available."),
+                code="invalid_target",
+            )
+
     def populate_access_token(
         self,
-        access_token: dict,
+        access_token: dict[str, Any],
         *,
-        client,
+        client: OIDCClient,
         scopes: Iterable[str],
-        user,
-        **kwargs,
+        user: AbstractBaseUser,
+        **kwargs: Any,
     ) -> None:
-        """Add MCP-specific claims to JWT access tokens when appropriate.
+        """Preserve the exact retained resource on a refresh-token grant.
 
-        The MCP audience claim is only added when the token includes the
-        ``validibot:mcp`` scope. This keeps the adapter compatible with
-        future non-MCP clients that may share the same allauth issuer.
+        RFC 8707 lets a refresh request omit ``resource`` to inherit its
+        original grant. The JWT is encoded before allauth copies that retained
+        resource into the replacement database rows, so derive the claim from
+        the still-active allauth refresh-token record at this adapter boundary.
         """
 
         super().populate_access_token(
@@ -67,9 +102,42 @@ class ValidibotOIDCAdapter(DefaultOIDCAdapter):
             user=user,
             **kwargs,
         )
-        if "validibot:mcp" not in scopes:
+        if "aud" in access_token or self.request is None:
             return
+        raw_refresh_token = self.request.POST.get("refresh_token")
+        if not raw_refresh_token:
+            return
+        refresh_token = OIDCToken.objects.filter(
+            client=client,
+            user=user,
+        ).lookup(
+            OIDCToken.Type.REFRESH_TOKEN,
+            raw_refresh_token,
+        )
+        expected = str(settings.IDP_OIDC_MCP_RESOURCE_AUDIENCE).rstrip("/")
+        if refresh_token and refresh_token.get_resources() == [expected]:
+            access_token["aud"] = [expected]
 
-        audience = getattr(settings, "IDP_OIDC_MCP_RESOURCE_AUDIENCE", "").rstrip("/")
-        if audience:
-            access_token["aud"] = audience
+    def populate_server_metadata(self, data: dict[str, str | list[str]]) -> None:
+        """Customize allauth's discovery metadata for the public MCP origin.
+
+        allauth owns the discovery document and its declared protocol
+        capabilities. This supported adapter hook only adds Validibot's scope
+        and makes endpoint origins deterministic behind reverse proxies.
+        """
+
+        super().populate_server_metadata(data)
+        scopes = data.get("scopes_supported")
+        if isinstance(scopes, list) and MCP_OIDC_SCOPE not in scopes:
+            scopes.append(MCP_OIDC_SCOPE)
+
+        site_url = str(settings.SITE_URL).rstrip("/")
+        for key in _SERVER_ENDPOINT_KEYS:
+            value = data.get(key)
+            if not isinstance(value, str):
+                continue
+            parsed = urlsplit(value)
+            suffix = parsed.path
+            if parsed.query:
+                suffix = f"{suffix}?{parsed.query}"
+            data[key] = f"{site_url}{suffix}"

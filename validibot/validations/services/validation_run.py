@@ -70,6 +70,9 @@ RUN_CANCELED_MESSAGE = _("Run canceled by user.")
 if TYPE_CHECKING:
     from uuid import UUID
 
+    from django.http import HttpRequest
+    from rest_framework.request import Request
+
     from validibot.submissions.models import Submission
     from validibot.users.models import Organization
     from validibot.users.models import User
@@ -279,14 +282,15 @@ class ValidationRunService:
 
     def launch(
         self,
-        request,
+        request: HttpRequest | Request | None,
         org: Organization,
         workflow: Workflow,
         submission: Submission,
         user_id: int,
-        metadata: dict | None = None,
+        metadata: dict[str, Any] | None = None,
         *,
-        extra: dict | None = None,
+        actor: User | None = None,
+        extra: dict[str, Any] | None = None,
         source: ValidationRunSource = ValidationRunSource.LAUNCH_PAGE,
     ) -> ValidationRunLaunchResults:
         """
@@ -297,12 +301,14 @@ class ValidationRunService:
         execution to the appropriate backend (Celery, Cloud Tasks, etc.).
 
         Args:
-            request: The HTTP request object (for user auth and URI building).
+            request: Optional HTTP request carrying the authenticated user.
             org: The organization under which the run is created.
             workflow: The workflow to execute.
             submission: The file/content to validate.
             user_id: ID of the user initiating the run.
             metadata: Optional metadata to associate with the run.
+            actor: Explicit authenticated user for non-HTTP launch channels.
+                HTTP callers normally leave this unset and use ``request.user``.
             extra: Additional fields to pass to ValidationRun.objects.create().
             source: Origin of the run (LAUNCH_PAGE, API, etc.).
 
@@ -319,19 +325,17 @@ class ValidationRunService:
         from validibot.validations.services.run_admission import admit_validation_run
 
         start_time = time.perf_counter()
-        if not request:
-            err_msg = "Request object is required to build absolute URIs."
-            raise ValueError(err_msg)
+        launch_user = actor or getattr(request, "user", None)
         if not org:
             err_msg = "Organization must be provided"
             raise ValueError(err_msg)
-        if not request.user:
-            err_msg = "Request user must be authenticated"
+        if not launch_user or not getattr(launch_user, "is_authenticated", False):
+            err_msg = "An authenticated launch user is required"
             raise ValueError(err_msg)
         if not submission:
             err_msg = "Submission must be provided"
             raise ValueError(err_msg)
-        if not workflow.can_execute(user=request.user):
+        if not workflow.can_execute(user=launch_user):
             err_msg = "User does not have permission to execute this workflow"
             raise PermissionError(err_msg)
 
@@ -349,7 +353,7 @@ class ValidationRunService:
         allowed, reason = check_org_policies(
             org,
             "launch_validation_run",
-            user=request.user,
+            user=launch_user,
             workflow_type=workflow_type,
         )
         if not allowed:
@@ -364,8 +368,8 @@ class ValidationRunService:
         run_user = None
         if getattr(submission, "user_id", None):
             run_user = submission.user
-        elif getattr(request.user, "is_authenticated", False):
-            run_user = request.user
+        elif getattr(launch_user, "is_authenticated", False):
+            run_user = launch_user
 
         run_extra = dict(extra or {})
         with transaction.atomic():
@@ -412,7 +416,7 @@ class ValidationRunService:
                 run_created_hooks(
                     validation_run,
                     workflow_type=workflow_type,
-                    launching_user=request.user,
+                    launching_user=launch_user,
                 )
             except OrgPolicyDeniedError:
                 raise
@@ -468,7 +472,7 @@ class ValidationRunService:
         try:
             enqueue_validation_run(
                 validation_run_id=validation_run.id,
-                user_id=request.user.id,
+                user_id=launch_user.id,
             )
         except Exception:
             logger.exception(
@@ -509,6 +513,7 @@ class ValidationRunService:
         # any future terminal additions) get the right HTTP code —
         # without this a timed-out synchronous run would return 202
         # Accepted, misleading the caller into polling.
+        http_status: int
         if validation_run.status in VALIDATION_RUN_TERMINAL_STATUSES:
             http_status = status.HTTP_201_CREATED
         else:

@@ -107,18 +107,11 @@ cp .envs.example/.production/.google-cloud/.django  .envs/.production/.google-cl
 cp .envs.example/.production/.google-cloud/.build   .envs/.production/.google-cloud/.build
 ```
 
-If you plan to deploy MCP as well, copy the MCP template:
-
-```bash
-cp .envs.example/.production/.google-cloud/.mcp     .envs/.production/.google-cloud/.mcp
-```
-
 Then edit the new files. The `.just` file holds deployment-time
 configuration (GCP project, region, app name) and is sourced into your
 shell — it never leaves your machine. The `.django` file holds runtime
 configuration and is uploaded to Secret Manager. The `.build` file holds
-build/deploy knobs, including `ENABLE_MCP_SERVER`, public MCP URLs, and hosted
-x402 values that the recipes stamp onto the services that need them.
+build/deploy knobs and non-secret hosted x402 values.
 
 ## Typical first-time flow
 
@@ -241,149 +234,53 @@ just gcp deploy-all dev
 separate migrate step is not needed for a routine deploy. Promote to
 production only after the lower stage looks healthy.
 
-## Include the MCP server
+## MCP on GCP
 
-The standalone FastMCP container exposes validation workflows to AI
-agents over the Model Context Protocol. On GCP it runs as its own
-Cloud Run service (`validibot-mcp` in prod, `validibot-mcp-<stage>`
-otherwise) with its own Artifact Registry image and service account,
-deployed independently from the main Django web service.
+MCP is embedded in the normal Django ASGI image and Cloud Run web service. The
+same load balancer hostname serves both the application and `<SITE_URL>/mcp`.
+There is no second Artifact Registry image, Cloud Run service, service account,
+secret, or internal HTTP proxy.
 
-**Source and image.** The MCP code lives in this repo at `mcp/` and
-is built from `compose/production/mcp/Dockerfile`. The image is a
-lightweight Python container (~80 MB) with FastMCP, httpx, and
-pydantic-settings only — no Django, no database drivers.
+The Community image contains the implementation. A Cloud deployment activates
+the endpoint by importing `validibot-pro`, whose thin license registration adds
+the `mcp_server` feature. A Community-only process leaves the route unmounted.
 
-**License gate.** Whenever an enabled MCP revision starts, it calls
-`GET /api/v1/license/features/` against the Django API and refuses
-to serve traffic unless `mcp_server` is advertised. This only
-happens when `validibot-pro` (or enterprise) is installed. So a
-community-only deployment can build and deploy the image but the
-enabled container will exit during the license check. A
-`deploy-maintenance` revision is instead internal and explicitly disabled, so
-it can become ready while Django is offline. `mode-live` exposes Django
-first and then re-enables MCP, which creates an enabled revision that performs
-the same fail-closed license check before serving traffic.
-
-### Configure the knobs
-
-The MCP deploy tooling reads its public Cloud Run config from
-`.envs/.production/.google-cloud/.build`:
+Configure MCP in the normal stage `.django` file:
 
 ```bash
-# Include the MCP container in ``just gcp deploy-all`` and unlock
-# the ``just gcp mcp ...`` recipes. Requires validibot-pro to be
-# installed so the runtime license check passes.
-ENABLE_MCP_SERVER=true
+SITE_URL=https://app.your-domain.example
+IDP_OIDC_MCP_RESOURCE_AUDIENCE=https://app.your-domain.example/mcp
+IDP_OIDC_CHATGPT_REDIRECT_URIS=<exact callback from ChatGPT plugin builder>
+DRF_NUM_PROXIES=2
 
-# Public URL of YOUR Validibot Django API — the MCP server proxies
-# tool calls here. There is no default; setting this wrong could
-# accidentally proxy your users' traffic to another operator's API.
-VALIDIBOT_MCP_API_BASE_URL=https://app.your-domain.example
-
-# Public URL of YOUR MCP service. The deploy recipe stamps this onto both
-# Django and MCP; do not repeat it in .django or .mcp.
-VALIDIBOT_MCP_BASE_URL=https://mcp.your-domain.example
-
-# Hosted x402 is cloud-only and disabled by default. Its runtime settings live
-# in the cloud Django .django secret, not in .build or .mcp.
+# Optional bounded defaults shown explicitly:
+MCP_FILE_MAX_BYTES=2500000
+MCP_MAX_REQUEST_BODY_BYTES=4194304
+MCP_READS_PER_MINUTE=120
+MCP_STARTS_PER_MINUTE=20
 ```
 
-See `.envs.example/.production/.google-cloud/.build` for the full
-documented template.
+The ChatGPT OAuth client is public and uses PKCE, so it has no client secret.
+The existing IDP signing-key configuration remains required for JWT access
+tokens. Do not add the retired confidential proxy client, `mcp-env`, or MCP
+service-account settings.
 
-### Configure MCP auth
-
-MCP has two independent auth chains, both of which need their own
-settings in `.envs/.production/.google-cloud/.django`:
-
-**1. End user → MCP server (OAuth 2.1).** When an OAuth-capable MCP
-client (Claude Desktop, Cursor, Windsurf, Continue, Zed, etc.)
-connects, the MCP server proxies a Dynamic Client Registration flow
-to Django's OIDC provider. Required settings:
+Upload and deploy through the normal commands:
 
 ```bash
-# Signing key for JWT access tokens (base64-encoded PEM). Generate
-# once and back up securely — rotating invalidates every live session.
-IDP_OIDC_PRIVATE_KEY_B64=<base64 of a fresh openssl genrsa 2048 -out key.pem>
-
-# Paired secret for the confidential OAuth client the MCP server registers as.
-# Use the same generated value in .mcp as VALIDIBOT_OAUTH_CLIENT_SECRET
-# (openssl rand -hex 32), then rotate both secret files together.
-IDP_OIDC_MCP_SERVER_CLIENT_SECRET=<hex random secret>
-```
-
-In `.envs/.production/.google-cloud/.build`:
-```bash
-# Public URL of your MCP server. The deploy recipe stamps this onto both
-# Django and MCP so the OIDC audience, redirect URI, and MCP metadata come
-# from one value.
-VALIDIBOT_MCP_BASE_URL=https://mcp.your-domain.example
-```
-
-**2. MCP server → Django API (Cloud Run OIDC identity token).** Every
-tool call reaches Django via `/api/v1/mcp/*`, which requires a Google-
-signed identity token minted by the MCP service account. Required
-settings:
-
-```bash
-# The deploy recipe stamps MCP_OIDC_AUDIENCE onto Django from
-# VALIDIBOT_MCP_API_BASE_URL in .build. Keep only the service-account
-# allowlist in .django.
-MCP_OIDC_ALLOWED_SERVICE_ACCOUNTS=validibot-mcp-prod@your-project.iam.gserviceaccount.com
-```
-
-Django refuses to boot if `MCP_OIDC_AUDIENCE` is stamped but the allowlist is
-empty — a safety guard against accepting tokens from any Google service account
-that can mint to the audience.
-
-See `.envs.example/.production/.google-cloud/.django` for the fully
-commented template.
-
-### Deploy
-
-First-time setup provisions the MCP service account, IAM bindings,
-and Artifact Registry access:
-
-```bash
-source .envs/.production/.google-cloud/.just
-just gcp mcp setup prod
-```
-
-Then upload the MCP secret (OAuth client credentials, etc.) and
-deploy the service. You have three levels of granularity:
-
-```bash
-# Umbrella — pushes every secret that might have changed
-just gcp secrets prod
-# Equivalent to: gcp django secrets + gcp mcp secrets
-
-# Surgical — just one service
-just gcp django secrets prod   # only .django → django-env
-just gcp mcp secrets prod      # only .mcp → mcp-env
-```
-
-```bash
-# Full deploy — Django web + worker + scheduler + MCP build + MCP deploy
+just gcp django secrets prod
 just gcp deploy-all prod
-
-# MCP-only deploy — useful for hotfixing just the MCP image
-just gcp mcp build-push
-just gcp mcp deploy prod
 ```
 
-### Routing
+The production command uses Gunicorn with `uvicorn_worker.UvicornWorker` so the
+same Cloud Run revision correctly serves synchronous Django views and the ASGI
+Streamable HTTP route. Cloud Run concurrency remains deliberately bounded; see
+the project MCP operations guide for the current value and acceptance checks.
 
-To expose MCP on a custom domain via the load balancer you set up
-for Django, run:
-
-```bash
-just gcp mcp lb-add prod mcp.your-domain.example
-```
-
-That provisions a serverless NEG, a backend service, adds the MCP
-hostname to the managed SSL certificate, and locks the Cloud Run
-service's ingress to load-balancer-only.
+Before calling the deployment plugin-ready, test real HTTPS OAuth, every tool,
+denied access, text and binary attachments, and rollback through ChatGPT
+developer mode. Local protocol integration tests cannot substitute for that
+external acceptance gate.
 
 ## Domain and networking
 

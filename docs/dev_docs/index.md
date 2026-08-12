@@ -122,7 +122,7 @@ Validibot install on their own VM, not for someone hacking on the codebase:
 
 ## Integrations
 
-- **[MCP Server](mcp/index.md)** — Standalone FastMCP service that exposes validation workflows to AI agents (Claude, Cursor, Windsurf, etc.). Source, Dockerfile, and deploy recipes all live in this repo; license-gated at runtime.
+- **[MCP Server](mcp/index.md)** — Official-SDK Streamable HTTP endpoint embedded in Django ASGI; public Community implementation activated by the Pro feature gate.
 ---
 
 ## Testing

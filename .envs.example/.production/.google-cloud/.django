@@ -44,12 +44,11 @@ DJANGO_CSRF_TRUSTED_ORIGINS=https://your-subdomain.example.com
 # hops (real client + Google front end), so the real client is the SECOND from
 # the right → 2. (A direct Cloud Run domain mapping would be 1; community
 # default is 1.) VERIFY before trusting this — curl from a known IP and count
-# from the right (see docs/dev_docs/deployment/reverse-proxy.md), then uncomment.
-# Until set, the community default of 1 applies (safe direction: over-throttles
-# rather than allowing a bypass). Stronger still: have the LB overwrite XFF with
-# {client_ip_address} so spoofed prefixes never arrive — see the x402 ops runbook
-# "Hardening: sanitize X-Forwarded-For at the load balancer".
-#DRF_NUM_PROXIES=2
+# from the right during staging acceptance. A different ingress topology must
+# override this value. Stronger still: have the LB overwrite XFF with
+# {client_ip_address} so spoofed prefixes never arrive; see the x402 operations
+# runbook's X-Forwarded-For hardening section.
+DRF_NUM_PROXIES=2
 
 # DATABASE
 # ==============================================================================
@@ -349,74 +348,22 @@ CREDENTIAL_ISSUER_URL=https://validibot.example.com
 # Optional override. ES256 is the only algorithm currently supported.
 SIGNING_ALGORITHM=ES256
 
-# OIDC — MCP OAuth support
+# OIDC — embedded MCP OAuth support
 # ------------------------------------------------------------------------------
-# Required when your deployment runs the MCP server and you want
-# OAuth-capable MCP clients (Claude Desktop, Cursor, Windsurf, Continue,
-# Zed, etc.) to authenticate end users via Dynamic Client Registration.
-# Leave blank to disable the OAuth path — the legacy API-token flow
-# still works as a fallback for clients that accept a raw bearer token.
-#
-# Private key PEM, base64-encoded. Used by the Django OIDC provider to
-# sign JWT access tokens that the MCP server verifies via JWKS.
-# Generate once and back up securely — rotating it invalidates every
-# outstanding MCP session. Command:
+# The Pro-gated MCP endpoint is served at {SITE_URL}/mcp by this same Django
+# service. Generate one RSA signing key and store only its base64-encoded PEM:
 #   openssl genrsa -out oidc-key.pem 2048 \
 #     && base64 < oidc-key.pem | tr -d '\n'
 IDP_OIDC_PRIVATE_KEY_B64=<your-base64-encoded-pem>
-# Paired secret for the confidential OAuth client the MCP Cloud Run service
-# registers with. This and `.mcp`'s VALIDIBOT_OAUTH_CLIENT_SECRET are the two
-# Secret Manager-backed copies of the same generated secret, so rotate them
-# together from one fresh value. Generate with:
-#   openssl rand -hex 32
-IDP_OIDC_MCP_SERVER_CLIENT_SECRET=<your-hex-random-secret>
 
-# Public MCP URL: set VALIDIBOT_MCP_BASE_URL once in `.build`. The deploy
-# recipe stamps it onto Django web so the OIDC audience and redirect URI are
-# derived from the same value MCP uses for its public metadata.
+# ChatGPT displays an installation-specific callback URI in the plugin builder.
+# Paste that exact URI here, upload this Django env, and deploy. The migration
+# job runs ensure_oidc_clients before the new web revision receives traffic.
+IDP_OIDC_CHATGPT_REDIRECT_URIS=https://chatgpt.com/replace-with-builder-callback
 
-# MCP → Django service-to-service auth (Cloud Run OIDC identity tokens)
-# ------------------------------------------------------------------------------
-# Every MCP tool call reaches Django via the helper API at
-# ``/api/v1/mcp/*``. That API is protected by a two-layer auth check:
-#
-#   1. Service identity — proves the request came from the MCP Cloud
-#      Run service (not a random caller who got hold of a user token).
-#   2. End-user identity — resolved from the forwarded
-#      X-Validibot-User-Sub / X-Validibot-Api-Token headers that the
-#      MCP server attaches after validating the user's OAuth token.
-#
-# In production on GCP, step 1 uses Cloud Run's built-in OIDC identity token
-# flow: the MCP service fetches a Google-signed token whose ``aud`` claim is
-# the Django API URL. The GCP deploy recipe stamps that audience onto Django as
-# MCP_OIDC_AUDIENCE from VALIDIBOT_MCP_API_BASE_URL in `.build`, so do not
-# repeat it here. Django also verifies that the token's service-account email
-# is on the MCP_OIDC_ALLOWED_SERVICE_ACCOUNTS list. This mirrors the existing
-# TASK_OIDC_* allowlist used for worker/Cloud Tasks auth.
-#
-# The service-account allowlist is REQUIRED when running MCP on GCP. Django
-# refuses to boot (ImproperlyConfigured) if MCP_OIDC_AUDIENCE is stamped by the
-# deploy recipe but MCP_OIDC_ALLOWED_SERVICE_ACCOUNTS is empty — an empty
-# allowlist would let any Google service account that can mint a token with our
-# audience pass the check, which is equivalent to no service identity at all.
-#
-# (On self-hosted docker-compose deployments, set VALIDIBOT_MCP_SERVICE_KEY
-# instead; that path uses a shared secret and skips OIDC entirely.
-# See the docker-compose env template.)
-
-# Comma-separated allowlist of service-account emails permitted to
-# mint identity tokens for the Django API audience. Must include the
-# service account your MCP Cloud Run service runs as (typically
-# named ``{app}-mcp-prod@{project}.iam.gserviceaccount.com`` when
-# provisioned by ``just gcp mcp setup prod``).
-#
-#   MCP_OIDC_ALLOWED_SERVICE_ACCOUNTS=validibot-mcp-prod@your-project.iam.gserviceaccount.com
-#
-# Multiple SAs can be listed, comma-separated (useful when staging
-# and prod share one Django deployment, or during a SA migration):
-#
-#   MCP_OIDC_ALLOWED_SERVICE_ACCOUNTS=validibot-mcp-prod@...,validibot-mcp-staging@...
-MCP_OIDC_ALLOWED_SERVICE_ACCOUNTS=
+# Optional Claude Desktop compatibility is managed by the predefined public
+# client defaults. No confidential client or service-to-service MCP secret is
+# required. The protected resource audience defaults to {SITE_URL}/mcp.
 
 # ==============================================================================
 # CLOUD-ONLY  —  hosted SaaS layer

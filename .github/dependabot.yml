@@ -37,7 +37,6 @@ updates:
     directories:
       - '/compose/local/django'
       - '/compose/production/django'
-      - '/compose/production/mcp'
       - '/compose/production/postgres'
     schedule:
       interval: 'daily'

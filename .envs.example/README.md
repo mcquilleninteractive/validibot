@@ -20,22 +20,10 @@ mkdir -p .envs/.local
 cp .envs.example/.local/.django .envs/.local/.django
 cp .envs.example/.local/.postgres .envs/.local/.postgres
 
-# Copy the build/recipe config. Recommended for every local stack:
-# it drives recipe-level knobs like ENABLE_MCP_SERVER (Pro stacks)
-# and build-time Pro/Enterprise packaging (community Docker builds).
+# Copy the optional Pro/Enterprise package build configuration.
 cp .envs.example/.local/.build .envs/.local/.build
 
-# For the MCP-enabled stacks (local-pro / local-cloud), also copy the
-# MCP env file — the `mcp` container reads it. Plain `just local` skips it.
-cp .envs.example/.local/.mcp .envs/.local/.mcp
-
 # Edit the files and replace !!!SET...!!! placeholders with your values.
-# For local-pro / local-cloud, flip ENABLE_MCP_SERVER=true in .build.
-# For local-pro / local-cloud, generate one local MCP service key and put that
-# paired secret in .local/.mcp and .local/.django. x402 is a cloud-only feature;
-# if you exercise it (local-cloud only), its config lives in .local/.django —
-# the cloud Django service is the only consumer now that the MCP server no
-# longer handles payments.
 # Then start the local stack:
 just local up
 ```
@@ -61,13 +49,8 @@ mkdir -p .envs/.production/.self-hosted
 cp .envs.example/.production/.self-hosted/.django .envs/.production/.self-hosted/.django
 cp .envs.example/.production/.self-hosted/.postgres .envs/.production/.self-hosted/.postgres
 
-# Copy the build/recipe config. Required if you set a commercial package
-# (VALIDIBOT_COMMERCIAL_PACKAGE) or want the MCP container
-# (ENABLE_MCP_SERVER=true). Safe to copy even if both stay unset.
+# Copy the optional commercial-package build configuration.
 cp .envs.example/.production/.self-hosted/.build .envs/.production/.self-hosted/.build
-
-# For the MCP container (ENABLE_MCP_SERVER=true), also copy the MCP env file:
-cp .envs.example/.production/.self-hosted/.mcp .envs/.production/.self-hosted/.mcp
 
 # Edit with your production values (especially secrets!)
 # Then validate and bootstrap with:
@@ -85,30 +68,25 @@ mkdir -p .envs/.production/.google-cloud
 cp .envs.example/.production/.google-cloud/.django .envs/.production/.google-cloud/.django
 cp .envs.example/.production/.google-cloud/.just .envs/.production/.google-cloud/.just
 cp .envs.example/.production/.google-cloud/.build .envs/.production/.google-cloud/.build
-cp .envs.example/.production/.google-cloud/.mcp .envs/.production/.google-cloud/.mcp
 
 # Edit .django with your GCP project values (uploaded to Secret Manager)
 # Edit .just with your GCP project ID and region (used locally by just commands)
-# Edit .build with deploy-time knobs like ENABLE_MCP_SERVER and public MCP URLs
-# (x402 payment config lives in .django, not .build)
-# Edit .mcp with MCP-only secrets before uploading mcp-env
+# Edit .build with local build/deploy knobs
 
 # Source the just config before running deployment commands
 source .envs/.production/.google-cloud/.just
-just gcp deploy-all prod          # build + push + migrate + web/worker/scheduler/mcp
+just gcp deploy-all prod          # build + push + migrate + web/worker/scheduler
 
-# Secrets upload via the `secrets` recipes (run after editing .django / .mcp):
-#   just gcp secrets prod          # umbrella: uploads BOTH .django and .mcp
+# Secrets upload via the `secrets` recipes (run after editing .django):
+#   just gcp secrets prod          # upload .django
 #   just gcp django secrets prod   # only .django  (django-env)
-#   just gcp mcp secrets prod      # only .mcp     (mcp-env)
 ```
 
 **GCP config files:**
 
 - `.django` - Django runtime settings, uploaded to Secret Manager
 - `.just` - Host-side GCP command context (project ID, region), sourced locally
-- `.build` - Build/deploy knobs read by just recipes; the shared non-secret MCP URLs are stamped into Cloud Run env vars (x402 config lives in `.django`)
-- `.mcp` - MCP server secrets, uploaded to the separate `mcp-env` Secret Manager secret
+- `.build` - Build/deploy knobs read by just recipes
 
 ### AWS (Future)
 
@@ -131,19 +109,16 @@ cp .envs.example/.production/.aws/.django .envs/.production/.aws/.django
 ├── .local/
 │   ├── .django             # Django settings for local dev
 │   ├── .build              # Optional Docker build settings for Pro/Enterprise
-│   ├── .mcp                # MCP server config (local-pro / local-cloud only)
 │   └── .postgres           # Postgres credentials for local dev
 └── .production/
     ├── .self-hosted/       # Customer-operated single-VM Compose deployment
-    │   ├── .build          # Optional Docker build settings for Pro/Enterprise
-    │   ├── .django
-    │   ├── .mcp            # Optional MCP server config (Pro feature)
-    │   └── .postgres
+	    │   ├── .build          # Optional Docker build settings for Pro/Enterprise
+	    │   ├── .django
+	    │   └── .postgres
     ├── .google-cloud/      # Validibot's hosted GCP deployment
-    │   ├── .django         # Django runtime settings (uploaded to Secret Manager)
-    │   ├── .just           # Just command runner settings (sourced locally)
-    │   ├── .build          # Deploy-time knobs stamped into Cloud Run env vars
-    │   └── .mcp            # MCP server secrets (uploaded to mcp-env)
+	    │   ├── .django         # Django runtime settings (uploaded to Secret Manager)
+	    │   ├── .just           # Just command runner settings (sourced locally)
+	    │   └── .build          # Deploy-time knobs
     └── .aws/               # Future AWS deployment (stub)
         └── .django
 
@@ -154,10 +129,9 @@ cp .envs.example/.production/.aws/.django .envs/.production/.aws/.django
 │   └── .postgres
 └── .production/
     ├── .self-hosted/
-    │   ├── .build
-    │   ├── .django
-    │   ├── .mcp
-    │   └── .postgres
+	    │   ├── .build
+	    │   ├── .django
+	    │   └── .postgres
     ├── .google-cloud/
     │   ├── .django
     │   └── .just
@@ -187,32 +161,33 @@ The `.build` file plays two roles — both loaded from the same file:
    YAML interpolation of `${FOO}` references in the compose files
    (primarily build args that bake commercial packages into the image).
 2. **Recipe-level knobs** — the `just local up` / `just local-pro up` /
-   `just local-cloud up` recipes (and the production `just gcp` recipes)
-   source this file at the top so shell-level variables like
-   `ENABLE_MCP_SERVER` drive which Compose profiles get activated, and so the
-   GCP deploy recipe can stamp a few public values (e.g. the MCP public URLs)
-   onto Cloud Run via `--set-env-vars`.
+	   `just local-cloud up` recipes (and the production `just gcp` recipes)
+	   source this file before Docker Compose or GCP deployment commands.
 
 `.build` is no longer mounted into any running container via `env_file`. Runtime
-payment config (x402) moved to `.django` when the MCP server stopped handling
-payments. All `.build` values are optional — if the file is absent the recipes
+payment config (x402) and embedded MCP config live in `.django`. All `.build`
+values are optional — if the file is absent the recipes
 no-op cleanly where the stack does not need it.
 
 | Variable | Role | Description | Example |
 | --- | --- | --- | --- |
 | `VALIDIBOT_COMMERCIAL_PACKAGE` | Build-time | **Self-hosted Pro/Enterprise operators:** an exact package pin or credential-free SHA-256 wheel URL. Installing it only makes the code _importable_ — activate it by setting `DJANGO_SETTINGS_MODULE=config.settings.production_pro` in `.django`. | `validibot-pro==0.1.0` |
 | `VALIDIBOT_COMMERCIAL_NETRC` | Build-time | Absolute path to a mode-0600 netrc with the `pypi.validibot.com` login and one-time dashboard key. Docker Compose mounts it only as a BuildKit secret for the install step. | `/home/operator/.netrc` |
-| `ENABLE_MCP_SERVER` | Recipe | Activate the `mcp` Compose profile so the FastMCP container is built and started alongside the stack. Set to `true` for `just local-pro up` / `just local-cloud up`; ignored by `just local up` (community compose has no mcp service). | `true` / `false` |
-| `VALIDIBOT_MCP_API_BASE_URL` | Recipe | GCP-only API URL stamped into MCP as `VALIDIBOT_API_BASE_URL` and Django web as `MCP_OIDC_AUDIENCE`. Required when `ENABLE_MCP_SERVER=true` on GCP. | `https://app.your-domain.example` |
-| `VALIDIBOT_MCP_BASE_URL` | Recipe/runtime | GCP-only public MCP URL stamped into both Django and MCP as `VALIDIBOT_MCP_BASE_URL`, so OAuth audience/redirect metadata comes from one value. | `https://mcp.your-domain.example` |
 
-> **Per-family note:** `VALIDIBOT_MCP_API_BASE_URL` and `VALIDIBOT_MCP_BASE_URL`
-> are GCP-only and stay in `.production/.google-cloud/.build`; the deploy recipe
-> stamps them onto Cloud Run via `--set-env-vars`. **x402 payment config is not
-> here** — it lives in `.django` (read only by `validibot_cloud.settings`),
-> because the cloud Django service is its sole consumer now that the MCP server
-> no longer handles payments. See the X402 sections of the `.local/.django` and
-> `.production/.google-cloud/.django` files.
+### Embedded MCP Variables (`.django`, Pro feature)
+
+The official-SDK MCP endpoint runs inside the Django ASGI process at
+`<SITE_URL>/mcp`; there is no `.mcp` file or separate service credential.
+
+| Variable | Description | Default |
+| --- | --- | --- |
+| `IDP_OIDC_MCP_RESOURCE_AUDIENCE` | Exact OAuth resource and access-token audience. | `<SITE_URL>/mcp` |
+| `IDP_OIDC_CHATGPT_REDIRECT_URIS` | Exact callback URI or URIs supplied by ChatGPT. | empty |
+| `MCP_FILE_MAX_BYTES` | Maximum downloaded ChatGPT validation file. | `2500000` |
+| `MCP_MAX_REQUEST_BODY_BYTES` | Maximum Streamable HTTP body. | `4194304` |
+| `MCP_READS_PER_MINUTE` | Shared per-principal budget across read tools. | `120` |
+| `MCP_STARTS_PER_MINUTE` | Per-principal validation-start budget. | `20` |
+| `MCP_ALLOWED_ORIGINS` | Additional exact trusted browser origins. | empty |
 
 ### Django Variables (`.django`)
 

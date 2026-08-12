@@ -21,13 +21,13 @@ The Docker Compose production stack uses `docker-compose.production.yml` and the
 
 It runs:
 
-- `web` with Gunicorn
+- `web` with Gunicorn and `UvicornWorker` (including `/mcp` on Pro)
 - `worker` for background jobs and validator execution
 - `scheduler` for periodic tasks
 - `postgres`
 - `redis`
 
-Two optional services live behind Compose profiles and stay off unless
+One optional service lives behind a Compose profile and stays off unless
 you opt in:
 
 - `caddy` — a bundled reverse proxy that auto-issues a Let's Encrypt
@@ -36,9 +36,6 @@ you opt in:
   already run nginx, Traefik, Cloudflare Tunnel, or a hosting-provider
   load balancer. See [Reverse Proxy Setup](reverse-proxy.md) for the
   full set of options.
-- `mcp` — the standalone FastMCP server that exposes validation
-  workflows to AI agents. Pro feature, opt-in via
-  `ENABLE_MCP_SERVER=true` (covered below).
 
 ## First-time install
 
@@ -55,9 +52,8 @@ you opt in:
    cp .envs.example/.production/.self-hosted/.postgres .envs/.production/.self-hosted/.postgres
    ```
 
-   Also copy the `.build` file — it holds both commercial-package
-   installation vars (Pro / Enterprise) and recipe-level knobs like
-   `ENABLE_MCP_SERVER`. Safe to copy for any deployment; all vars
+	   Also copy the `.build` file — it holds commercial-package
+	   installation vars (Pro / Enterprise). Safe to copy for any deployment; all vars
    have sensible defaults when left empty.
 
    ```bash
@@ -106,43 +102,10 @@ you opt in:
    directly — that makes future upgrades harder; the dedicated
    settings module is the supported path.
 
-   To also include the MCP server (exposes validation workflows to
-   AI agents over the Model Context Protocol), copy the MCP env file
-   and flip the build flag:
-
-   ```bash
-   cp .envs.example/.production/.self-hosted/.mcp \
-      .envs/.production/.self-hosted/.mcp
-   ```
-
-   Then generate one long random `VALIDIBOT_MCP_SERVICE_KEY` and place that
-   paired secret in both `.envs/.production/.self-hosted/.mcp` and your
-   `.django` file. That shared secret is how the MCP server authenticates
-   itself to Django's helper API. Generate one with:
-
-   ```bash
-   python -c "import secrets; print(secrets.token_urlsafe(32))"
-   ```
-
-   Finally, in `.envs/.production/.self-hosted/.build`:
-
-   ```bash
-   ENABLE_MCP_SERVER=true
-   ```
-
-   The `just self-hosted up` / `build` recipes source the `.build`
-   file at the top and activate the `mcp` Compose profile when the
-   flag is truthy.
-
-   **License gate.** The MCP code itself lives in this repo at
-   `mcp/` and is free to build, but whenever an enabled revision starts the server calls
-   `GET /api/v1/license/features/` against the Django API and
-   refuses to serve traffic unless `mcp_server` is advertised —
-   which only happens when `validibot-pro` (or enterprise) is
-   installed via `VALIDIBOT_COMMERCIAL_PACKAGE`. So a community-only
-   deployment that flips `ENABLE_MCP_SERVER=true` will build and
-   start the container, then watch it exit on the license check.
-   If you're running Pro, you're all set.
+	   MCP requires no additional service setup. Its public implementation is
+	   embedded in Django, and the Pro package activates `/mcp` through the
+	   `mcp_server` feature. Configure the OAuth audience and client callback in
+	   `.django`; do not create a `.mcp` file or shared service key.
 
 4. Validate the env files and bootstrap the deployment:
 
