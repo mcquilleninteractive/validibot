@@ -137,7 +137,7 @@ Sometimes the rule you want depends on *context about the submission* that isn't
 
 **Attaching metadata at upload.** There are three ways to send it, depending on how the run is launched:
 
-- **Web launch form** — when the workflow enables it, the launch page shows an "Extra data" tab where the submitter can add a name, a short description, and key-value metadata.
+- **Web launch form** — when the workflow enables it, the launch page shows a "Submission details" tab where the submitter can add a name, a short description, and submission metadata as JSON.
 - **API** — include a `metadata` object (and optionally `filename`, `short_description`) in the start request.
 - **CLI** — `validibot validate model.ttl -w my-workflow -o my-org --meta deliverable=handover --short-description "Final package"` (repeat `--meta` for more keys).
 

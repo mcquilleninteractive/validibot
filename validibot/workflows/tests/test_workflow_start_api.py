@@ -345,13 +345,14 @@ class TestWorkflowStartAPI:
         workflow,
         mock_validation_service_success,
     ):
+        """The start API must reject media types outside its explicit registry."""
         api_client.force_authenticate(user=user)
         grant_role(user, org, RoleCode.EXECUTOR)
 
         resp = api_client.post(
             start_url(workflow),
             data=b"raw-binary",
-            content_type="application/pdf",
+            content_type="application/x-unsupported",
         )
 
         assert resp.status_code == status.HTTP_400_BAD_REQUEST
@@ -745,6 +746,72 @@ class TestWorkflowStartAPI:
         run = ValidationRun.objects.get(pk=body["id"])
         assert run.submission
         assert run.submission.input_file
+
+    def test_start_with_pdf_upload_persists_the_explicit_pdf_type(
+        self,
+        api_client: APIClient,
+        org,
+        user,
+        workflow,
+    ):
+        """A PDF-only workflow must persist PDF rather than generic binary."""
+        workflow.allowed_file_types = [SubmissionFileType.PDF]
+        workflow.save(update_fields=["allowed_file_types"])
+        validator = workflow.steps.get().validator
+        validator.supported_file_types = [SubmissionFileType.PDF]
+        validator.save(update_fields=["supported_file_types"])
+        api_client.force_authenticate(user=user)
+        grant_role(user, org, RoleCode.EXECUTOR)
+
+        uploaded = SimpleUploadedFile(
+            "engineering-package.pdf",
+            b"%PDF-2.0\n%%EOF",
+            content_type="application/pdf",
+        )
+        response = api_client.post(
+            start_url(workflow),
+            data={
+                "file": uploaded,
+                "filename": "engineering-package.pdf",
+                "content_type": "application/pdf",
+            },
+            format="multipart",
+        )
+
+        assert response.status_code == status.HTTP_201_CREATED, response.data
+        run = ValidationRun.objects.get(pk=response.json()["id"])
+        assert run.submission.file_type == SubmissionFileType.PDF
+        assert run.submission.original_filename == "engineering-package.pdf"
+
+    def test_start_with_raw_pdf_body_preserves_binary_bytes(
+        self,
+        api_client: APIClient,
+        org,
+        user,
+        workflow,
+    ):
+        """Raw PDF requests must never pass through lossy text decoding."""
+        workflow.allowed_file_types = [SubmissionFileType.PDF]
+        workflow.save(update_fields=["allowed_file_types"])
+        validator = workflow.steps.get().validator
+        validator.supported_file_types = [SubmissionFileType.PDF]
+        validator.save(update_fields=["supported_file_types"])
+        api_client.force_authenticate(user=user)
+        grant_role(user, org, RoleCode.EXECUTOR)
+        pdf_bytes = b"%PDF-2.0\n%\xff\xfe binary marker\n%%EOF"
+
+        response = api_client.post(
+            start_url(workflow),
+            data=pdf_bytes,
+            content_type="application/pdf",
+            HTTP_X_FILENAME="raw-package.pdf",
+        )
+
+        assert response.status_code == status.HTTP_201_CREATED, response.data
+        run = ValidationRun.objects.get(pk=response.json()["id"])
+        assert run.submission.file_type == SubmissionFileType.PDF
+        assert run.submission.original_filename == "raw-package.pdf"
+        assert run.submission.read_bytes() == pdf_bytes
 
     def test_multipart_file_upload_persists_metadata(
         self,

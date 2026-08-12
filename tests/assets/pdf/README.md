@@ -1,4 +1,90 @@
-# PDF composed-acceptance fixture
+# PDFValidator test assets
+
+All PDFs in this directory are repository-owned synthetic fixtures. They
+contain no user, customer, council, or third-party project data.
+
+## AEC issue packages
+
+`aec-issue-package-clean.pdf` and `aec-issue-package-negative.pdf` are
+human-readable, two-sheet A3 architectural coordination packages backed by
+standard PDF 2.0 EmbeddedFiles and Associated Files structures. Each visible
+package explains its exact selector configuration and expected validator
+outcome.
+
+The clean package carries:
+
+- `coordination-model.ifc`, a small STEP Part 21 carrier with
+  `FILE_SCHEMA(('IFC4'))`;
+- `requirements.ids`, synthetic buildingSMART IDS-shaped XML; and
+- `transmittal.json`, deterministic issue metadata.
+
+With `emit_extracted_files_bundle=true`, `safe_static_package_v1`, and the
+selectors printed on sheet G001, the clean package must succeed with three
+members and all six fixed artifacts:
+
+```text
+pdf_inventory
+extracted_files_bundle
+xmp_metadata
+selected_xml
+selected_json
+selected_step_p21
+```
+
+The negative package preserves the same visible issue and intentionally adds:
+
+- a second `requirements.ids` candidate, making the XML selector ambiguous;
+- a `text/plain` declaration for the detected STEP Part 21 member;
+- `../unsafe-notes.xml`, whose name must remain evidence and never become a
+  filesystem path;
+- an inert document-open JavaScript action; and
+- an inert external URI action targeting `example.invalid`.
+
+The safe-static profile must fail without executing or fetching anything. The
+current stable finding codes are:
+
+```text
+pdf.member.duplicate_name
+pdf.member.type_mismatch
+pdf.profile.safe_static.javascript_actions
+pdf.profile.safe_static.open_actions
+pdf.profile.safe_static.uri_actions
+pdf.selector.ambiguous
+pdf.selector.type_mismatch
+```
+
+The unsafe filename is represented by the member risk flags
+`filename_dot_segment` and `filename_path_hazard`.
+
+Fixture identities:
+
+| Fixture | Size | SHA-256 |
+| --- | ---: | --- |
+| `aec-issue-package-clean.pdf` | 15,024 bytes | `964d9571145824e3eccbc48663d187a28441d96ea08d95ec55dda9daa51a2612` |
+| `aec-issue-package-negative.pdf` | 18,901 bytes | `7d6595f40c7794f54f6980a4d5100ff8b764f89ea7fd65e32f582f345351e244` |
+
+The selected clean payload identities are:
+
+| Payload | Size | SHA-256 |
+| --- | ---: | --- |
+| `coordination-model.ifc` | 894 bytes | `256334d666e43f3e47c918305300ac569653bbab12bb10d729c8cb162c947be0` |
+| `requirements.ids` | 1,591 bytes | `4f0fedf3e6d5c7b752696e715089e3d3e6bca4a399fbafb6250014a8a1d88e2f` |
+| `transmittal.json` | 345 bytes | `1d66b5bb9f0b5220eccc56aca65251a42a22fca1a1291394fb5c3f523a867552` |
+
+`generate_aec_packages.py` reproduces both PDFs deterministically. Generation
+is an intentional reviewed fixture update, never a test-suite side effect. It
+requires ReportLab 4.4.9 and pypdf 6.10.0; one isolated invocation is:
+
+```bash
+uv run --with reportlab==4.4.9 --with pypdf==6.10.0 \
+  python tests/assets/pdf/generate_aec_packages.py
+```
+
+The payloads and generated PDFs are distributed under CC0-1.0 by McQuillen
+Interactive Pty. Ltd. They exercise the PDF package and typed carrier boundary;
+they do not claim IFC, IDS, PDF/A, drawing, design, or construction conformance.
+
+## Composed XML acceptance fixture
 
 `composed-package.pdf` is the application-side copy of the synthetic
 `package-mechanisms` fixture in the PDF backend's versioned V1 corpus. It was

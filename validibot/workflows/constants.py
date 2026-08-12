@@ -146,6 +146,7 @@ SUPPORTED_CONTENT_TYPES = {
     "text/x-idf": SubmissionFileType.TEXT,
     "text/yaml": SubmissionFileType.YAML,
     "application/yaml": SubmissionFileType.YAML,
+    "application/pdf": SubmissionFileType.PDF,
     "application/octet-stream": SubmissionFileType.BINARY,
     # RDF serializations used by the SHACL validator. Turtle is the
     # most common; the others cover JSON-LD, RDF/XML, N-Triples, and
@@ -165,6 +166,7 @@ DEFAULT_CONTENT_TYPE_BY_FILE_TYPE = {
     SubmissionFileType.XML: "application/xml",
     SubmissionFileType.TEXT: "text/plain",
     SubmissionFileType.YAML: "text/yaml",
+    SubmissionFileType.PDF: "application/pdf",
     SubmissionFileType.BINARY: "application/octet-stream",
 }
 

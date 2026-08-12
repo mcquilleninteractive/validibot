@@ -3478,6 +3478,18 @@ msgstr "コンテンツを送信"
 msgid "Extra data"
 msgstr "追加データ"
 
+msgid "Submission details"
+msgstr "送信の詳細"
+
+msgid "Submission metadata (JSON)"
+msgstr "送信メタデータ (JSON)"
+
+msgid "Allow submission metadata (JSON)"
+msgstr "送信メタデータ (JSON) を許可"
+
+msgid "Allow submitters to provide optional JSON metadata with their submission."
+msgstr "送信者が任意の JSON メタデータを送信に追加できるようにします。"
+
 msgid "Input requirements"
 msgstr ""
 

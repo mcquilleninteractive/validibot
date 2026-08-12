@@ -119,6 +119,24 @@ def test_launch_page_renders_for_org_member(client):
     assert 'class="card-body editor-card__scroll"' in body
 
 
+def test_launch_page_groups_optional_fields_under_submission_details(client):
+    """The launch UI should use a clear umbrella label for optional details."""
+    workflow = WorkflowFactory(allow_submission_meta_data=True)
+    WorkflowStepFactory(workflow=workflow)
+    user = _force_login_for_workflow(client, workflow)
+    grant_role(user, workflow.org, RoleCode.EXECUTOR)
+
+    response = client.get(
+        reverse("workflows:workflow_launch", kwargs={"pk": workflow.pk}),
+    )
+
+    body = response.content.decode()
+    assert response.status_code == HTTPStatus.OK
+    assert "Submission details" in body
+    assert "Submission metadata (JSON)" in body
+    assert ">Extra data<" not in body
+
+
 def test_launch_page_disables_form_without_steps(client):
     """A non-editor launch gate should retain natural document scrolling."""
     workflow = WorkflowFactory()

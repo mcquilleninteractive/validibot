@@ -184,6 +184,13 @@ class TestForceExtension:
             == "model.rdf"
         )
 
+    def test_pdf_content_type_uses_pdf_extension(self):
+        """PDF uploads retain the extension required by the isolated parser."""
+        assert (
+            force_extension("package.bin", content_type="application/pdf")
+            == "package.pdf"
+        )
+
 
 # ---------------------------------------------------------------------------
 # build_safe_filename

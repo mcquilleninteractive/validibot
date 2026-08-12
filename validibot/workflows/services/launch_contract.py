@@ -42,7 +42,7 @@ In scope (this module):
 - Workflow active state
 - Workflow has steps
 - File type supported by the workflow
-- File type supported by every step
+- File type supported by every step that consumes the primary submission file
 - Payload size within configured maximum
 
 Out of scope (handled elsewhere):
@@ -180,7 +180,8 @@ class LaunchContract:
         2. Workflow has at least one step
         3. Every validator step has an available runtime config/class
         4. (If ``file_type`` provided) workflow accepts the file type
-        5. (If ``file_type`` provided) every step accepts the file type
+        5. (If ``file_type`` provided) every step consuming the primary
+           submission accepts the file type
         6. (If ``payload_size_bytes`` provided) payload is non-empty
         7. (If ``payload_size_bytes`` provided) payload is within max
 
@@ -300,12 +301,12 @@ class LaunchContract:
         workflow: Workflow,
         file_type: str,
     ) -> LaunchContractViolation | None:
-        """Verify the workflow and every step accept ``file_type``.
+        """Verify the workflow and primary-file consumers accept ``file_type``.
 
-        Reuses the existing ``Workflow.supports_file_type`` and
-        ``Workflow.first_incompatible_step`` model methods. Phase 2
-        doesn't change those — it just unifies how callers consume
-        them.
+        Later validators may consume typed artifacts exposed by earlier file
+        ports. ``Workflow.first_incompatible_step`` therefore checks the launch
+        type only for steps bound to the primary submitted file (and legacy
+        validators without declared artifact inputs).
         """
         if not workflow.supports_file_type(file_type):
             allowed = workflow.allowed_file_type_labels()

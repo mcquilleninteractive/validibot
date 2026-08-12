@@ -130,6 +130,7 @@ class SubmissionFileType(models.TextChoices):
     XML = "xml", _("XML")
     TEXT = "text", _("Plain Text")
     YAML = "yaml", _("YAML")
+    PDF = "pdf", _("PDF")
     BINARY = "binary", _("Binary")
     UNKNOWN = "UNKNOWN", _("Unknown")
 
@@ -186,7 +187,7 @@ DATA_FORMAT_FILE_TYPE_MAP: dict[str, list[str]] = {
     SubmissionDataFormat.THERM_THMZ: [SubmissionFileType.BINARY],
     # CSV is carried as a plain-text file (the Tabular Validator reads it).
     SubmissionDataFormat.CSV: [SubmissionFileType.TEXT],
-    SubmissionDataFormat.PDF: [SubmissionFileType.BINARY],
+    SubmissionDataFormat.PDF: [SubmissionFileType.PDF],
     SubmissionDataFormat.STEP_P21: [SubmissionFileType.TEXT],
     SubmissionDataFormat.ZIP: [SubmissionFileType.BINARY],
     SubmissionDataFormat.PORTFOLIO_MANAGER_REPORT: [

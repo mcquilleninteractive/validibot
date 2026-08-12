@@ -196,7 +196,7 @@ def test_real_pdf_output_is_the_exact_xml_validated_by_the_next_step(
     )
     pdf_validator = Validator.objects.get(slug="pdf-validator", version=1)
     xml_validator = Validator.objects.get(slug="xml-validator", version=2)
-    workflow = WorkflowFactory(allowed_file_types=[SubmissionFileType.BINARY])
+    workflow = WorkflowFactory(allowed_file_types=[SubmissionFileType.PDF])
     ruleset = RulesetFactory(
         org=workflow.org,
         ruleset_type=RulesetType.XML_SCHEMA,
@@ -237,7 +237,7 @@ def test_real_pdf_output_is_the_exact_xml_validated_by_the_next_step(
         org=workflow.org,
         project=workflow.project,
         user=workflow.user,
-        file_type=SubmissionFileType.BINARY,
+        file_type=SubmissionFileType.PDF,
     )
     submission.set_content(
         uploaded_file=SimpleUploadedFile(
@@ -246,7 +246,7 @@ def test_real_pdf_output_is_the_exact_xml_validated_by_the_next_step(
             content_type="application/pdf",
         ),
         filename="composed-package.pdf",
-        file_type=SubmissionFileType.BINARY,
+        file_type=SubmissionFileType.PDF,
     )
     submission.save()
     run = ValidationRunFactory(submission=submission)
@@ -335,7 +335,7 @@ def test_real_pdf_output_is_the_exact_xml_validated_by_the_next_step(
     assert result.passed is True
     assert consumer_run.status == StepStatus.PASSED
     assert observed["xml_document"] == EXPECTED_XML
-    assert submission.file_type == SubmissionFileType.BINARY
+    assert submission.file_type == SubmissionFileType.PDF
     assert submission.read_bytes() == fixture_bytes
     assert submission.read_bytes() != observed["xml_document"]
     trace = consumer_run.input_traces.get(input_contract_key="xml_document")

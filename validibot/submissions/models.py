@@ -1118,7 +1118,9 @@ def detect_file_type(
         return SubmissionFileType.XML
     if name.endswith(".thmz"):
         return SubmissionFileType.BINARY
-    if name.endswith((".pdf", ".fmu", ".xls", ".xlsx", ".zip")):
+    if name.endswith(".pdf"):
+        return SubmissionFileType.PDF
+    if name.endswith((".fmu", ".xls", ".xlsx", ".zip")):
         return SubmissionFileType.BINARY
     if name.endswith((".step", ".stp", ".p21")):
         return SubmissionFileType.TEXT

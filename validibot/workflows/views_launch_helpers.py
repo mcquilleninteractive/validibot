@@ -8,6 +8,7 @@ from typing import Any
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.core.files.base import ContentFile
 from django.db import transaction
 from django.http import HttpRequest
 from django.urls import reverse
@@ -17,6 +18,7 @@ from rest_framework.response import Response as APIResponse
 from validibot.core.site_settings import MetadataPolicyError
 from validibot.core.site_settings import get_site_settings
 from validibot.projects.models import Project
+from validibot.submissions.constants import SubmissionFileType
 from validibot.submissions.constants import SubmissionRetention
 from validibot.submissions.ingest import prepare_inline_text
 from validibot.submissions.ingest import prepare_uploaded_file
@@ -305,23 +307,37 @@ def handle_raw_body_mode(
             status_code=400,
         )
 
-    charset = "utf-8"
-    if ";" in full_ct:
-        for part in full_ct.split(";")[1:]:
-            k, _, v = part.partition("=")
-            if k.strip().lower() == "charset" and v.strip():
-                charset = v.strip()
-                break
-    try:
-        text_content = raw.decode(charset)
-    except UnicodeDecodeError:
-        text_content = raw.decode("utf-8", errors="replace")
+    filename_file_type = resolve_submission_file_type(
+        requested=file_type,
+        filename=filename,
+    )
+    is_binary_body = filename_file_type in {
+        SubmissionFileType.PDF,
+        SubmissionFileType.BINARY,
+    }
+    text_content: str | None = None
+    if not is_binary_body:
+        charset = "utf-8"
+        if ";" in full_ct:
+            for part in full_ct.split(";")[1:]:
+                k, _, v = part.partition("=")
+                if k.strip().lower() == "charset" and v.strip():
+                    charset = v.strip()
+                    break
+        try:
+            text_content = raw.decode(charset)
+        except UnicodeDecodeError:
+            text_content = raw.decode("utf-8", errors="replace")
 
     resolved_file_type = resolve_submission_file_type(
         requested=file_type,
         filename=filename,
         inline_text=text_content,
     )
+    is_binary_body = resolved_file_type in {
+        SubmissionFileType.PDF,
+        SubmissionFileType.BINARY,
+    }
     violation = describe_workflow_file_type_violation(
         workflow=workflow,
         file_type=resolved_file_type,
@@ -340,12 +356,24 @@ def handle_raw_body_mode(
             filename=filename,
         )
 
-    safe_filename, ingest = prepare_inline_text(
-        text=text_content,
-        filename=filename,
-        content_type=ingest_content_type,
-        deny_magic_on_text=True,
-    )
+    binary_upload: ContentFile | None = None
+    if is_binary_body:
+        binary_upload = ContentFile(raw, name=filename or "document")
+        ingest = prepare_uploaded_file(
+            uploaded_file=binary_upload,
+            filename=filename,
+            content_type=ingest_content_type,
+            max_bytes=max_inline,
+        )
+        safe_filename = ingest.filename
+    else:
+        assert text_content is not None
+        safe_filename, ingest = prepare_inline_text(
+            text=text_content,
+            filename=filename,
+            content_type=ingest_content_type,
+            deny_magic_on_text=True,
+        )
 
     submission = Submission(
         org=workflow.org,
@@ -361,11 +389,20 @@ def handle_raw_body_mode(
         # promised.
         retention_policy=_resolve_submission_retention(workflow),
     )
-    submission.set_content(
-        inline_text=text_content,
-        filename=safe_filename,
-        file_type=resolved_file_type,
-    )
+    if is_binary_body:
+        assert binary_upload is not None
+        submission.set_content(
+            uploaded_file=binary_upload,
+            filename=safe_filename,
+            file_type=resolved_file_type,
+        )
+        submission.checksum_sha256 = ingest.sha256
+    else:
+        submission.set_content(
+            inline_text=text_content,
+            filename=safe_filename,
+            file_type=resolved_file_type,
+        )
 
     with transaction.atomic():
         submission.full_clean()

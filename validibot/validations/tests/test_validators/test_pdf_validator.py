@@ -11,6 +11,7 @@ import pytest
 from pydantic import ValidationError
 
 from validibot.submissions.constants import SubmissionDataFormat
+from validibot.submissions.constants import SubmissionFileType
 from validibot.validations.constants import ADVANCED_VALIDATION_TYPES
 from validibot.validations.constants import ArtifactKind
 from validibot.validations.constants import BindingSourceScope
@@ -88,6 +89,7 @@ def test_pdf_catalog_declares_isolated_fixed_typed_ports() -> None:
     assert config.compute_tier == ComputeTier.LOW
     assert config.execution_backend_slug == "pdf"
     assert config.output_envelope_class == "validibot_shared.pdf.PdfOutputEnvelope"
+    assert config.supported_file_types == [SubmissionFileType.PDF]
     assert ValidationType.PDF in ADVANCED_VALIDATION_TYPES
     assert set(entries) >= {
         "pdf_document",

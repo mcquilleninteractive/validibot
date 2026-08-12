@@ -3209,6 +3209,18 @@ msgstr ""
 msgid "Extra data"
 msgstr ""
 
+msgid "Submission details"
+msgstr "Détails de la soumission"
+
+msgid "Submission metadata (JSON)"
+msgstr "Métadonnées de la soumission (JSON)"
+
+msgid "Allow submission metadata (JSON)"
+msgstr "Autoriser les métadonnées de soumission (JSON)"
+
+msgid "Allow submitters to provide optional JSON metadata with their submission."
+msgstr "Autoriser les utilisateurs à fournir des métadonnées JSON facultatives avec leur soumission."
+
 msgid "Input requirements"
 msgstr ""
 

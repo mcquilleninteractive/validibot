@@ -471,7 +471,14 @@ class WorkflowForm(forms.ModelForm):
             "history_policy",
             "is_active",
         ]
+        labels = {
+            "allow_submission_meta_data": _("Allow submission metadata (JSON)"),
+        }
         help_texts = {
+            "allow_submission_meta_data": _(
+                "Allow submitters to provide optional JSON metadata with "
+                "their submission."
+            ),
             "version": _(
                 "Required number to track workflow iterations. Use a positive "
                 "integer (e.g. 1). Defaults to 1 for a brand-new workflow.",
@@ -626,6 +633,10 @@ class WorkflowForm(forms.ModelForm):
             (
                 SubmissionFileType.YAML.value,
                 FileTypeChoiceLabel(_("YAML"), _(".yml, .yaml")),
+            ),
+            (
+                SubmissionFileType.PDF.value,
+                FileTypeChoiceLabel(_("PDF"), _(".pdf")),
             ),
             (
                 SubmissionFileType.BINARY.value,
@@ -1694,7 +1705,7 @@ class WorkflowLaunchForm(forms.Form):
         help_text=_("Upload a file instead of pasting submission data."),
     )
     metadata = forms.CharField(
-        label=_("Metadata (JSON)"),
+        label=_("Submission metadata (JSON)"),
         required=False,
         widget=forms.Textarea(
             attrs={

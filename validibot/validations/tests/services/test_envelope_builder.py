@@ -585,7 +585,7 @@ def _build_pdf_file_port_run():
         workflow=step.workflow,
         org=step.workflow.org,
         content="%PDF-2.0\n% fixture",
-        file_type=SubmissionFileType.BINARY,
+        file_type=SubmissionFileType.PDF,
         original_filename="package.pdf",
     )
     run = ValidationRunFactory(

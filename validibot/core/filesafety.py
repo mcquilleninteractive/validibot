@@ -41,6 +41,7 @@ SAFE_EXT_FOR_TYPE = {
     "application/rdf+xml": ".rdf",
     "application/yaml": ".yaml",
     "text/yaml": ".yaml",
+    "application/pdf": ".pdf",
     "application/octet-stream": ".bin",
 }
 

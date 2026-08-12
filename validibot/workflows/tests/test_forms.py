@@ -65,7 +65,7 @@ def test_workflow_form_limits_projects_to_current_org():
 def test_workflow_form_renders_allowed_file_type_examples_without_changing_values():
     """Allowed file-type hints must be display-only.
 
-    The settings form shows extension examples next to broad file-type
+    The settings form shows extension examples next to file-type
     labels. Those examples are a UX affordance, but the submitted
     checkbox values still need to be the canonical ``SubmissionFileType``
     values consumed by workflow launch validation.
@@ -77,7 +77,9 @@ def test_workflow_form_renders_allowed_file_type_examples_without_changing_value
     assert 'value="json"' in html
     assert 'value="xml"' in html
     assert 'value="text"' in html
+    assert 'value="pdf"' in html
     assert 'value="name"' not in html
+    assert 'class="workflow-file-type-option__name">PDF</span>' in html
     assert (
         'class="workflow-file-type-option__examples">'
         ".txt, .csv, .idf, .ttl, .nt, .nq</span>"
@@ -85,6 +87,7 @@ def test_workflow_form_renders_allowed_file_type_examples_without_changing_value
     assert (
         'class="workflow-file-type-option__examples">.xls, .xlsx, .fmu, .zip</span>'
     ) in html
+    assert ('class="workflow-file-type-option__examples">.pdf</span>') in html
 
 
 def test_workflow_form_exposes_exact_editing_policy_choices_and_default():
@@ -112,6 +115,18 @@ def test_workflow_form_explains_transient_storage_for_no_retention_choices():
     assert "'Do not retain' keeps detailed results briefly" in output_help
     assert "access-controlled transient storage" in output_help
     assert "purges them shortly after validation" in output_help
+
+
+def test_workflow_form_uses_submission_metadata_terminology():
+    """Authors should see the same precise metadata term used at launch."""
+    form = WorkflowForm()
+
+    field = form.fields["allow_submission_meta_data"]
+
+    assert field.label == "Allow submission metadata (JSON)"
+    assert field.help_text == (
+        "Allow submitters to provide optional JSON metadata with their submission."
+    )
 
 
 def test_workflow_form_saves_selected_project():
@@ -365,6 +380,15 @@ def test_workflow_launch_form_accepts_inline_payload():
 
     assert form.is_valid(), form.errors
     assert form.cleaned_data["metadata"] == {"source": "ui"}
+
+
+def test_workflow_launch_form_labels_submission_metadata_consistently():
+    """Submitters should see metadata identified as a submission detail."""
+    workflow = WorkflowFactory(allow_submission_meta_data=True)
+
+    form = WorkflowLaunchForm(workflow=workflow, user=workflow.user)
+
+    assert form.fields["metadata"].label == "Submission metadata (JSON)"
 
 
 def test_workflow_launch_form_accepts_file_upload():

@@ -1116,28 +1116,50 @@ class Workflow(FeaturedImageMixin, TimeStampedModel):
         normalized = (file_type or "").lower()
         return normalized in {ft.lower() for ft in (self.allowed_file_types or [])}
 
-    def validator_is_compatible(self, validator) -> bool:
-        if not validator:
-            return True
-        validator_types = set(
-            getattr(validator, "supported_file_types", []) or [],
-        )
-        workflow_types = set(self.allowed_file_types or [])
-        return bool(
-            {ft.lower() for ft in workflow_types}
-            & {ft.lower() for ft in validator_types}
-        )
+    def first_incompatible_step(self, file_type: str) -> WorkflowStep | None:
+        """Return the first step that rejects the primary submission file.
 
-    def first_incompatible_step(self, file_type: str):
+        A validator only needs to support the launch file type when it consumes
+        that primary submitted file. Artifact inputs bound to earlier-step
+        outputs, workflow resources, system resources, or auxiliary submitted
+        files carry their own typed contracts and must not be compared with the
+        workflow's original submission type.
+
+        Validators without declared artifact input ports retain the legacy
+        whole-payload check because there is no more precise source contract.
+        """
         if not file_type:
             return None
+
+        from validibot.validations.constants import BindingSourceScope
+        from validibot.validations.constants import StepIODirection
+        from validibot.validations.services.artifact_bindings import (
+            effective_artifact_ports,
+        )
+
         normalized = file_type.lower()
         steps = self.steps.select_related("validator").all()
         for step in steps:
             validator = step.validator
-            if validator and hasattr(validator, "supports_file_type"):
-                if not validator.supports_file_type(normalized):
-                    return step
+            if not validator or not hasattr(validator, "supports_file_type"):
+                continue
+            if validator.supports_file_type(normalized):
+                continue
+
+            artifact_inputs = effective_artifact_ports(
+                step,
+                direction=StepIODirection.INPUT,
+            )
+            if not artifact_inputs:
+                return step
+
+            consumes_primary_submission = step.input_bindings.filter(
+                io_definition_id__in=[port.pk for port in artifact_inputs],
+                source_scope=BindingSourceScope.SUBMISSION_FILE,
+                source_data_path="primary",
+            ).exists()
+            if consumes_primary_submission:
+                return step
         return None
 
     def first_unavailable_validator_step(self):

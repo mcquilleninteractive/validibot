@@ -579,6 +579,8 @@ class ValidationRunStartSerializer(serializers.Serializer):
             return SubmissionFileType.JSON
         if name.endswith(".xml"):
             return SubmissionFileType.XML
+        if name.endswith(".pdf"):
+            return SubmissionFileType.PDF
         if name.endswith(".idf") or "energyplus" in name:
             return SubmissionFileType.TEXT
 

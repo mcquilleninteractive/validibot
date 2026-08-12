@@ -22,12 +22,14 @@ from validibot.actions.models import Action
 from validibot.actions.models import ActionDefinition
 from validibot.actions.models import SlackMessageAction
 from validibot.actions.registry import get_action_form
+from validibot.submissions.constants import SubmissionDataFormat
 from validibot.submissions.constants import SubmissionFileType
 from validibot.users.constants import RoleCode
 from validibot.users.tests.factories import OrganizationFactory
 from validibot.users.tests.factories import UserFactory
 from validibot.users.tests.factories import grant_role
 from validibot.users.tests.utils import ensure_all_roles_exist
+from validibot.validations.constants import ArtifactKind
 from validibot.validations.constants import AssertionType
 from validibot.validations.constants import BindingSourceScope
 from validibot.validations.constants import CatalogValueType
@@ -359,7 +361,13 @@ def test_wizard_shows_only_latest_version_per_validator_slug(client):
     assert "Dup JSON v1" not in html
 
 
-def test_wizard_shows_xml_validator_even_when_incompatible_file_type(client):
+def test_wizard_enables_xml_validator_for_json_workflow(client):
+    """Typed upstream artifacts make the original submission type irrelevant.
+
+    A JSON workflow may produce XML in an earlier step and bind that file to an
+    XML validator. The picker must therefore let the author select the XML
+    validator instead of disabling it based on the launch submission alone.
+    """
     workflow = WorkflowFactory()
     _login_for_workflow(client, workflow)
     xml_validator = ensure_validator(
@@ -375,15 +383,152 @@ def test_wizard_shows_xml_validator_even_when_incompatible_file_type(client):
     html = response.content.decode()
     assert xml_validator.name in html
     assert f'value="validator:{xml_validator.pk}"' in html
-    # The template renders 'disabled' on a separate line after 'value=...',
-    # so match using a regex that allows whitespace between attributes.
-    assert re.search(
+    assert not re.search(
         rf'value="validator:{xml_validator.pk}"\s+disabled',
         html,
     )
 
 
+def test_wizard_allows_selecting_validator_for_a_different_submission_type(client):
+    """The POST handoff must honor the same file-port composition rule as GET."""
+    workflow = WorkflowFactory()
+    _login_for_workflow(client, workflow)
+    xml_validator = ensure_validator(
+        ValidationType.XML_SCHEMA,
+        "selectable-xml-validator",
+        "Selectable XML Schema",
+    )
+
+    redirect_url = _select_validator(client, workflow, xml_validator)
+
+    expected = reverse(
+        "workflows:workflow_step_create",
+        args=[workflow.pk, xml_validator.pk],
+    )
+    assert expected in redirect_url
+
+
+def test_create_xml_step_in_pdf_workflow_with_upstream_file_binding(client):
+    """The step save must accept XML sourced from an earlier PDF-step output."""
+    workflow = WorkflowFactory(allowed_file_types=[SubmissionFileType.PDF])
+    _login_for_workflow(client, workflow)
+    pdf_validator = ensure_validator(
+        ValidationType.PDF,
+        "pdf-producer",
+        "PDF Package Validator",
+    )
+    producer = WorkflowStepFactory(
+        workflow=workflow,
+        validator=pdf_validator,
+        order=10,
+        name="Inspect PDF package",
+    )
+    output_port = StepIODefinitionFactory(
+        validator=pdf_validator,
+        workflow_step=None,
+        contract_key="selected_xml",
+        native_name="selected_xml",
+        label="Selected XML",
+        direction=StepIODirection.OUTPUT,
+        origin_kind=StepIOOriginKind.CATALOG,
+        data_type=CatalogValueType.ARTIFACT_REF,
+        io_medium=StepIOMedium.ARTIFACT,
+        artifact_kind=ArtifactKind.FILE,
+        data_format=SubmissionDataFormat.XML,
+        media_type="application/xml",
+        min_items=0,
+        max_items=1,
+    )
+    xml_validator = ensure_validator(
+        ValidationType.XML_SCHEMA,
+        "xml-consumer",
+        "XML Schema Validator",
+    )
+    input_port = StepIODefinitionFactory(
+        validator=xml_validator,
+        workflow_step=None,
+        contract_key="xml_document",
+        native_name="xml_document",
+        label="XML document",
+        direction=StepIODirection.INPUT,
+        origin_kind=StepIOOriginKind.CATALOG,
+        data_type=CatalogValueType.ARTIFACT_REF,
+        io_medium=StepIOMedium.ARTIFACT,
+        artifact_kind=ArtifactKind.FILE,
+        data_format=SubmissionDataFormat.XML,
+        accepted_data_formats=[SubmissionDataFormat.XML],
+        media_type="application/xml",
+        accepted_media_types=["application/xml"],
+        allowed_source_scopes=[
+            BindingSourceScope.SUBMISSION_FILE,
+            BindingSourceScope.UPSTREAM_ARTIFACT,
+        ],
+        min_items=1,
+        max_items=1,
+    )
+
+    response = client.post(
+        _select_validator(client, workflow, xml_validator),
+        data={
+            "name": "Validate extracted XML",
+            "schema_type": "XSD",
+            "schema_text": (
+                '<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">'
+                '<xs:element name="root" type="xs:string"/>'
+                "</xs:schema>"
+            ),
+            "xml_document_source": BindingSourceScope.UPSTREAM_ARTIFACT,
+            "xml_document_upstream_artifact": (
+                f"{producer.step_key}.{output_port.contract_key}"
+            ),
+        },
+    )
+
+    assert response.status_code == HTTPStatus.FOUND
+    consumer = workflow.steps.get(validator=xml_validator)
+    binding = StepInputBinding.objects.get(
+        workflow_step=consumer,
+        io_definition=input_port,
+    )
+    assert binding.source_scope == BindingSourceScope.UPSTREAM_ARTIFACT
+    assert binding.source_step == producer
+    assert binding.source_output_io_definition == output_port
+
+
+def test_wizard_enables_pdf_validator_for_pdf_workflow(client):
+    """The dedicated PDF type must expose the PDF Package Validator card.
+
+    The stale Binary value models a catalog row created before PDF became an
+    explicit file type. Card availability is now independent of that coarse
+    field, while the accompanying data migration repairs the persisted row.
+    """
+    workflow = WorkflowFactory(allowed_file_types=[SubmissionFileType.PDF])
+    _login_for_workflow(client, workflow)
+    pdf_validator = ensure_validator(
+        ValidationType.PDF,
+        "pdf-validator",
+        "PDF Package Validator",
+    )
+    Validator.objects.filter(pk=pdf_validator.pk).update(
+        supported_file_types=[SubmissionFileType.BINARY],
+    )
+
+    url = reverse("workflows:workflow_step_wizard", args=[workflow.pk])
+    response = client.get(url, HTTP_HX_REQUEST="true")
+
+    assert response.status_code == HTTPStatus.OK
+    html = response.content.decode()
+    assert pdf_validator.name in html
+    assert f'value="validator:{pdf_validator.pk}"' in html
+    assert not re.search(
+        rf'value="validator:{pdf_validator.pk}"\s+disabled',
+        html,
+    )
+    assert "Not allowed for this workflow&#x27;s submission types" not in html
+
+
 def test_fmu_validator_enabled_for_json_workflow(client):
+    """A published and available FMU validator remains selectable."""
     workflow = WorkflowFactory()
     _login_for_workflow(client, workflow)
     fmu_validator = ensure_validator(

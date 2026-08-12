@@ -290,7 +290,6 @@ class WorkflowStepWizardView(WorkflowObjectMixin, View):
         validators = self._available_validators(workflow)
         action_definitions = self._available_action_definitions()
         tabs, options = self._build_step_tabs(
-            workflow,
             validators,
             action_definitions,
         )
@@ -304,25 +303,6 @@ class WorkflowStepWizardView(WorkflowObjectMixin, View):
             selection = form.get_selection()
             if selection["kind"] == "validator":
                 validator = selection["object"]
-                if not workflow.validator_is_compatible(validator):
-                    allowed = ", ".join(workflow.allowed_file_type_labels())
-                    form.add_error(
-                        None,
-                        _(
-                            "%(validator)s cannot be added because this workflow only "
-                            "accepts %(allowed)s submissions.",
-                        )
-                        % {
-                            "validator": validator.name,
-                            "allowed": allowed or _("the selected"),
-                        },
-                    )
-                    return self._render_select(
-                        request,
-                        workflow,
-                        form=form,
-                        status=400,
-                    )
                 create_url = reverse_with_org(
                     "workflows:workflow_step_create",
                     request=request,
@@ -361,9 +341,12 @@ class WorkflowStepWizardView(WorkflowObjectMixin, View):
 
     def _available_validators(self, workflow: Workflow) -> list[Validator]:
         """
-        Return validators visible to this workflow's org. Compatibility is
-        enforced at save time so the selector can still show validators that
-        would require different file types.
+        Return validators visible to this workflow's organization.
+
+        The workflow's original submission types deliberately do not filter or
+        disable this list. A later step can consume a typed file exposed by an
+        earlier step, so compatibility belongs to the selected file-port source
+        rather than to the workflow as a whole.
 
         Excludes DRAFT validators (not ready for display). COMING_SOON validators
         are included but will be disabled in the UI.
@@ -421,7 +404,6 @@ class WorkflowStepWizardView(WorkflowObjectMixin, View):
         action_definitions = self._available_action_definitions()
 
         tabs, options = self._build_step_tabs(
-            workflow,
             validators,
             action_definitions,
         )
@@ -450,7 +432,6 @@ class WorkflowStepWizardView(WorkflowObjectMixin, View):
 
     def _build_step_tabs(
         self,
-        workflow: Workflow,
         validators: list[Validator],
         action_definitions: list[ActionDefinition],
     ) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
@@ -505,7 +486,7 @@ class WorkflowStepWizardView(WorkflowObjectMixin, View):
                 handled.extend(filtered)
             else:
                 filtered = []
-            members = [self._serialize_validator(workflow, v) for v in filtered]
+            members = [self._serialize_validator(v) for v in filtered]
             tabs.append(
                 {
                     "slug": slug,
@@ -524,7 +505,7 @@ class WorkflowStepWizardView(WorkflowObjectMixin, View):
             )
             if advanced_tab is not None:
                 serialized = [
-                    self._serialize_validator(workflow, v) for v in remaining_validators
+                    self._serialize_validator(v) for v in remaining_validators
                 ]
                 advanced_tab["entries"].extend(serialized)
                 options.extend(serialized)
@@ -595,27 +576,22 @@ class WorkflowStepWizardView(WorkflowObjectMixin, View):
 
     def _serialize_validator(
         self,
-        workflow: Workflow,
         validator: Validator,
     ) -> dict[str, object]:
         cfg = get_config(validator.validation_type)
-        is_compatible = workflow.validator_is_compatible(validator)
-        allowed = ", ".join(workflow.allowed_file_type_labels())
         disabled_reason = None
         is_disabled = False
         short_description = validator.short_description
         if not short_description and cfg is not None:
             short_description = cfg.short_description
 
-        # Check if coming soon (takes precedence over compatibility)
+        # Coming-soon validators remain visible for product discovery but are
+        # not authorable. Available validators are selectable regardless of the
+        # workflow's original submission type because file ports can bind them
+        # to typed outputs from earlier steps.
         if validator.is_coming_soon:
             is_disabled = True
             disabled_reason = _("Coming soon")
-        elif not is_compatible:
-            is_disabled = True
-            disabled_reason = _(
-                "Not allowed for this workflow's submission types (%(allowed)s).",
-            ) % {"allowed": allowed or _("selected types")}
 
         return {
             "value": f"validator:{validator.pk}",
@@ -1284,20 +1260,6 @@ class WorkflowStepFormView(WorkflowObjectMixin, FormView):
             )
         else:
             validator = self.get_validator()
-            if not workflow.validator_is_compatible(validator):
-                allowed = ", ".join(workflow.allowed_file_type_labels())
-                form.add_error(
-                    None,
-                    _(
-                        "%(validator)s cannot be added because this workflow only "
-                        "accepts %(allowed)s submissions.",
-                    )
-                    % {
-                        "validator": validator.name,
-                        "allowed": allowed or _("the selected"),
-                    },
-                )
-                return self.form_invalid(form)
             try:
                 saved_step = save_workflow_step(
                     workflow,
