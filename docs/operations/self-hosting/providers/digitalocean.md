@@ -86,13 +86,12 @@ Droplet (Ubuntu 24.04 LTS)
 │   └── docker/               (Docker data-root)
 │       └── volumes/          (Postgres, uploads/evidence, Redis, Caddy data)
 └── A Validibot Compose stack:
-    ├── web        Django web application (Gunicorn)
+    ├── web        Django ASGI application (Gunicorn + UvicornWorker; MCP on Pro)
     ├── worker     Celery worker (background tasks, validators)
     ├── scheduler  Celery Beat (periodic tasks)
     ├── postgres   Database
     ├── redis      Task queue broker
-    ├── caddy      (opt-in profile) reverse proxy with auto-TLS
-    └── mcp        (Pro feature, opt-in) FastMCP server
+    └── caddy      (opt-in profile) reverse proxy with auto-TLS
 ```
 
 Advanced validators (EnergyPlus, FMU) run as short-lived sibling containers spawned by the worker via the host Docker socket. They clean up after themselves.
@@ -351,14 +350,13 @@ the fresh-install default.
 
 ## Step 7: Configure environment files
 
-Validibot uses four env files for self-hosted deployments — all under `.envs/.production/.self-hosted/`:
+Validibot uses three env files for self-hosted deployments — all under `.envs/.production/.self-hosted/`:
 
 | File | Purpose |
 |---|---|
 | `.django` | Django runtime config — secrets, allowed hosts, email, storage paths, MFA key. |
 | `.postgres` | Postgres credentials. |
-| `.build` | Build/host config — rootless socket, MCP host port, image tags, optional exact Pro package reference. |
-| `.mcp` | MCP runtime and OAuth settings (used only when the Pro MCP service is enabled). |
+| `.build` | Build/host config — rootless socket, image tags, optional exact Pro package reference. |
 
 Copy the templates and edit them:
 

@@ -1,6 +1,6 @@
-"""Opaque reference helpers for the MCP API.
+"""Opaque reference helpers for legacy Community and Cloud agent adapters.
 
-Encodes the minimum routing data the MCP server needs (org slug + workflow
+Encodes the minimum routing data the HTTP adapter needs (org slug + workflow
 slug, or org slug + run id) into URL-safe base64 JSON strings. The MCP
 contract never exposes these routing details to agents — tools round-trip
 the opaque handle and the helper API resolves it back to concrete rows.
@@ -24,8 +24,8 @@ WORKFLOW_REF_PREFIX = "wf_"
 RUN_REF_PREFIX = "run_"
 RUN_REF_MEMBER_KIND = "member"
 
-# TODO: Move this ref codec into validibot-shared so the Django helper layer
-# and the FastMCP package stop maintaining parallel base64url/JSON helpers.
+# This codec remains here while Community and Cloud compatibility adapters share
+# it. Embedded MCP uses encrypted references from ``validibot.mcp_server``.
 
 
 def build_workflow_ref(workflow: Workflow) -> str:

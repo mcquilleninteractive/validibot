@@ -15,7 +15,7 @@ secrets:
 
 services:
   web: &django
-    # Web app serving user-facing traffic (runserver on 8000)
+    # Web app serving Django and the Pro-gated MCP endpoint over ASGI on 8000
     # This is the ONLY container that runs migrations
     build:
       context: .

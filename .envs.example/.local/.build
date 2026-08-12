@@ -8,13 +8,8 @@
 #      of ``${FOO}`` references in the compose files (build args, image
 #      tags, etc.). Variables here flow to ``docker build``.
 #
-#   2. ``just local up`` / ``just local-pro up`` / ``just local-cloud up``
-#      source this file at the top of the recipe, so its variables drive
-#      recipe-level logic (which Compose profiles to activate, whether to
-#      pull extra overlays, etc.) before ``docker compose`` is invoked.
-#
-# This file holds only build-time and recipe-level knobs (the commercial
-# package coordinates and ENABLE_MCP_SERVER). It is no longer mounted into any
+# This file holds only build-time and recipe-level knobs such as commercial
+# package coordinates. It is no longer mounted into any
 # running container via ``env_file``. Runtime payment config (x402) moved to
 # ``.django`` when the MCP server stopped handling payments — see the x402
 # section there.
@@ -42,35 +37,7 @@ VALIDIBOT_COMMERCIAL_PACKAGE=
 VALIDIBOT_COMMERCIAL_NETRC=
 
 
-# -- 2. Recipe-level knobs --------------------------------------------------
-#
-# ENABLE_MCP_SERVER
-# -----------------
-# The standalone FastMCP container is defined in the compose overlays
-# used by ``just local-pro up`` and ``just local-cloud up``. Those
-# recipes read this variable to decide whether to activate the ``mcp``
-# Compose profile.
-#
-# Defaults to ``false``. Flip to ``true`` when running local-pro or
-# local-cloud — MCP is a Pro feature, so both stacks have the
-# prerequisite (validibot-pro) installed.
-#
-#   true   — include MCP (local-pro / local-cloud only; ignored by
-#            ``just local up`` since the community compose file has no
-#            mcp service defined)
-#   false  — omit MCP
-#
-# The MCP server has a second, runtime gate inside the container: at
-# startup it calls ``GET /api/v1/license/features/`` and refuses to
-# boot unless ``mcp_server`` appears. ``local-pro`` and ``local-cloud``
-# install validibot-pro, which advertises that feature — so the gate
-# is satisfied automatically. ``local`` (community only) has no Pro
-# and would fail the runtime check even if ENABLE_MCP_SERVER=true
-# were honoured there.
-ENABLE_MCP_SERVER=false
-
-
-# -- 3. x402 payments — MOVED to .django -----------------------------------
+# -- 2. x402 payments — MOVED to .django -----------------------------------
 #
 # x402 is a cloud-only runtime feature: only validibot-cloud's Django reads it
 # (the MCP server no longer handles payments). So ALL x402 config now lives in

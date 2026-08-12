@@ -14,8 +14,7 @@
 # Usage:
 #   just local-pro up                            # start community + pro
 #   just local-pro up --build                    # rebuild + start
-#   ENABLE_MCP_SERVER=true just local-pro up     # + MCP container
-#   just local-pro down                          # stop (tears down MCP too)
+#   just local-pro down                          # stop
 #   just local-pro rebuild                       # full clean rebuild
 #
 # If you want the cloud layer (billing, tenancy, onboarding), use
@@ -42,11 +41,6 @@ compose_env_args := `bash -lc 'if [ -f ".envs/.local/.build" ]; then printf -- "
 
 # Start community + pro stack (detached).
 #
-# Recipe-level knobs (ENABLE_MCP_SERVER, future flags) come from
-# ``.envs/.local/.build`` — see ``.envs.example/.local/.build`` for the
-# variable reference. Setting a knob inline (``ENABLE_MCP_SERVER=true
-# just local-pro up``) still works and wins over the file.
-#
 # Stops the stack and rebuilds the venv volume when --build is passed so new
 # dependencies from pro (authlib, cryptography) are picked up cleanly — mirrors
 # the behaviour of ``just local-cloud up --build``.
@@ -54,22 +48,7 @@ compose_env_args := `bash -lc 'if [ -f ".envs/.local/.build" ]; then printf -- "
 up *args:
     #!/usr/bin/env bash
     set -euo pipefail
-    # Load shell-level knobs from .envs/.local/.build if present. ``set -a``
-    # exports every variable the file defines, so downstream checks like
-    # ``${ENABLE_MCP_SERVER:-false}`` see them. Absent file → no-op.
-    if [ -f .envs/.local/.build ]; then
-        set -a
-        # shellcheck disable=SC1091
-        source .envs/.local/.build
-        set +a
-    fi
     args="{{args}}"
-    if [[ "${ENABLE_MCP_SERVER:-false}" == "true" || \
-          "${ENABLE_MCP_SERVER:-false}" == "1" || \
-          "${ENABLE_MCP_SERVER:-false}" == "yes" ]]; then
-        export COMPOSE_PROFILES="${COMPOSE_PROFILES:+${COMPOSE_PROFILES},}mcp"
-        echo "ENABLE_MCP_SERVER is set — including the MCP container (profile: mcp)"
-    fi
     if [[ "$args" == *"--build"* ]]; then
         docker compose {{compose_env_args}} \
             -f "{{base_compose}}" \
@@ -83,13 +62,11 @@ up *args:
         up -d $args
 
 
-# Stop the community + pro stack. Tears down every service including any
-# MCP container regardless of how it was started.
+# Stop the community + pro stack.
 [no-cd]
 down:
     #!/usr/bin/env bash
     set -euo pipefail
-    export COMPOSE_PROFILES="${COMPOSE_PROFILES:+${COMPOSE_PROFILES},}mcp"
     docker compose {{compose_env_args}} \
         -f "{{base_compose}}" \
         -f "{{overlay_compose}}" \
@@ -105,19 +82,6 @@ down:
 rebuild *args:
     #!/usr/bin/env bash
     set -euo pipefail
-    # Same .envs/.local/.build sourcing as ``up`` so recipe knobs are
-    # consistent across a build loop.
-    if [ -f .envs/.local/.build ]; then
-        set -a
-        # shellcheck disable=SC1091
-        source .envs/.local/.build
-        set +a
-    fi
-    if [[ "${ENABLE_MCP_SERVER:-false}" == "true" || \
-          "${ENABLE_MCP_SERVER:-false}" == "1" || \
-          "${ENABLE_MCP_SERVER:-false}" == "yes" ]]; then
-        export COMPOSE_PROFILES="${COMPOSE_PROFILES:+${COMPOSE_PROFILES},}mcp"
-    fi
     docker compose {{compose_env_args}} \
         -f "{{base_compose}}" \
         -f "{{overlay_compose}}" \

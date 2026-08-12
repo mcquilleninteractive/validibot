@@ -7,11 +7,11 @@
 # Usage:
 #   just local-cloud up            # Start cloud containers (detached)
 #   just local-cloud up --build    # Rebuild and start
-#   just local-cloud down          # Stop cloud containers (including MCP)
+#   just local-cloud down          # Stop cloud containers
 #
 # Note: `just local down` only stops the community-only stack (docker-compose.local.yml).
-# The cloud stack includes extra services like the MCP server that aren't
-# in the local compose file, so use `just local-cloud down` to stop them.
+# The cloud stack includes cloud billing and tenancy services that aren't in
+# the local compose file, so use `just local-cloud down` to stop them.
 #
 # =============================================================================
 
@@ -38,13 +38,6 @@ _db_url := 'DATABASE_URL="postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POS
 # The --port / -p flag remaps only the host side of the web container's port
 # (the container still serves on 8000). It is consumed by this recipe and not
 # passed through to `docker compose`, which has no --port flag of its own.
-# Port 8001 is rejected — it is reserved for the MCP server.
-#
-# Recipe-level knobs (ENABLE_MCP_SERVER, future flags) come from
-# ``.envs/.local/.build`` — see ``.envs.example/.local/.build`` for
-# the variable reference. Setting a knob inline
-# (``ENABLE_MCP_SERVER=true just local-cloud up``) still works and
-# wins over the file.
 #
 # When --build is passed, the stack is stopped and the venv volume is removed
 # first so that `uv sync` installs dependencies from the updated lockfile.
@@ -54,15 +47,6 @@ _db_url := 'DATABASE_URL="postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POS
 up *args:
     #!/usr/bin/env bash
     set -euo pipefail
-    # Load shell-level knobs from .envs/.local/.build if present.
-    # ``set -a`` exports every variable so the ENABLE_MCP_SERVER check
-    # below sees them. Absent file → no-op, inline env still works.
-    if [ -f .envs/.local/.build ]; then
-        set -a
-        # shellcheck disable=SC1091
-        source .envs/.local/.build
-        set +a
-    fi
     # Pull an optional host-port override (-p / --port / --port=N) out of the
     # args before the rest flow through to `docker compose up`, which has no
     # --port flag of its own. WEB_PORT is read by the web service's ``ports``
@@ -96,25 +80,7 @@ up *args:
             echo "Error: --port expects a port number, e.g. 'just local-cloud up --port 8080'." >&2
             exit 1
         fi
-        # 8001 is the MCP server's host port (docker-compose.cloud.yml). Refuse
-        # it so the web container can't collide with or shadow the MCP server.
-        if [[ "${WEB_PORT}" == "8001" ]]; then
-            echo "Error: port 8001 is reserved for the MCP server. Choose a different --port." >&2
-            exit 1
-        fi
         echo "Mapping web to http://localhost:${WEB_PORT} (container still serves on 8000)."
-    fi
-    # ENABLE_MCP_SERVER=true activates the "mcp" Compose profile so the
-    # standalone FastMCP container is built and started alongside the
-    # rest of the stack. The MCP service definition lives in
-    # docker-compose.cloud.yml and refuses to run without the profile.
-    # Any other value (or unset) leaves it out, matching the fact that
-    # MCP is a Pro feature.
-    if [[ "${ENABLE_MCP_SERVER:-false}" == "true" || \
-          "${ENABLE_MCP_SERVER:-false}" == "1" || \
-          "${ENABLE_MCP_SERVER:-false}" == "yes" ]]; then
-        export COMPOSE_PROFILES="${COMPOSE_PROFILES:+${COMPOSE_PROFILES},}mcp"
-        echo "ENABLE_MCP_SERVER is set — including the MCP container (profile: mcp)"
     fi
     if [[ "$args" == *"--build"* ]]; then
         docker compose -f "{{cloud_compose}}" down
@@ -122,10 +88,10 @@ up *args:
     fi
     docker compose -f "{{cloud_compose}}" up -d $args
 
-# Stop all cloud containers (including MCP server)
+# Stop all cloud containers.
 #
 # Tears down every service defined in docker-compose.cloud.yml — web, worker,
-# postgres, redis, mcp, mailpit, etc. Volumes are preserved so data persists
+# postgres, redis, mailpit, etc. Volumes are preserved so data persists
 # across restarts; use `just local-cloud clean` for a full reset.
 # Run a Django management command in the cloud web container
 # (mirrors `just local manage` — the exec bypasses the entrypoint, so
@@ -140,14 +106,6 @@ manage +command:
 down:
     #!/usr/bin/env bash
     set -euo pipefail
-    # Always enable the "mcp" profile so `down` removes the MCP container too.
-    # The MCP service is profile-gated (profiles: ["mcp"]); a plain
-    # `docker compose down` leaves profiled services as orphans because they're
-    # out of scope unless the profile is active. Without this, an MCP container
-    # started via `ENABLE_MCP_SERVER=true ... up` would be left running after a
-    # `down`. Enabling the profile here only widens teardown scope — it never
-    # starts anything — and mirrors the local-pro `down` recipe.
-    export COMPOSE_PROFILES="${COMPOSE_PROFILES:+${COMPOSE_PROFILES},}mcp"
     docker compose -f "{{cloud_compose}}" down
 
 # Stop the complete cloud stack and delete every local data volume.
@@ -161,7 +119,6 @@ down:
 clean:
     #!/usr/bin/env bash
     set -euo pipefail
-    export COMPOSE_PROFILES="${COMPOSE_PROFILES:+${COMPOSE_PROFILES},}mcp"
     docker compose -f "{{cloud_compose}}" down -v --remove-orphans
 
 # Rebuild and start containers, clearing the venv volume
@@ -178,20 +135,6 @@ clean:
 rebuild *args:
     #!/usr/bin/env bash
     set -euo pipefail
-    # Same .envs/.local/.build sourcing + ENABLE_MCP_SERVER translation
-    # as the ``up`` recipe above — keeps the toggle consistent for
-    # developers who rebuild in a loop.
-    if [ -f .envs/.local/.build ]; then
-        set -a
-        # shellcheck disable=SC1091
-        source .envs/.local/.build
-        set +a
-    fi
-    if [[ "${ENABLE_MCP_SERVER:-false}" == "true" || \
-          "${ENABLE_MCP_SERVER:-false}" == "1" || \
-          "${ENABLE_MCP_SERVER:-false}" == "yes" ]]; then
-        export COMPOSE_PROFILES="${COMPOSE_PROFILES:+${COMPOSE_PROFILES},}mcp"
-    fi
     docker compose -f "{{cloud_compose}}" down
     docker volume rm validibot_validibot_local_venv 2>/dev/null || true
     docker compose -f "{{cloud_compose}}" build {{args}}

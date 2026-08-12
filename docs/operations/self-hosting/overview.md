@@ -33,13 +33,12 @@ your VM
 │   ├── repo/          Validibot checkout and operator backups
 │   └── docker/        Docker data root, including named volumes
 └── A Validibot Compose stack:
-    ├── web        Django web application (Gunicorn)
+    ├── web        Django ASGI application (Gunicorn + UvicornWorker; MCP on Pro)
     ├── worker     Celery worker (background tasks, validators)
     ├── scheduler  Celery Beat (periodic tasks)
     ├── postgres   Database
     ├── redis      Task queue broker
-    ├── caddy      (optional, opt-in) reverse proxy with auto-TLS
-    └── mcp        (Pro feature, opt-in) FastMCP server
+    └── caddy      (optional, opt-in) reverse proxy with auto-TLS
 ```
 
 Validation jobs spawn additional short-lived Docker containers
@@ -178,11 +177,9 @@ If you bring your own proxy, configure it to forward to the `web`
 container on port 8000 and set `DJANGO_SECURE_PROXY_SSL_HEADER` plus
 `DJANGO_CSRF_TRUSTED_ORIGINS` appropriately in your `.django` file.
 
-When MCP is enabled, configure a second HTTPS hostname and keep its public base
-URL identical in `.django` and `.mcp`. Bundled Caddy automatically proxies that
-hostname to `mcp:8080`; an external host proxy should use
-`127.0.0.1:8001`. The Compose stack never publishes MCP plaintext beyond host
-loopback.
+On Pro, MCP is served by the same web container at `<SITE_URL>/mcp`. No second
+hostname, port, container, or proxy rule is required. Ensure the proxy preserves
+the original HTTPS scheme and host for both ordinary Django routes and `/mcp`.
 
 ## Provider quickstarts
 

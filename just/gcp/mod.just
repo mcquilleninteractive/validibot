@@ -200,37 +200,12 @@ validator_backend_git_sha := `git -C ../validibot-validator-backends rev-parse -
 # Submodules
 # =============================================================================
 #
-# Service-specific submodules under ``just gcp``. The umbrella recipes
-# at the top level of this module (``secrets``, ``deploy-all``) delegate
-# to these for the per-service work, so there's one source of truth for
-# each service's GCP operations.
-#
-# Users pick the granularity they need:
-#
-#   just gcp secrets prod           # umbrella — pushes .django AND .mcp
-#   just gcp django secrets prod    # surgical — only .django
-#   just gcp mcp secrets prod       # surgical — only .mcp
-#
-# The same triangle exists for other MCP operations (build, deploy,
-# logs, status, ...) via the ``gcp mcp`` submodule; there's no
-# corresponding Django submodule yet because Django has no additional
-# per-service recipes distinct from the main ``gcp`` commands.
+# Service-specific submodules under ``just gcp``. MCP is part of the Django
+# image and service, so it intentionally has no separate deployment module.
 
 # Django-specific operations on GCP (currently just the surgical
 # ``secrets`` recipe).
 mod django 'django'
-
-# MCP server operations on GCP — re-exposes the existing ``just/mcp``
-# module at ``just gcp mcp`` so operators can use either grammar:
-#
-#   just mcp deploy prod         # historical path (still works)
-#   just gcp mcp deploy prod     # new grammar, matches django + secrets pattern
-#
-# Both invocations hit the same module; there is no code duplication.
-# The test recipes (``just mcp test``, ``just mcp test-e2e``) also
-# surface at ``just gcp mcp test`` but are genuinely local commands —
-# the more natural home remains ``just mcp ...`` for those.
-mod mcp '../mcp'
 
 # =============================================================================
 # Service Account Configuration
@@ -558,37 +533,17 @@ deploy stage: _require-gcp-config (_confirm-deploy stage) (_mode-require-live st
 [arg('stage', pattern='dev|staging|prod')]
 deploy-worker stage: _require-gcp-config (_confirm-deploy stage) (_mode-require-live stage) build push (_maybe-migrate stage) (_deploy-worker stage)
 
-# Deploy every service to a stage (single build+push for Django, plus
-# an MCP build+deploy when ENABLE_MCP_SERVER is set).
+# Deploy every service to a stage from the single Django image.
 #
 # Composition:
 #   1. build + push Django image
 #   2. migrate (unless GCP_SKIP_MIGRATE=1)
 #   3. deploy web + worker Cloud Run services
 #   4. sync Cloud Scheduler jobs
-#   5. build + deploy MCP — no-op when ENABLE_MCP_SERVER is unset
-#
-# Step 5 is gated by the ``just mcp`` recipes' built-in
-# ``_mcp_enabled_gate``: when ENABLE_MCP_SERVER is unset, each MCP
-# recipe prints a "skipped" message and exits 0. Community-only
-# operators get the same deploy-all UX as cloud operators — just
-# without the MCP step running.
-#
-# ENABLE_MCP_SERVER can be set three ways (in precedence order):
-#   1. Inline on the command line
-#   2. Your shell environment
-#   3. The STAGE-SPECIFIC ``.envs/<stage>/.google-cloud/.build`` file
-#      (prod reads .envs/.production/...; dev reads .envs/.dev/...).
-#      See ``.envs.example/.production/.google-cloud/.build`` for the
-#      template. This is the "set and forget" path — each stage has
-#      its own knob file so a dev deploy cannot accidentally inherit
-#      prod's settings.
 #
 # Usage: just gcp deploy-all dev | just gcp deploy-all prod
-# Usage (with MCP, ad-hoc): ENABLE_MCP_SERVER=true just gcp deploy-all prod
-# Usage (with MCP, persisted via .build file): just gcp deploy-all prod
 [arg('stage', pattern='dev|staging|prod')]
-deploy-all stage: _require-gcp-config (_confirm-deploy stage) (_mode-require-live stage) build push (_maybe-migrate stage) (_deploy-web stage) (_deploy-worker stage) (scheduler-setup stage) (_maybe-deploy-mcp stage)
+deploy-all stage: _require-gcp-config (_confirm-deploy stage) (_mode-require-live stage) build push (_maybe-migrate stage) (_deploy-web stage) (_deploy-worker stage) (scheduler-setup stage)
     @echo ""
     @echo "All services deployed to {{stage}}"
     @echo ""
@@ -596,9 +551,6 @@ deploy-all stage: _require-gcp-config (_confirm-deploy stage) (_mode-require-liv
     @echo "environment variables in .envs/, run:"
     @echo "  just gcp secrets {{stage}}"
     @echo "  just gcp deploy-all {{stage}}"
-    @echo ""
-    @echo "``just gcp secrets`` uploads .django always; it also uploads"
-    @echo ".mcp when ENABLE_MCP_SERVER is set (in .build or inline)."
 
 # Roll the web service back to a previously-deployed revision by shifting
 # 100% of traffic to it — the recovery path for a bad deploy. With no
@@ -950,42 +902,6 @@ _run-upgrade stage version flags:
     : > "${COMPLETED_MARKER}"
     exit 0
 
-# Internal: build and deploy the MCP server when the deploy is MCP-aware.
-#
-# Delegates straight to the ``just gcp mcp`` submodule recipes so there
-# is one source of truth for how MCP gets built and deployed. Those
-# recipes have their own ENABLE_MCP_SERVER gate — when the flag is
-# unset they print a short "skipped" message and exit 0, so calling
-# them unconditionally from deploy-all is safe on community-only
-# stacks.
-#
-# The flag comes from (in precedence order):
-#   1. Inline on the command line
-#   2. The user's shell environment
-#   3. ``.envs/<stage>/.google-cloud/.build`` if present — the file is
-#      STAGE-SPECIFIC so ``just gcp deploy-all dev`` does not read the
-#      prod build file. ``set -a`` exports the values so the child
-#      ``just`` processes inherit them.
-[private]
-_maybe-deploy-mcp stage:
-    #!/usr/bin/env bash
-    set -euo pipefail
-
-    if [ "{{stage}}" = "prod" ]; then
-        BUILD_FILE=".envs/.production/.google-cloud/.build"
-    else
-        BUILD_FILE=".envs/.{{stage}}/.google-cloud/.build"
-    fi
-    if [ -f "$BUILD_FILE" ]; then
-        set -a
-        # shellcheck disable=SC1091
-        source "$BUILD_FILE"
-        set +a
-    fi
-
-    just gcp mcp build-push
-    just gcp mcp deploy "{{stage}}"
-
 # Internal: conditionally run migrations before deploy.
 # Skipped when GCP_SKIP_MIGRATE=1 (for hotfixes with no schema changes).
 [private]
@@ -1093,12 +1009,9 @@ _deploy-web stage:
     # Shared public values stamped onto the web revision. x402 is NOT here
     # anymore: it is cloud-only config and lives entirely in the .django secret
     # (loaded by the entrypoint's `set -a; source /secrets/.env`), so it must
-    # not be stamped via --set-env-vars. VALIDIBOT_MCP_BASE_URL is stamped so
-    # Django derives its OAuth audience and redirect URI from the same MCP
-    # public URL the MCP service uses.
+    # not be stamped via --set-env-vars. The embedded MCP audience is derived
+    # from SITE_URL inside Django settings.
     SET_ENV_VARS="APP_ROLE=web,GCP_APP_NAME={{app_name}},VALIDIBOT_STAGE={{stage}},VALIDIBOT_VERSION=${VALIDIBOT_VERSION:-{{validibot_version}}}"
-    if [ -n "${VALIDIBOT_MCP_API_BASE_URL:-}" ]; then SET_ENV_VARS="${SET_ENV_VARS},MCP_OIDC_AUDIENCE=${VALIDIBOT_MCP_API_BASE_URL}"; fi
-    if [ -n "${VALIDIBOT_MCP_BASE_URL:-}" ]; then SET_ENV_VARS="${SET_ENV_VARS},VALIDIBOT_MCP_BASE_URL=${VALIDIBOT_MCP_BASE_URL}"; fi
 
     echo "Deploying $SERVICE to Cloud Run ({{stage}}, ingress: $INGRESS)..."
     # Scaling flags: --min/--max are Cloud Run SERVICE-level scaling limits,
@@ -1124,6 +1037,7 @@ _deploy-web stage:
         --max "$MAX_INSTANCES" \
         --min-instances default \
         --max-instances default \
+        --concurrency 8 \
         --memory 1Gi \
         --timeout {{gcp_cloud_run_request_timeout}} \
         --execution-environment gen2 \
@@ -1216,25 +1130,10 @@ _deploy-worker stage:
 # Secrets Management
 # =============================================================================
 
-# Umbrella secrets command — pushes every env file that might need
-# pushing before a deploy.
+# Umbrella secrets command — pushes the Django environment used by the web,
+# worker, jobs, and embedded MCP endpoint.
 #
-# Delegates to two submodule recipes:
-#   - ``just gcp django secrets <stage>``  — always runs
-#   - ``just gcp mcp secrets <stage>``     — runs but short-circuits
-#     via its ``_mcp_enabled_gate`` when ENABLE_MCP_SERVER is unset
-#
-# The stage-specific ``.envs/<stage>/.google-cloud/.build`` file
-# provides the default for ENABLE_MCP_SERVER so operators don't have
-# to prefix the flag on every invocation. See
-# ``.envs.example/.production/.google-cloud/.build`` for the template.
-#
-# For surgical pushes (rotating only one service's secrets), use:
-#   - ``just gcp django secrets <stage>``  — only .django
-#   - ``just gcp mcp secrets <stage>``     — only .mcp
-#
-# Avoiding the umbrella when you only changed one file keeps the audit history
-# meaningful. Each surgical uploader also bounds only its own version history:
+# The uploader bounds its version history:
 # newest two non-destroyed versions plus every live Cloud Run pin.
 #
 # Usage:
@@ -1250,24 +1149,7 @@ secrets stage: _require-gcp-config
     #!/usr/bin/env bash
     set -euo pipefail
 
-    # Source the STAGE-SPECIFIC .build knob file so ``just gcp mcp
-    # secrets`` sees the current value of ENABLE_MCP_SERVER for THIS
-    # stage. ``set -a`` exports every sourced variable so the child
-    # ``just`` processes inherit it.
-    if [ "{{stage}}" = "prod" ]; then
-        BUILD_FILE=".envs/.production/.google-cloud/.build"
-    else
-        BUILD_FILE=".envs/.{{stage}}/.google-cloud/.build"
-    fi
-    if [ -f "$BUILD_FILE" ]; then
-        set -a
-        # shellcheck disable=SC1091
-        source "$BUILD_FILE"
-        set +a
-    fi
-
     just gcp django secrets "{{stage}}"
-    just gcp mcp secrets "{{stage}}"
 
 # =============================================================================
 # Operations
@@ -2073,9 +1955,9 @@ _run-backup stage image:
     # config component.  ``gcloud secrets versions list --filter=
     # state=ENABLED --limit=1`` returns the most recent enabled
     # version; we record that so a future restore knows which
-    # version was active at backup time.  Missing secrets (e.g.
-    # mcp-env in a deployment without MCP) are silently skipped —
-    # we record what's there, not what should be there.
+    # version was active at backup time. Retired MCP secrets remain in the
+    # inventory only to preserve rollback evidence during acceptance; missing
+    # legacy secrets are skipped. We record what's there, not what should be.
     SECRET_VERSION_ARGS=()
     for SECRET_NAME in "${SECRET}" "mcp-env" "mcp-env-{{stage}}"; do
         # Only the prod-named MCP secret applies to prod, etc.
@@ -6330,14 +6212,12 @@ _maintenance-assert-offline stage:
     if [ "{{stage}}" = "prod" ]; then
         WEB_SERVICE="${APP_NAME}-web"
         WORKER_SERVICE="${APP_NAME}-worker"
-        MCP_SERVICE="${APP_NAME}-mcp"
         QUEUE_NAME="${APP_NAME}-tasks"
         PROVIDER_QUEUE_NAME="${APP_NAME}-validator-provider"
         JOB_SUFFIX=""
     else
         WEB_SERVICE="${APP_NAME}-web-{{stage}}"
         WORKER_SERVICE="${APP_NAME}-worker-{{stage}}"
-        MCP_SERVICE="${APP_NAME}-mcp-{{stage}}"
         QUEUE_NAME="${APP_NAME}-validation-queue-{{stage}}"
         PROVIDER_QUEUE_NAME="${APP_NAME}-validator-provider-{{stage}}"
         JOB_SUFFIX="-{{stage}}"
@@ -6349,9 +6229,8 @@ _maintenance-assert-offline stage:
     }
     check_isolated_service() {
         local service="$1"
-        local expect_mcp_disabled="${2:-0}"
-        local required="${3:-0}"
-        local service_json ingress service_min revision_min mcp_enabled
+        local required="${2:-0}"
+        local service_json ingress service_min revision_min
         if ! service_json=$(gcloud run services describe "$service" \
             --region {{gcp_region}} --project {{gcp_project}} --format=json 2>/dev/null); then
             if [ "$required" = "1" ]; then
@@ -6362,18 +6241,12 @@ _maintenance-assert-offline stage:
         ingress=$(jq -r '.metadata.annotations["run.googleapis.com/ingress"] // "unknown"' <<< "$service_json")
         service_min=$(jq -r '.spec.scaling.minInstanceCount // .metadata.annotations["run.googleapis.com/minScale"] // "0"' <<< "$service_json")
         revision_min=$(jq -r '.spec.template.metadata.annotations["autoscaling.knative.dev/minScale"] // "0"' <<< "$service_json")
-        mcp_enabled=$(jq -r '[.spec.template.spec.containers[0].env[]? | select(.name == "VALIDIBOT_MCP_ENABLED") | .value][0] // "true"' <<< "$service_json")
-        if [ "$ingress" != "internal" ] || [ "$service_min" != "0" ] || [ "$revision_min" != "0" ] || { [ "$expect_mcp_disabled" = "1" ] && [ "$mcp_enabled" != "false" ]; }; then
-            if [ "$expect_mcp_disabled" = "1" ]; then
-                record_isolation_error "$service is not isolated (ingress=$ingress service-min=$service_min revision-min=$revision_min VALIDIBOT_MCP_ENABLED=$mcp_enabled)."
-            else
-                record_isolation_error "$service is not isolated (ingress=$ingress service-min=$service_min revision-min=$revision_min)."
-            fi
+        if [ "$ingress" != "internal" ] || [ "$service_min" != "0" ] || [ "$revision_min" != "0" ]; then
+            record_isolation_error "$service is not isolated (ingress=$ingress service-min=$service_min revision-min=$revision_min)."
         fi
     }
-    check_isolated_service "$WEB_SERVICE" 0 1
-    check_isolated_service "$WORKER_SERVICE" 0 1
-    check_isolated_service "$MCP_SERVICE" 1
+    check_isolated_service "$WEB_SERVICE" 1
+    check_isolated_service "$WORKER_SERVICE" 1
     if SERVICES=$(gcloud run services list \
         --region {{gcp_region}} --project {{gcp_project}} \
         --filter="metadata.labels.stage:{{stage}} AND metadata.labels.validator:*" \
@@ -6420,14 +6293,12 @@ _enforce-maintenance stage:
     if [ "{{stage}}" = "prod" ]; then
         WEB_SERVICE="${APP_NAME}-web"
         WORKER_SERVICE="${APP_NAME}-worker"
-        MCP_SERVICE="${APP_NAME}-mcp"
         QUEUE_NAME="${APP_NAME}-tasks"
         PROVIDER_QUEUE_NAME="${APP_NAME}-validator-provider"
         JOB_SUFFIX=""
     else
         WEB_SERVICE="${APP_NAME}-web-{{stage}}"
         WORKER_SERVICE="${APP_NAME}-worker-{{stage}}"
-        MCP_SERVICE="${APP_NAME}-mcp-{{stage}}"
         QUEUE_NAME="${APP_NAME}-validation-queue-{{stage}}"
         PROVIDER_QUEUE_NAME="${APP_NAME}-validator-provider-{{stage}}"
         JOB_SUFFIX="-{{stage}}"
@@ -6441,9 +6312,8 @@ _enforce-maintenance stage:
     }
     ensure_offline_service() {
         local service="$1"
-        local disable_mcp="${2:-0}"
-        local required="${3:-0}"
-        local service_json ingress service_min revision_min mcp_enabled
+        local required="${2:-0}"
+        local service_json ingress service_min revision_min
         if ! service_json=$(gcloud run services describe "$service" \
             --region {{gcp_region}} --project {{gcp_project}} --format=json 2>/dev/null); then
             if [ "$required" = "1" ]; then
@@ -6456,8 +6326,7 @@ _enforce-maintenance stage:
         ingress=$(jq -r '.metadata.annotations["run.googleapis.com/ingress"] // "unknown"' <<< "$service_json")
         service_min=$(jq -r '.spec.scaling.minInstanceCount // .metadata.annotations["run.googleapis.com/minScale"] // "0"' <<< "$service_json")
         revision_min=$(jq -r '.spec.template.metadata.annotations["autoscaling.knative.dev/minScale"] // "0"' <<< "$service_json")
-        mcp_enabled=$(jq -r '[.spec.template.spec.containers[0].env[]? | select(.name == "VALIDIBOT_MCP_ENABLED") | .value][0] // "true"' <<< "$service_json")
-        if [ "$ingress" = "internal" ] && [ "$service_min" = "0" ] && [ "$revision_min" = "0" ] && { [ "$disable_mcp" != "1" ] || [ "$mcp_enabled" = "false" ]; }; then
+        if [ "$ingress" = "internal" ] && [ "$service_min" = "0" ] && [ "$revision_min" = "0" ]; then
             echo "   Service $service is already internal with zero minimum capacity."
             return
         fi
@@ -6466,9 +6335,6 @@ _enforce-maintenance stage:
             --region {{gcp_region}} --project {{gcp_project}}
             --ingress internal --min=0 --min-instances=default --quiet
         )
-        if [ "$disable_mcp" = "1" ]; then
-            update_args+=(--update-env-vars VALIDIBOT_MCP_ENABLED=false)
-        fi
         if ! "${update_args[@]}"; then
             record_maintenance_error "could not make Cloud Run service $service maintenance-safe."
         fi
@@ -6504,9 +6370,8 @@ _enforce-maintenance stage:
     # Inspect first so already-safe services are left alone, and aggregate any
     # update failures so every remaining runtime and work safeguard is still
     # attempted before this recipe returns an error.
-    ensure_offline_service "$WEB_SERVICE" 0 1
-    ensure_offline_service "$WORKER_SERVICE" 0 1
-    ensure_offline_service "$MCP_SERVICE" 1
+    ensure_offline_service "$WEB_SERVICE" 1
+    ensure_offline_service "$WORKER_SERVICE" 1
     if SERVICES=$(gcloud run services list \
         --region {{gcp_region}} --project {{gcp_project}} \
         --filter="metadata.labels.stage:{{stage}} AND metadata.labels.validator:*" \
@@ -6761,7 +6626,6 @@ deploy-maintenance stage: _require-gcp-config
     GCP_DEPLOY_MAINTENANCE=1 just gcp _deploy-web {{stage}}
     GCP_DEPLOY_MAINTENANCE=1 just gcp _deploy-worker {{stage}}
     GCP_DEPLOY_MAINTENANCE=1 just gcp scheduler-setup {{stage}}
-    GCP_DEPLOY_MAINTENANCE=1 just gcp _maybe-deploy-mcp {{stage}}
     just gcp _enforce-maintenance {{stage}}
     MODE=$(just gcp _mode-current {{stage}})
     if [ "$MODE" != "MAINTENANCE" ]; then
@@ -6839,33 +6703,20 @@ mode-live stage: _require-gcp-config
     if [ "{{stage}}" = "prod" ]; then
         WEB_SERVICE="${APP_NAME}-web"
         WORKER_SERVICE="${APP_NAME}-worker"
-        MCP_SERVICE="${APP_NAME}-mcp"
         QUEUE_NAME="${APP_NAME}-tasks"
         PROVIDER_QUEUE_NAME="${APP_NAME}-validator-provider"
         JOB_SUFFIX=""
         WEB_MIN=1
         WEB_NEG="${APP_NAME}-neg"
-        MCP_NEG="${APP_NAME}-mcp-neg"
-        BUILD_FILE=".envs/.production/.google-cloud/.build"
     else
         WEB_SERVICE="${APP_NAME}-web-{{stage}}"
         WORKER_SERVICE="${APP_NAME}-worker-{{stage}}"
-        MCP_SERVICE="${APP_NAME}-mcp-{{stage}}"
         QUEUE_NAME="${APP_NAME}-validation-queue-{{stage}}"
         PROVIDER_QUEUE_NAME="${APP_NAME}-validator-provider-{{stage}}"
         JOB_SUFFIX="-{{stage}}"
         WEB_MIN=0
         WEB_NEG="${APP_NAME}-neg-{{stage}}"
-        MCP_NEG="${APP_NAME}-mcp-neg-{{stage}}"
-        BUILD_FILE=".envs/.{{stage}}/.google-cloud/.build"
     fi
-    if [ -f "$BUILD_FILE" ]; then
-        set -a
-        # shellcheck disable=SC1090
-        source "$BUILD_FILE"
-        set +a
-    fi
-    MCP_ENABLED="${VALIDIBOT_MCP_ENABLED:-true}"
 
     just gcp _maintenance-start-database {{stage}}
     # Before queues or schedulers can resume, prove the latest offered
@@ -6883,7 +6734,6 @@ mode-live stage: _require-gcp-config
         echo "Provider retention policy is drain-and-retain; retaining superseded pairs for rollback and drain."
     fi
     if gcloud compute network-endpoint-groups describe "$WEB_NEG" --region={{gcp_region}} --project={{gcp_project}} &>/dev/null; then WEB_INGRESS="internal-and-cloud-load-balancing"; else WEB_INGRESS="all"; fi
-    if gcloud compute network-endpoint-groups describe "$MCP_NEG" --region={{gcp_region}} --project={{gcp_project}} &>/dev/null; then MCP_INGRESS="internal-and-cloud-load-balancing"; else MCP_INGRESS="all"; fi
 
     # Maintenance already left worker capacity and every scheduler definition
     # in their desired immutable shape. Reopening a stage changes only paused
@@ -6929,37 +6779,6 @@ mode-live stage: _require-gcp-config
     gcloud run services update "$WEB_SERVICE" \
         --region {{gcp_region}} --project {{gcp_project}} \
         --ingress "$WEB_INGRESS" --min="$WEB_MIN" --quiet
-    if gcloud run services describe "$MCP_SERVICE" --region {{gcp_region}} --project {{gcp_project}} &>/dev/null; then
-        # The MCP revision performs this same license request once during
-        # startup. Wait for the newly opened Django route first so a brief
-        # load-balancer propagation delay cannot make that revision fail.
-        if [[ "$MCP_ENABLED" =~ ^(true|True|TRUE|1|yes|Yes|YES)$ ]]; then
-            if [ -z "${VALIDIBOT_MCP_API_BASE_URL:-}" ]; then
-                echo "Error: VALIDIBOT_MCP_API_BASE_URL is required to enable MCP." >&2
-                exit 1
-            fi
-            MCP_LICENSE_URL="${VALIDIBOT_MCP_API_BASE_URL%/}/api/v1/license/features/"
-            MCP_LICENSE_READY=0
-            echo "Waiting for the MCP license check endpoint..."
-            for attempt in {1..12}; do
-                if curl --fail --silent --show-error --location \
-                    --connect-timeout 5 --max-time 10 "$MCP_LICENSE_URL" 2>/dev/null \
-                    | jq -e '.features | index("mcp_server") != null' >/dev/null; then
-                    MCP_LICENSE_READY=1
-                    break
-                fi
-                if [ "$attempt" -lt 12 ]; then sleep 5; fi
-            done
-            if [ "$MCP_LICENSE_READY" != "1" ]; then
-                echo "Error: the MCP license endpoint did not become ready." >&2
-                exit 1
-            fi
-        fi
-        gcloud run services update "$MCP_SERVICE" \
-            --region {{gcp_region}} --project {{gcp_project}} \
-            --ingress "$MCP_INGRESS" --min=0 \
-            --update-env-vars "VALIDIBOT_MCP_ENABLED=$MCP_ENABLED" --quiet
-    fi
     MODE=$(just gcp _mode-current {{stage}})
     if [ "$MODE" != "LIVE" ]; then
         echo "Error: {{stage}} did not converge to LIVE (current mode: $MODE)." >&2
@@ -6978,7 +6797,6 @@ mode-status stage: _require-gcp-config
     if [ "{{stage}}" = "prod" ]; then
         WEB_SERVICE="${APP_NAME}-web"
         WORKER_SERVICE="${APP_NAME}-worker"
-        MCP_SERVICE="${APP_NAME}-mcp"
         DB_INSTANCE="${APP_NAME}-db"
         QUEUE_NAME="${APP_NAME}-tasks"
         PROVIDER_QUEUE_NAME="${APP_NAME}-validator-provider"
@@ -6986,7 +6804,6 @@ mode-status stage: _require-gcp-config
     else
         WEB_SERVICE="${APP_NAME}-web-{{stage}}"
         WORKER_SERVICE="${APP_NAME}-worker-{{stage}}"
-        MCP_SERVICE="${APP_NAME}-mcp-{{stage}}"
         DB_INSTANCE="${APP_NAME}-db-{{stage}}"
         QUEUE_NAME="${APP_NAME}-validation-queue-{{stage}}"
         PROVIDER_QUEUE_NAME="${APP_NAME}-validator-provider-{{stage}}"
@@ -7012,9 +6829,8 @@ mode-status stage: _require-gcp-config
     echo "Stage status for {{stage}}"
     check_service() {
         local service="$1"
-        local expect_mcp_disabled="${2:-0}"
-        local required="${3:-0}"
-        local service_json ingress service_min revision_min mcp_enabled
+        local required="${2:-0}"
+        local service_json ingress service_min revision_min
         if ! service_json=$(gcloud run services describe "$service" \
             --region {{gcp_region}} --project {{gcp_project}} --format=json 2>/dev/null); then
             if [ "$required" = "1" ]; then
@@ -7030,29 +6846,23 @@ mode-status stage: _require-gcp-config
         ingress=$(jq -r '.metadata.annotations["run.googleapis.com/ingress"] // "unknown"' <<< "$service_json")
         service_min=$(jq -r '.spec.scaling.minInstanceCount // .metadata.annotations["run.googleapis.com/minScale"] // "0"' <<< "$service_json")
         revision_min=$(jq -r '.spec.template.metadata.annotations["autoscaling.knative.dev/minScale"] // "0"' <<< "$service_json")
-        mcp_enabled=$(jq -r '[.spec.template.spec.containers[0].env[]? | select(.name == "VALIDIBOT_MCP_ENABLED") | .value][0] // "true"' <<< "$service_json")
         if [ "$service" = "$WEB_SERVICE" ]; then
             WEB_INGRESS="$ingress"
             WEB_SERVICE_MIN="$service_min"
             WEB_REVISION_MIN="$revision_min"
         fi
-        if [ "$expect_mcp_disabled" = "1" ]; then
-            echo "  Runtime:       $service ingress=$ingress service-min=$service_min revision-min=$revision_min enabled=$mcp_enabled"
-        else
-            echo "  Runtime:       $service ingress=$ingress service-min=$service_min revision-min=$revision_min"
-        fi
-        if [ "$ingress" != "internal" ] || [ "$service_min" != "0" ] || [ "$revision_min" != "0" ] || { [ "$expect_mcp_disabled" = "1" ] && [ "$mcp_enabled" != "false" ]; }; then
+        echo "  Runtime:       $service ingress=$ingress service-min=$service_min revision-min=$revision_min"
+        if [ "$ingress" != "internal" ] || [ "$service_min" != "0" ] || [ "$revision_min" != "0" ]; then
             RUNTIME_ISOLATION_ISSUES=$((RUNTIME_ISOLATION_ISSUES + 1))
         fi
-        if [ "$service" = "$WEB_SERVICE" ] || [ "$service" = "$MCP_SERVICE" ]; then
+        if [ "$service" = "$WEB_SERVICE" ]; then
             if [ "$ingress" != "all" ] && [ "$ingress" != "internal-and-cloud-load-balancing" ]; then
                 LIVE_RUNTIME_ISSUES=$((LIVE_RUNTIME_ISSUES + 1))
             fi
         fi
     }
-    check_service "$WEB_SERVICE" 0 1
-    check_service "$WORKER_SERVICE" 0 1
-    check_service "$MCP_SERVICE" 1
+    check_service "$WEB_SERVICE" 1
+    check_service "$WORKER_SERVICE" 1
     if SERVICES=$(gcloud run services list \
         --region {{gcp_region}} --project {{gcp_project}} \
         --filter="metadata.labels.stage:{{stage}} AND metadata.labels.validator:*" \
@@ -7853,13 +7663,13 @@ security-audit stage: _require-gcp-config
     fi
     echo ""
 
-    # 6. MCP may read its own stage secret, never every project secret.
-    echo "6. Checking MCP Secret Manager scope..."
+    # 6. Audit a retired standalone-MCP identity while it remains for rollback.
+    echo "6. Checking retired MCP resource scope..."
     if [ "$MCP_PRESENT" -eq 0 ]; then
-        echo "   SKIP: MCP service account not provisioned"
+        echo "   SKIP: retired MCP service account is absent"
     elif ! gcloud secrets describe "$MCP_SECRET" \
         --project={{gcp_project}} &>/dev/null; then
-        echo "   WARN: MCP service account exists but $MCP_SECRET does not"
+        echo "   WARN: retired MCP service account exists but $MCP_SECRET does not"
         ((WARN+=1))
     else
         PROJECT_POLICY=$(gcloud projects get-iam-policy {{gcp_project}} --format=json)
@@ -7881,10 +7691,10 @@ security-audit stage: _require-gcp-config
             | length
         ' <<< "$SECRET_POLICY")
         if [ "$PROJECT_SECRET_ACCESS" -eq 0 ] && [ "$EXACT_SECRET_ACCESS" -eq 1 ]; then
-            echo "   PASS: MCP can read only $MCP_SECRET"
+            echo "   PASS: retired MCP identity can read only $MCP_SECRET"
             ((PASS+=1))
         else
-            echo "   WARN: MCP secret scope is unexpected (project=$PROJECT_SECRET_ACCESS exact=$EXACT_SECRET_ACCESS)"
+            echo "   WARN: retired MCP secret scope is unexpected (project=$PROJECT_SECRET_ACCESS exact=$EXACT_SECRET_ACCESS)"
             ((WARN+=1))
         fi
     fi

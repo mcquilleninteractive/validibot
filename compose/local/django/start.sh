@@ -28,4 +28,9 @@ python manage.py sync_help
 echo "Ensuring local EnergyPlus weather resources..."
 python manage.py seed_weather_files
 
-python manage.py runserver 0.0.0.0:8000
+# Exercise the same composed ASGI application used in production.
+exec uvicorn config.asgi:application \
+  --host 0.0.0.0 \
+  --port 8000 \
+  --reload \
+  --reload-include '*.html'

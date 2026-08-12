@@ -4,9 +4,10 @@
      aria-labelledby="repository-overview-title repository-overview-description">
   <title id="repository-overview-title">Validibot repository architecture overview</title>
   <desc id="repository-overview-description">
-    The Validibot command-line interface and FastMCP server call the community
-    Django application over REST. Django uses validibot-shared and dispatches
-    advanced validation runs to the validator backend containers. Commercial
+    The Validibot command-line interface calls the community Django application
+    over REST. The official MCP SDK is embedded in Django ASGI and calls
+    application services directly. Django uses validibot-shared and dispatches
+    advanced validation runs to validator backend containers. Commercial
     packages unlock gated features in the Django application.
   </desc>
   <defs>
@@ -47,9 +48,9 @@
   <text class="detail" x="605" y="277">REST API</text>
 
   <rect class="node" x="805" y="180" width="150" height="125" rx="14"/>
-  <text class="label" x="880" y="222">FastMCP</text>
-  <text class="detail" x="880" y="252">AI-agent</text>
-  <text class="detail" x="880" y="277">server</text>
+  <text class="label" x="880" y="222">Embedded MCP</text>
+  <text class="detail" x="880" y="252">official SDK</text>
+  <text class="detail" x="880" y="277">ASGI route</text>
 
   <rect class="node" x="55" y="170" width="245" height="105" rx="14"/>
   <text class="label" x="177.5" y="212">validibot-cli</text>
@@ -72,7 +73,7 @@
   <text class="edge-label" x="372" y="210">REST</text>
 
   <path class="edge" d="M 805 242.5 H 765"/>
-  <text class="edge-label" x="785" y="228">REST</text>
+  <text class="edge-label" x="785" y="228">direct</text>
 
   <path class="edge" d="M 765 205 C 935 100, 1020 150, 1100 172"/>
   <text class="edge-label" x="938" y="112">dispatches advanced runs</text>

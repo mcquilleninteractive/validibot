@@ -259,32 +259,16 @@ CREDENTIAL_ISSUER_URL=
 # algorithm.
 SIGNING_ALGORITHM=ES256
 
-# MCP helper API service-to-service auth. Required if the MCP server is enabled
-# (ENABLE_MCP_SERVER=true in .build). Generate one paired secret and place it
-# here and in .envs/.production/.self-hosted/.mcp:
-#
-#   python -c "import secrets; print(secrets.token_urlsafe(32))"
-#
-# Without this, every MCP tool call 401s at the Django helper API.
-VALIDIBOT_MCP_SERVICE_KEY=replace-with-a-long-random-string
-
-# MCP OAuth (required for Claude Desktop support). Leave commented to
-# disable the OAuth path — the legacy API-token flow still works.
-#
-# IDP_OIDC_MCP_SERVER_CLIENT_SECRET — confidential client secret.
-#IDP_OIDC_MCP_SERVER_CLIENT_SECRET=
-#
+# Embedded MCP OAuth. The Pro-gated endpoint is {SITE_URL}/mcp and needs no
+# extra container, hostname, or service-to-service secret.
 # IDP_OIDC_PRIVATE_KEY_B64 — base64-encoded PEM. Generate with:
 #   openssl genrsa -out oidc-key.pem 2048 \
 #     && base64 < oidc-key.pem | tr -d '\n'
 #IDP_OIDC_PRIVATE_KEY_B64=
 #
-# VALIDIBOT_MCP_BASE_URL — public HTTPS URL of the MCP server. Bundled Caddy
-# reads this value to terminate TLS for the MCP hostname. The OIDC
-# audience and confidential redirect URI default to {BASE}/mcp and
-# {BASE}/auth/callback respectively, so setting this one var lines up
-# both Django and the MCP container.
-#VALIDIBOT_MCP_BASE_URL=https://mcp.your-domain.example
+# Paste the exact callback URI shown by the ChatGPT plugin builder, then run
+# `just self-hosted bootstrap` (or `python manage.py ensure_oidc_clients`).
+#IDP_OIDC_CHATGPT_REDIRECT_URIS=https://chatgpt.com/replace-with-builder-callback
 
 
 # -- 8. OPTIONAL TELEMETRY (off by default) --------------------------------

@@ -7,6 +7,7 @@ service surface area small; APIs live on the worker service (APP_ROLE=worker)
 behind IAM.
 """
 
+from allauth.idp.oidc.views import configuration as oidc_server_metadata
 from django.conf import settings
 from django.conf.urls.static import static
 from django.contrib import admin
@@ -16,8 +17,6 @@ from django.urls import path
 from validibot.core import views as core_views
 from validibot.core.health import deep_health_check
 from validibot.core.health import health_check
-from validibot.idp.views import oauth_authorization_server_metadata
-from validibot.idp.views import openid_configuration_metadata
 from validibot.members import views as members_views
 from validibot.workflows import views as workflow_views
 
@@ -27,24 +26,18 @@ urlpatterns = [
     # Health check endpoint for container orchestration (Docker, Kubernetes)
     path("health/", health_check, name="health-check"),
     path("health/deep/", deep_health_check, name="deep-health-check"),
-    # OIDC discovery metadata — canonical SITE_URL-rooted payloads so MCP
-    # clients (Claude Desktop, custom agents) see a stable issuer host
-    # behind proxies. Views live in validibot.idp.
-    path(
-        ".well-known/openid-configuration",
-        openid_configuration_metadata,
-        name="openid-configuration-metadata",
-    ),
+    # RFC 8414 discovery alias. The allauth include below owns the OpenID
+    # discovery route; both paths deliberately use allauth's same view.
     path(
         ".well-known/oauth-authorization-server",
-        oauth_authorization_server_metadata,
+        oidc_server_metadata,
         name="oauth-authorization-server-metadata",
     ),
     # django-allauth's OIDC authorization-server endpoints (authorize, token,
     # jwks, userinfo, revocation). Mounted at "" because allauth's own URL
     # patterns already include an "identity/" prefix; adding another layer
-    # would double it. The namespace "idp" matches what the discovery views
-    # above ``reverse()`` against.
+    # would double it. Validibot's adapter customizes its metadata through
+    # allauth's supported ``populate_server_metadata`` hook.
     path("", include("allauth.idp.urls", namespace="idp")),
     path("", include("validibot.home.urls", namespace="home")),
     path(

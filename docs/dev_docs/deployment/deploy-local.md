@@ -46,9 +46,7 @@ mkdir -p .envs/.local
 cp .envs.example/.local/.django .envs/.local/.django
 cp .envs.example/.local/.postgres .envs/.local/.postgres
 
-# Also copy the build/recipe config. It holds both build-time knobs
-# (commercial-package installation) and recipe-level knobs
-# (ENABLE_MCP_SERVER for the Pro stacks). Safe to copy even for
+# Also copy the optional commercial-package build config. Safe to copy for
 # community-only use — every variable has a sensible default.
 cp .envs.example/.local/.build .envs/.local/.build
 
@@ -126,58 +124,22 @@ community (`local`) and Pro (`local_pro`).
 
 ## Include the MCP server
 
-The standalone FastMCP container exposes validation workflows to AI
-agents (Claude, Cursor, etc.) over the Model Context Protocol. The
-code itself lives in this repo at `mcp/` — it's community, not Pro
-— so self-hosted deployments can build and run it. At runtime,
-though, the container calls `GET /api/v1/license/features/` against
-the Django API and refuses to serve traffic unless `mcp_server` is
-advertised, which only happens when `validibot-pro` (or enterprise)
-is installed. So the practical picture is:
+MCP is embedded in the normal Django ASGI application. Its implementation is
+public Community code, but `config.asgi` mounts `/mcp` only when the installed
+commercial package registers the `mcp_server` feature.
 
-- **Community-only stack**: the container can be built, but it will
-  fail its license check on startup and exit. Useful for
-  contributors hacking on the MCP code, not for end users.
-- **Pro stack**: the license check passes, MCP serves requests
-  normally.
-
-The container is defined in the `local-pro`
-compose overlay behind an opt-in `mcp` Compose profile, so an
-empty `.build` file leaves it out by default.
-
-First, copy the MCP env file. The MCP container reads its config from
-`.envs/.local/.mcp`, so the file needs to exist before the container can
-start:
+After selecting `config.settings.local_pro` as described above, restart the Pro
+stack:
 
 ```bash
-cp .envs.example/.local/.mcp .envs/.local/.mcp
+just local-pro up --build
 ```
 
-The defaults work for local development. The one paired secret worth changing
-is `VALIDIBOT_MCP_SERVICE_KEY`: generate one long random string and place it in
-both `.envs/.local/.mcp` and `.envs/.local/.django` (uncomment the line if it is
-commented out). That shared secret is how the MCP container authenticates
-itself to Django's helper API. Generate one with:
+The endpoint is `http://localhost:8000/mcp`, on the same web port as Django.
+There is no `.mcp` env file, Compose profile, service key, or second container.
+The Community `just local up` stack leaves the route unmounted.
 
-```bash
-python -c "import secrets; print(secrets.token_urlsafe(32))"
-```
-
-Then open `.envs/.local/.build` and set:
-
-```bash
-ENABLE_MCP_SERVER=true
-```
-
-Then restart the stack:
-
-```bash
-just local-pro up --build    # community + Pro + MCP
-```
-
-The recipe prints `"ENABLE_MCP_SERVER is set — including the MCP container (profile: mcp)"` on start, and the container listens on `http://localhost:8001`.
-
-`ENABLE_MCP_SERVER=true` is ignored by `just local up` because the community local compose file defines no `mcp` service — if you want to exercise MCP locally, use `local-pro`.
+For OAuth and official-client test instructions, see [MCP Server](../mcp/index.md).
 
 ## Enable signed credentials locally
 

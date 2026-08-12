@@ -149,10 +149,8 @@ just self-hosted check-dns
 
 If you bring your own proxy, configure it to forward to the `web` container on port 8000 and set `DJANGO_SECURE_PROXY_SSL_HEADER` plus `DJANGO_CSRF_TRUSTED_ORIGINS` appropriately in your `.django` file.
 
-For MCP, configure a distinct HTTPS hostname. Bundled Caddy reads
-`VALIDIBOT_MCP_BASE_URL` from `.django` and proxies that origin to the private
-`mcp:8080` service. An external proxy should forward to
-`http://127.0.0.1:8001`; do not expose that plaintext port publicly.
+On Pro, MCP is available at `<SITE_URL>/mcp` through the same proxy and web
+container. No distinct hostname, port, or proxy backend is required.
 
 ## Provider quickstarts
 

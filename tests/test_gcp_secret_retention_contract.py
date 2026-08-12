@@ -10,25 +10,23 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_surgical_secret_uploads_apply_bounded_retention() -> None:
-    """Django and MCP uploads must prune only after establishing a new latest."""
+def test_django_secret_upload_applies_bounded_retention() -> None:
+    """The unified application secret must prune only after creating a latest."""
     django_recipe = (REPO_ROOT / "just/gcp/django/mod.just").read_text(
         encoding="utf-8",
     )
-    mcp_recipe = (REPO_ROOT / "just/mcp/mod.just").read_text(encoding="utf-8")
 
-    for recipe in (django_recipe, mcp_recipe):
-        assert "--format=json" in recipe
-        assert "NEW_VERSION" in recipe
-        assert "prune-secret-versions.sh" in recipe
-        assert "GCP_SECRET_VERSIONS_TO_KEEP:-2" in recipe
-        assert "--new-version=" in recipe
-        assert "--mode=apply" in recipe
-        assert "gcloud secrets versions access" not in recipe
+    assert "--format=json" in django_recipe
+    assert "NEW_VERSION" in django_recipe
+    assert "prune-secret-versions.sh" in django_recipe
+    assert "GCP_SECRET_VERSIONS_TO_KEEP:-2" in django_recipe
+    assert "--new-version=" in django_recipe
+    assert "--mode=apply" in django_recipe
+    assert "gcloud secrets versions access" not in django_recipe
 
 
-def test_umbrella_secret_upload_delegates_to_the_surgical_recipes() -> None:
-    """The umbrella path must inherit each secret's independent retention."""
+def test_umbrella_secret_upload_delegates_to_the_django_recipe() -> None:
+    """The umbrella path must use the one application secret retention policy."""
     recipes = (REPO_ROOT / "just/gcp/mod.just").read_text(encoding="utf-8")
     recipe = recipes.split("secrets stage:", maxsplit=1)[1].split(
         "# Operations",
@@ -36,7 +34,7 @@ def test_umbrella_secret_upload_delegates_to_the_surgical_recipes() -> None:
     )[0]
 
     assert 'just gcp django secrets "{{stage}}"' in recipe
-    assert 'just gcp mcp secrets "{{stage}}"' in recipe
+    assert 'just gcp mcp secrets "{{stage}}"' not in recipe
 
 
 def test_secret_retention_helper_is_fail_closed_and_never_reads_payloads() -> None:

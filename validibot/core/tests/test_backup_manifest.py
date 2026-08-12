@@ -101,6 +101,7 @@ class TestSchemaVersion:
     """The schema version is pinned and rejects unknown values."""
 
     def test_default_schema_version_is_v1(self):
+        """Restore tooling depends on newly created manifests using the v1 contract."""
         manifest = BackupManifest(**_minimal_manifest_kwargs())
         assert manifest.schema_version == "validibot.backup.v1"
         assert manifest.schema_version == BACKUP_MANIFEST_SCHEMA_VERSION
@@ -135,6 +136,7 @@ class TestRequiredFields:
         ],
     )
     def test_missing_required_field_raises(self, missing_field):
+        """An incomplete manifest must fail before an operator attempts a restore."""
         kwargs = _minimal_manifest_kwargs()
         del kwargs[missing_field]
         with pytest.raises(ValidationError):
@@ -163,7 +165,7 @@ class TestOptionalFields:
     def test_config_when_present(self):
         """Config component populated — secret-version map is preserved."""
         config = BackupConfigComponent(
-            secret_manager_versions={"django-env": "17", "mcp-env": "4"},
+            secret_manager_versions={"django-env": "17", "worker-env": "4"},
         )
         manifest = BackupManifest(
             **_minimal_manifest_kwargs(),
@@ -171,7 +173,7 @@ class TestOptionalFields:
         )
         assert manifest.config is not None
         assert manifest.config.secret_manager_versions["django-env"] == "17"
-        assert manifest.config.secret_manager_versions["mcp-env"] == "4"
+        assert manifest.config.secret_manager_versions["worker-env"] == "4"
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -187,12 +189,14 @@ class TestRoundTrip:
     """
 
     def test_gcp_round_trip(self):
+        """GCP manifests must survive storage and parsing without semantic drift."""
         original = BackupManifest(**_minimal_manifest_kwargs())
         as_json = original.model_dump_json()
         reparsed = BackupManifest.model_validate_json(as_json)
         assert reparsed == original
 
     def test_self_hosted_round_trip(self):
+        """Self-hosted manifests preserve their target-specific nullable stage."""
         original = BackupManifest(
             **{
                 **_minimal_manifest_kwargs(),
@@ -278,6 +282,7 @@ class TestStrictShape:
     """Manifests are frozen and reject unknown fields."""
 
     def test_unknown_top_level_field_rejected(self):
+        """Rejecting unknown fields prevents silent writer/reader contract drift."""
         with pytest.raises(ValidationError):
             BackupManifest(
                 **_minimal_manifest_kwargs(),
@@ -344,6 +349,7 @@ class TestJsonShape:
     """
 
     def test_top_level_keys(self):
+        """Operator scripts rely on a stable, documented top-level JSON shape."""
         manifest = BackupManifest(**_minimal_manifest_kwargs())
         as_dict = json.loads(manifest.model_dump_json())
         assert set(as_dict.keys()) == {
@@ -360,6 +366,7 @@ class TestJsonShape:
         }
 
     def test_data_component_shape(self):
+        """Restore tooling needs stable database and media entry nesting."""
         # ``_minimal_manifest_kwargs`` already populates ``data`` with a
         # one-file default; override it here by mutating the dict so we
         # don't pass duplicate kwargs to the constructor.

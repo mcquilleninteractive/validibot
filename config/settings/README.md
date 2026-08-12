@@ -95,19 +95,16 @@ Platform-specific values live in environment files, not in separate settings mod
 ├── .local/
 │   ├── .django
 │   ├── .build
-│   ├── .mcp
 │   └── .postgres
 └── .production/
     ├── .self-hosted/
-    │   ├── .build
-    │   ├── .django
-    │   ├── .mcp
-    │   └── .postgres
+	    │   ├── .build
+	    │   ├── .django
+	    │   └── .postgres
     ├── .google-cloud/
-    │   ├── .build
-    │   ├── .django
-    │   ├── .just
-    │   └── .mcp
+	    │   ├── .build
+	    │   ├── .django
+	    │   └── .just
     └── .aws/
         └── .django
 ```
@@ -117,21 +114,18 @@ Platform-specific values live in environment files, not in separate settings mod
 ```
 .envs/
 ├── .local/
-│   ├── .build           # optional build args, MCP activation, shared non-secret x402 values
+│   ├── .build           # optional build args
 │   ├── .django
-│   ├── .mcp
 │   └── .postgres
 └── .production/
     ├── .self-hosted/
-    │   ├── .build       # optional build args and MCP activation
-    │   ├── .django          # DEPLOYMENT_TARGET=self_hosted
-    │   ├── .mcp
-    │   └── .postgres
+	    │   ├── .build       # optional build args
+	    │   ├── .django          # DEPLOYMENT_TARGET=self_hosted
+	    │   └── .postgres
     ├── .google-cloud/
-    │   ├── .build           # deploy knobs and shared non-secret MCP URL / x402 values
-    │   ├── .django          # DEPLOYMENT_TARGET=gcp
-    │   ├── .just            # host-side GCP command context
-    │   └── .mcp             # MCP-only runtime secrets
+	    │   ├── .build           # deploy knobs and shared non-secret x402 values
+	    │   ├── .django          # DEPLOYMENT_TARGET=gcp
+	    │   └── .just            # host-side GCP command context
     └── .aws/
         └── .django          # DEPLOYMENT_TARGET=aws
 ```

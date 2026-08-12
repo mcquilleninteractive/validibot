@@ -5,20 +5,9 @@
 # Submodule for operations that target *only* the Django web/worker
 # services on GCP. Invoked as ``just gcp django <recipe> <stage>``.
 #
-# This submodule exists so that the symmetric grammar works:
-#
-#   just gcp secrets prod         # umbrella — pushes Django AND MCP
-#   just gcp django secrets prod  # surgical — pushes ONLY Django
-#   just gcp mcp secrets prod     # surgical — pushes ONLY MCP
-#
-# The umbrella recipe (``just gcp secrets``) delegates here for the
-# Django half of its work, so there is a single source of truth for
-# *how* the Django secret upload is performed.
-#
-# When to use the surgical path: you're rotating a Django-only secret
-# (database password, Django SECRET_KEY, Stripe key) and don't want to
-# generate a no-op new version of ``mcp-env`` in Secret Manager on the
-# same push.
+# Both ``just gcp secrets prod`` and ``just gcp django secrets prod`` reach
+# this single uploader. The Django secret now configures every application
+# surface, including the embedded MCP endpoint.
 # =============================================================================
 
 

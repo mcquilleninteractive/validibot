@@ -35,9 +35,8 @@ if not MFA_ENCRYPTION_KEY:
     )
 
 # https://docs.djangoproject.com/en/dev/ref/settings/#allowed-hosts
-# "web" is the Compose service name — the MCP container (and any other
-# service-to-service caller inside the Compose network) reaches Django as
-# http://web:8000, so its Host header is "web", not localhost.
+# "web" is the Compose service name. Internal callers reach Django as
+# http://web:8000, so their Host header is "web", not localhost.
 ALLOWED_HOSTS = ["localhost", "0.0.0.0", "127.0.0.1", "web"]  # noqa: S104
 
 # CACHES

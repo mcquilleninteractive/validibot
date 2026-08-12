@@ -97,6 +97,7 @@ class AuditAction(TextChoices):
     GUEST_REVOKED = "guest_revoked", _("Guest Access Revoked")
     API_KEY_CREATED = "api_key_created", _("API Key Created")
     API_KEY_REVOKED = "api_key_revoked", _("API Key Revoked")
+    MCP_TOOL_CALLED = "mcp_tool_called", _("MCP Tool Called")
 
     # ── Security events (incident response + compliance) ───────────
     LOGIN_SUCCEEDED = "login_succeeded", _("Login Succeeded")
@@ -265,6 +266,7 @@ RETENTION_COLD_DAYS: dict[AuditAction, int] = {
     AuditAction.GUEST_REVOKED: 365 * 3,
     AuditAction.API_KEY_CREATED: 365 * 3,
     AuditAction.API_KEY_REVOKED: 365 * 3,
+    AuditAction.MCP_TOOL_CALLED: 365 * 2,
     # Admin actions: 3 years
     AuditAction.ADMIN_OBJECT_CHANGED: 365 * 3,
     # Privacy ops: indefinite — cold retention is -1, interpreted as

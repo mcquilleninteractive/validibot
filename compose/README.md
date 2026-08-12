@@ -44,12 +44,10 @@ it under `local/` would just be two identical files to keep in sync. (Real
 production on managed Postgres — e.g. Cloud SQL — doesn't use this image at all;
 only Compose-based stacks do.)
 
-**`mcp/` has a single Dockerfile** for the same reason — the FastMCP server is
-one artifact with no dev-specific variant. It also doesn't appear in the plain
-community `local` stack at all: the MCP server is gated behind the `mcp_server`
-license feature, so only `local-pro` and the self-hosted production stack
-declare an `mcp` service (under the `mcp` Compose profile), and both reuse
-`production/mcp/Dockerfile`.
+MCP has no separate Dockerfile. The official SDK's ASGI application is mounted
+inside Django at `/mcp`, so local Pro, Cloud, and self-hosted Pro all exercise
+the same web image and startup command. Community builds contain the public
+implementation but do not mount the route without the `mcp_server` feature.
 
 ## One thing to watch
 

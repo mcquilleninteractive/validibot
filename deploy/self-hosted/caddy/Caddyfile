@@ -6,10 +6,9 @@
 #
 #   COMPOSE_PROFILES=caddy just self-hosted deploy
 #
-# Caddy automatically issues Let's Encrypt certificates for SITE_URL and,
-# when configured, VALIDIBOT_MCP_BASE_URL. The Compose service reads both from
-# .envs/.production/.self-hosted/.django. Each configured hostname must already
-# resolve to this VM's public IP — run
+# Caddy automatically issues a Let's Encrypt certificate for SITE_URL. The
+# Compose service reads it from .envs/.production/.self-hosted/.django. The
+# configured hostname must already resolve to this VM's public IP — run
 # ``./deploy/self-hosted/scripts/check-dns`` to verify before starting
 # Caddy.
 #
@@ -54,22 +53,5 @@
 	# own healthcheck, but operators can also curl it directly.
 	handle /health/ {
 		reverse_proxy web:8000
-	}
-}
-
-# The MCP service is optional. When VALIDIBOT_MCP_BASE_URL is absent, this
-# block binds only an unexported loopback sentinel inside the Caddy container.
-# When MCP is enabled, set a distinct HTTPS origin such as
-# https://mcp.example.com in both .django and .mcp. Caddy then terminates its
-# public TLS and proxies to MCP over the private Compose network; port 8001
-# remains host-loopback-only.
-{$VALIDIBOT_MCP_BASE_URL:http://127.0.0.1:65535} {
-	reverse_proxy mcp:8080
-
-	header {
-		Strict-Transport-Security "max-age=31536000; includeSubDomains"
-		X-Content-Type-Options "nosniff"
-		Referrer-Policy "strict-origin-when-cross-origin"
-		-Server
 	}
 }

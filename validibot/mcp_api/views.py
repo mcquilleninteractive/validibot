@@ -1,10 +1,8 @@
-"""MCP helper views for authenticated workflow discovery, detail, and runs.
+"""Legacy adapter views for workflow discovery, detail, and runs.
 
-These endpoints exist so the FastMCP service can resolve an authenticated
-user's workflow catalog across all of their orgs without the MCP contract
-exposing org slugs as a first-class input. They read and write community
-models only (``Workflow``, ``ValidationRun``, ``Membership``) — no cloud
-dependencies.
+These Community routes are retained for Cloud compatibility code that resolves
+an authenticated user's workflows across organizations. The embedded MCP
+endpoint bypasses this HTTP layer and calls typed application services.
 
 Cloud's ``/api/v1/agent/*`` routes serve the separate anonymous x402 flow
 and are not affected by these views.
@@ -49,7 +47,7 @@ class MCPHelperAPIException(APIException):
 
     Wraps DRF's ``APIException`` so helper views can raise a single
     object and consistently return ``detail`` / ``code`` / ``errors``
-    payloads matching what the FastMCP client expects.
+    payloads matching the retained HTTP adapter contract.
     """
 
     status_code = HTTPStatus.BAD_REQUEST
@@ -289,10 +287,10 @@ class MCPWorkflowAccessSerializerMixin:
 
 
 class MCPWorkflowCatalogView(APIView):
-    """Return the authenticated workflow catalog for the MCP service.
+    """Return the authenticated workflow catalog to a trusted adapter.
 
-    The MCP service calls this endpoint over a trusted service-to-service
-    channel after validating the end user's bearer credential. The
+    The caller uses a trusted service-to-service channel after validating the
+    end user's bearer credential. The
     response is the set of workflows the user has identity access to (any
     visibility tier) that are ``mcp_enabled`` and whose org has
     ``mcp_allowed`` on. x402 paid-public workflows are NOT included — they
@@ -427,8 +425,8 @@ class MCPWorkflowRunCreateView(APIView):
     """Create a member-access validation run keyed by ``workflow_ref``.
 
     This view is the authenticated counterpart to the anonymous x402
-    run endpoint. The MCP service resolves the end user first, then
-    calls this helper over a trusted service channel so Django never
+    run endpoint. The trusted adapter resolves the end user first, then calls
+    this helper over a service channel so Django never
     has to accept the MCP OAuth token as a generic REST API credential.
     """
 

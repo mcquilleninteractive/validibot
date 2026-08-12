@@ -391,15 +391,15 @@ class EnvTemplateShapeTests(SimpleTestCase):
                 f"See ADR section 2 task 2.",
             )
 
-    def test_all_four_env_files_exist(self):
-        """The four env files (.django, .postgres, .build, .mcp) must all exist.
+    def test_all_three_env_files_exist(self):
+        """The Django, Postgres, and build env templates must all exist.
 
         Each plays a distinct role in the self-hosted Compose stack:
         .django for Django runtime config, .postgres for DB credentials,
-        .build for commercial-package + recipe knobs, .mcp for the
-        opt-in FastMCP container.
+        and .build for commercial-package and recipe knobs. MCP shares the
+        Django process and therefore has no fourth service env file.
         """
-        for filename in (".django", ".postgres", ".build", ".mcp"):
+        for filename in (".django", ".postgres", ".build"):
             path = ENVS_EXAMPLE_ROOT / filename
             assert path.is_file(), (
                 f"{path} missing — Phase 0 expected all four env files."
@@ -493,35 +493,20 @@ class ComposeFileShapeTests(SimpleTestCase):
         assert expected_mount in services["worker"]["volumes"]
         assert expected_mount not in services["web"]["volumes"]
 
-    def test_mcp_host_publication_is_loopback_only(self):
-        """Plain MCP HTTP must be reachable only by software on the host.
-
-        Public clients use TLS at Caddy or an operator-managed reverse proxy;
-        publishing port 8001 on every interface would bypass that boundary.
-        """
+    def test_mcp_does_not_create_a_second_compose_service(self):
+        """The Pro endpoint must share the web service and deployment path."""
         compose_path = REPO_ROOT / "docker-compose.production.yml"
         compose_data = yaml.safe_load(compose_path.read_text(encoding="utf-8"))
-        mcp_ports = compose_data["services"]["mcp"]["ports"]
+        assert "mcp" not in compose_data["services"]
+        assert compose_data["services"]["web"]["ports"] == ["8000:8000"]
 
-        assert mcp_ports == [
-            {
-                "target": 8080,
-                "published": "${MCP_HOST_PORT:-8001}",
-                "host_ip": "127.0.0.1",
-                "protocol": "tcp",
-            }
-        ]
-
-    def test_bundled_caddy_terminates_the_mcp_public_origin(self):
-        """The bundled proxy must provide a TLS path to private MCP HTTP.
-
-        Caddy reaches the service over the Compose network, so enabling TLS
-        never requires widening the host's loopback-only MCP publication.
-        """
+    def test_bundled_caddy_routes_the_shared_origin_to_django(self):
+        """The reverse proxy must send ordinary and MCP paths to one app."""
         caddyfile = (KIT_ROOT / "caddy" / "Caddyfile").read_text(encoding="utf-8")
 
-        assert "{$VALIDIBOT_MCP_BASE_URL:http://127.0.0.1:65535}" in caddyfile
-        assert "reverse_proxy mcp:8080" in caddyfile
+        assert "{$SITE_URL}" in caddyfile
+        assert "reverse_proxy web:8000" in caddyfile
+        assert "reverse_proxy mcp:" not in caddyfile
 
     def test_bundled_caddy_does_not_blank_env_file_origins(self):
         """Compose must not override Caddy's configured origins with blanks.
@@ -556,20 +541,15 @@ class SelfHostedSecurityDefaultTests(SimpleTestCase):
         )
         assert "VALIDATOR_CONTAINER_SOCKET=/var/run/docker.sock" not in effective_lines
 
-    def test_self_hosted_preflight_checks_socket_and_mcp_transport(self):
-        """Deployment must fail early on a missing socket or plaintext MCP URL.
-
-        Compose mount errors and OAuth audience mismatches are otherwise
-        discovered only after containers start, which makes secure defaults
-        look like unrelated application failures to operators.
-        """
+    def test_self_hosted_preflight_checks_socket_and_shared_site_url(self):
+        """Deployment must fail early on missing runtime prerequisites."""
         recipes = (REPO_ROOT / "just" / "self-hosted" / "mod.just").read_text(
             encoding="utf-8"
         )
 
         assert '[ ! -S "$VALIDATOR_CONTAINER_SOCKET" ]' in recipes
-        assert "MCP public base URL requires HTTPS" in recipes
-        assert "VALIDIBOT_MCP_BASE_URL must match in .django and .mcp" in recipes
+        assert '"SITE_URL"' in recipes
+        assert "VALIDIBOT_MCP_BASE_URL" not in recipes
 
     def test_self_hosted_preflight_uses_current_commercial_package_contract(self):
         """MCP-capable Pro installs must pass the same secure input contract.
@@ -602,11 +582,13 @@ class SelfHostedSecurityDefaultTests(SimpleTestCase):
         ]
 
         for variable_name in (
-            "ENABLE_MCP_SERVER",
-            "MCP_HOST_PORT",
             "VALIDATOR_CONTAINER_SOCKET",
+            "VALIDIBOT_COMMERCIAL_PACKAGE",
+            "VALIDIBOT_COMMERCIAL_NETRC",
         ):
             assert variable_name in loader
+        assert "ENABLE_MCP_SERVER" not in loader
+        assert "MCP_HOST_PORT" not in loader
         assert "printf '%s' \"$overrides\"" in loader
 
 
@@ -1167,10 +1149,9 @@ class GcpOperatorRecipeInvariantTests(SimpleTestCase):
     def test_maintenance_enforcement_scales_every_runtime_surface_to_zero(self):
         """Maintenance isolates runtime and work without changing Cloud SQL.
 
-        Web, worker, optional MCP, and validator Services can each retain paid
-        minimum capacity. Validator Services use only mutable service-level
-        scaling during isolation, preserving their accepted revision identity,
-        while the database remains available for consecutive operator tasks.
+        Web, worker, and validator Services can each retain paid minimum
+        capacity. MCP needs no separate lifecycle branch because it is part of
+        web. Validator isolation preserves the accepted revision identity.
         """
         block = self._block_between(
             "_enforce-maintenance stage:",
@@ -1180,8 +1161,8 @@ class GcpOperatorRecipeInvariantTests(SimpleTestCase):
         assert "--ingress internal --min=0" in block
         assert "ensure_offline_service" in block
         assert "already internal with zero minimum capacity" in block
-        assert 'ensure_offline_service "$WORKER_SERVICE" 0 1' in block
-        assert 'ensure_offline_service "$MCP_SERVICE" 1' in block
+        assert 'ensure_offline_service "$WORKER_SERVICE" 1' in block
+        assert "MCP_SERVICE" not in block
         assert 'ensure_validator_service_safe "$service"' in block
         validator_guard = block.split(
             "ensure_validator_service_safe()",
@@ -1190,7 +1171,6 @@ class GcpOperatorRecipeInvariantTests(SimpleTestCase):
         assert "--min=0 --quiet" in validator_guard
         assert "--min-instances" not in validator_guard
         assert "metadata.labels.validator" in block
-        assert "VALIDIBOT_MCP_ENABLED=false" in block
         assert 'pause_queue "$QUEUE_NAME" 1' in block
         assert 'pause_queue "$PROVIDER_QUEUE_NAME" 0' in block
         assert "--activation-policy NEVER" not in block
@@ -1198,20 +1178,16 @@ class GcpOperatorRecipeInvariantTests(SimpleTestCase):
         assert "MAINTENANCE_ERRORS" in block
         assert "completed all possible safeguards" in block
 
-    def test_maintenance_diagnostics_include_the_mcp_kill_switch_value(self):
-        """An MCP-only isolation failure must identify the hidden mismatch.
-
-        Internal ingress and zero capacity can look correct while an enabled
-        MCP container can still serve tools to internal callers. Printing the
-        effective `VALIDIBOT_MCP_ENABLED` value makes that failure actionable
-        instead of reporting three apparently healthy runtime fields.
-        """
+    def test_maintenance_diagnostics_use_the_web_service_for_mcp(self):
+        """Isolation must not depend on a retired standalone MCP service."""
         block = self._block_between(
             "_maintenance-assert-offline stage:",
             "_enforce-maintenance stage:",
         )
 
-        assert "VALIDIBOT_MCP_ENABLED=$mcp_enabled" in block
+        assert 'check_isolated_service "$WEB_SERVICE" 1' in block
+        assert "MCP_SERVICE" not in block
+        assert "VALIDIBOT_MCP_ENABLED" not in block
 
     def test_maintenance_park_is_the_only_explicit_database_stop_path(self):
         """Parking, and only parking, explicitly stops an isolated database.
@@ -1283,8 +1259,8 @@ class GcpOperatorRecipeInvariantTests(SimpleTestCase):
 
         Cloud SQL remains available throughout the maintenance session while
         traffic and task dispatch stay disabled. The EXIT trap is the recovery
-        guarantee for build, migration, web, worker, scheduler, and MCP
-        failures, and must not implicitly park the database.
+        guarantee for build, migration, web, worker, and scheduler failures,
+        and must not implicitly park the database. MCP shares web's revision.
         """
         block = self._block_between(
             "deploy-maintenance stage:",
@@ -1296,7 +1272,7 @@ class GcpOperatorRecipeInvariantTests(SimpleTestCase):
         assert "mode-maintenance" in block
         assert "_maintenance-stop-database" not in block
         assert "_migrate" in block
-        maintenance_safe_child_steps = 4
+        maintenance_safe_child_steps = 3
         assert block.count("GCP_DEPLOY_MAINTENANCE=1") == maintenance_safe_child_steps
         assert "trap - EXIT INT TERM" in block
 
@@ -1360,13 +1336,8 @@ class GcpOperatorRecipeInvariantTests(SimpleTestCase):
         assert block.rindex('--ingress "$WEB_INGRESS"') > block.index(
             "scheduler jobs resume"
         )
-        license_wait = block.index("Waiting for the MCP license check endpoint")
-        assert license_wait > block.rindex('--ingress "$WEB_INGRESS"')
-        assert license_wait < block.index(
-            "VALIDIBOT_MCP_ENABLED=$MCP_ENABLED",
-        )
-        assert 'index("mcp_server") != null' in block
-        assert "VALIDIBOT_MCP_ENABLED=$MCP_ENABLED" in block
+        assert "MCP_SERVICE" not in block
+        assert "VALIDIBOT_MCP_ENABLED" not in block
         assert "Restoring validator Service" not in block
         assert "desired-min-instances" not in block
         assert "trap cleanup EXIT INT TERM" in block
@@ -1413,60 +1384,22 @@ class GcpOperatorRecipeInvariantTests(SimpleTestCase):
         assert "gcloud run jobs executions cancel" in block
         assert "gcloud run jobs delete" not in block
 
-    def test_mcp_maintenance_deploy_is_disabled_until_stage_reopens(self):
-        """An offline MCP revision must not require the offline Django API.
+    def test_deployment_has_no_standalone_mcp_recipe_or_lifecycle(self):
+        """GCP deploy and mode changes must operate on the shared web service."""
 
-        The FastMCP startup license gate calls Django whenever MCP is enabled.
-        Maintenance deployment therefore stamps the kill switch off; the main
-        mode-live recipe restores the operator's configured value only
-        after web ingress is public again.
-        """
-        mcp_module = (REPO_ROOT / "just" / "mcp" / "mod.just").read_text(
-            encoding="utf-8",
+        assert not (REPO_ROOT / "just" / "mcp" / "mod.just").exists()
+        deploy_block = self._block_between(
+            "deploy stage:",
+            "# Deploy worker service to a specific stage.",
         )
-        deploy_start = mcp_module.index("deploy stage:")
-        deploy_end = mcp_module.index("# ── Load Balancer Integration", deploy_start)
-        deploy_block = mcp_module[deploy_start:deploy_end]
-
-        assert 'GCP_DEPLOY_MAINTENANCE:-0}" = "1"' in deploy_block
-        assert "MCP_ENABLED=false" in deploy_block
-        assert "VALIDIBOT_MCP_ENABLED=${MCP_ENABLED}" in deploy_block
-
-    def test_mcp_secret_access_is_bound_to_the_exact_stage_secret(self):
-        """MCP compromise must not expose Django or unrelated secrets.
-
-        Setup historically granted Secret Manager access at project scope even
-        though MCP needs only its own stage environment. Both first-time setup
-        and later secret upload must converge to the resource-level binding and
-        remove the known legacy project binding.
-        """
-        mcp_module = (REPO_ROOT / "just" / "mcp" / "mod.just").read_text(
-            encoding="utf-8",
+        mode_live_block = self._block_between(
+            "mode-live stage:",
+            "# Report the reconciled lifecycle mode.",
         )
-        setup_start = mcp_module.index("setup stage:")
-        setup_end = mcp_module.index("# ── Secrets", setup_start)
-        setup_block = mcp_module[setup_start:setup_end]
-        secrets_start = mcp_module.index("secrets stage:")
-        secrets_end = mcp_module.index("# ── Deploy", secrets_start)
-        secrets_block = mcp_module[secrets_start:secrets_end]
 
-        assert "gcloud projects add-iam-policy-binding" not in setup_block
-        assert "gcloud secrets add-iam-policy-binding" in setup_block
-        assert "gcloud secrets add-iam-policy-binding" in secrets_block
-        assert "gcloud projects remove-iam-policy-binding" in setup_block
-        assert "gcloud projects remove-iam-policy-binding" in secrets_block
-        assert "select((.condition // null) == null)" in setup_block
-        assert "select((.condition // null) == null)" in secrets_block
-
-        security_block = self._block_between(
-            "security-audit stage:",
-            "# Database Access",
-        )
-        assert "Checking MCP Secret Manager scope" in security_block
-        assert 'MCP_SECRET="mcp-env"' in security_block
-        assert 'MCP_SECRET="mcp-env-{{stage}}"' in security_block
-        assert 'PROJECT_SECRET_ACCESS" -eq 0' in security_block
-        assert 'EXACT_SECRET_ACCESS" -eq 1' in security_block
+        assert "deploy-mcp" not in deploy_block
+        assert "MCP_SERVICE" not in mode_live_block
+        assert "VALIDIBOT_MCP_ENABLED" not in mode_live_block
 
     def test_validator_release_mirror_copies_attested_digest_without_rebuild(self):
         """The GAR production mirror must preserve the signed GHCR image bytes.
@@ -1799,7 +1732,6 @@ class NoStaleDockerComposeReferencesTests(SimpleTestCase):
             ENVS_EXAMPLE_ROOT / ".django",
             ENVS_EXAMPLE_ROOT / ".postgres",
             ENVS_EXAMPLE_ROOT / ".build",
-            ENVS_EXAMPLE_ROOT / ".mcp",
         ]
         for path in files_to_check:
             text = path.read_text(encoding="utf-8")
@@ -3075,6 +3007,7 @@ class SupportBundleRecipeShapeTests(SimpleTestCase):
         assert "validibot.support-bundle.v1" in readme
 
     def test_gcp_recipe_no_longer_stub(self):
+        """The shipped GCP support-bundle command must perform real collection work."""
         text = self._gcp_text()
         match = re.search(
             r"^collect-support-bundle stage \*flags:.*$",

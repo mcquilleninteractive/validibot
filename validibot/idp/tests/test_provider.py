@@ -1,4 +1,4 @@
-"""Integration tests for the Validibot OIDC provider used by Claude and MCP."""
+"""Integration tests for the OAuth/OIDC provider used by MCP clients."""
 
 from __future__ import annotations
 
@@ -6,11 +6,15 @@ import base64
 import hashlib
 import json
 from functools import lru_cache
+from typing import TYPE_CHECKING
+from typing import Any
+from typing import cast
 from urllib.parse import parse_qs
 from urllib.parse import urlparse
 
 from allauth.account.models import EmailAddress
 from allauth.idp.oidc.models import Client as OIDCClient
+from allauth.idp.oidc.models import Token as OIDCToken
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives.serialization import Encoding
 from cryptography.hazmat.primitives.serialization import NoEncryption
@@ -20,6 +24,9 @@ from django.test import override_settings
 from django.urls import reverse
 
 from validibot.users.tests.factories import UserFactory
+
+if TYPE_CHECKING:
+    from validibot.users.models import User
 
 
 @lru_cache(maxsize=1)
@@ -39,7 +46,7 @@ def _generate_test_private_key() -> str:
 
 TEST_OIDC_PRIVATE_KEY = _generate_test_private_key()
 TEST_SITE_URL = "https://app.validibot.com"
-TEST_MCP_AUDIENCE = "https://mcp.validibot.com/mcp"
+TEST_MCP_AUDIENCE = "https://app.validibot.com/mcp"
 TEST_REDIRECT_URI = "https://claude.ai/api/mcp/auth_callback"
 TEST_SCOPE = "openid profile email validibot:mcp"
 TEST_CODE_VERIFIER = "pkce-verifier-for-validibot-tests-0123456789"
@@ -64,7 +71,7 @@ class ValidibotOIDCProviderTests(TestCase):
         """Create a logged-in user with a verified primary email address."""
 
         super().setUp()
-        self.user = UserFactory()
+        self.user = cast("User", UserFactory())
         EmailAddress.objects.create(
             user=self.user,
             email=self.user.email,
@@ -89,6 +96,8 @@ class ValidibotOIDCProviderTests(TestCase):
             payload["token_endpoint"],
             f"{TEST_SITE_URL}/identity/o/api/token",
         )
+        self.assertIn("validibot:mcp", payload["scopes_supported"])
+        self.assertEqual(payload["code_challenge_methods_supported"], ["S256"])
 
     def test_oauth_authorization_server_metadata_is_derived_from_oidc(self) -> None:
         """RFC 8414 metadata should mirror the OIDC discovery core endpoints."""
@@ -120,7 +129,7 @@ class ValidibotOIDCProviderTests(TestCase):
         )
 
     def test_authorization_page_uses_branded_mcp_copy(self) -> None:
-        """The consent page should explain the Claude-to-MCP access boundary."""
+        """The consent page should explain the AI-assistant access boundary."""
 
         oidc_client = self._create_public_client(skip_consent=False)
         response = self.client.get(
@@ -133,6 +142,7 @@ class ValidibotOIDCProviderTests(TestCase):
                 "state": "state-123",
                 "code_challenge": self._code_challenge(TEST_CODE_VERIFIER),
                 "code_challenge_method": "S256",
+                "resource": TEST_MCP_AUDIENCE,
             },
         )
 
@@ -154,6 +164,7 @@ class ValidibotOIDCProviderTests(TestCase):
                 "client_id": oidc_client.id,
                 "code": authorization_code,
                 "redirect_uri": TEST_REDIRECT_URI,
+                "resource": TEST_MCP_AUDIENCE,
             },
         )
 
@@ -165,29 +176,87 @@ class ValidibotOIDCProviderTests(TestCase):
         """Successful code exchange should emit a JWT scoped to the MCP resource."""
 
         oidc_client = self._create_public_client(skip_consent=True)
-        authorization_code = self._authorization_code_for(oidc_client)
-
-        response = self.client.post(
-            reverse("idp:oidc:token"),
-            {
-                "grant_type": "authorization_code",
-                "client_id": oidc_client.id,
-                "code": authorization_code,
-                "redirect_uri": TEST_REDIRECT_URI,
-                "code_verifier": TEST_CODE_VERIFIER,
-            },
-        )
-
-        self.assertEqual(response.status_code, 200)
-        payload = response.json()
+        payload = self._exchange_authorization_code(oidc_client)
         access_token = payload["access_token"]
         decoded = self._decode_jwt_payload(access_token)
 
         self.assertEqual(decoded["iss"], TEST_SITE_URL)
-        self.assertEqual(decoded["aud"], TEST_MCP_AUDIENCE)
+        self.assertEqual(decoded["aud"], [TEST_MCP_AUDIENCE])
         self.assertEqual(decoded["scope"], TEST_SCOPE)
         self.assertEqual(decoded["token_use"], "access")
         self.assertIn("refresh_token", payload)
+
+    def test_refresh_preserves_resource_scope_and_rotates_token(self) -> None:
+        """Refresh must retain MCP binding and replace the reusable credential."""
+
+        oidc_client = self._create_public_client(skip_consent=True)
+        initial = self._exchange_authorization_code(oidc_client)
+
+        response = self.client.post(
+            reverse("idp:oidc:token"),
+            {
+                "grant_type": "refresh_token",
+                "client_id": oidc_client.id,
+                "refresh_token": initial["refresh_token"],
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        refreshed = response.json()
+        decoded = self._decode_jwt_payload(refreshed["access_token"])
+        self.assertEqual(decoded["aud"], [TEST_MCP_AUDIENCE])
+        self.assertEqual(decoded["scope"], TEST_SCOPE)
+        self.assertNotEqual(refreshed["refresh_token"], initial["refresh_token"])
+        self.assertIsNone(
+            OIDCToken.objects.lookup(
+                OIDCToken.Type.REFRESH_TOKEN,
+                initial["refresh_token"],
+            ),
+        )
+
+    def test_revocation_endpoint_invalidates_stored_access_token(self) -> None:
+        """The standard allauth endpoint must make bearer revocation immediate."""
+
+        oidc_client = self._create_public_client(skip_consent=True)
+        payload = self._exchange_authorization_code(oidc_client)
+
+        response = self.client.post(
+            reverse("idp:oidc:revoke"),
+            {
+                "client_id": oidc_client.id,
+                "token": payload["access_token"],
+                "token_type_hint": "access_token",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(
+            OIDCToken.objects.lookup(
+                OIDCToken.Type.ACCESS_TOKEN,
+                payload["access_token"],
+            ),
+        )
+
+    def test_authorization_rejects_any_other_resource(self) -> None:
+        """OAuth must not mint an MCP token for a different audience."""
+
+        oidc_client = self._create_public_client(skip_consent=True)
+        response = self.client.get(
+            reverse("idp:oidc:authorization"),
+            {
+                "response_type": "code",
+                "client_id": oidc_client.id,
+                "redirect_uri": TEST_REDIRECT_URI,
+                "scope": TEST_SCOPE,
+                "state": "state-123",
+                "code_challenge": self._code_challenge(TEST_CODE_VERIFIER),
+                "code_challenge_method": "S256",
+                "resource": "https://attacker.example/mcp",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "wants to connect to your Validibot account")
 
     def _create_public_client(self, *, skip_consent: bool) -> OIDCClient:
         """Create the Claude-style public OIDC client used by the MCP flow."""
@@ -223,15 +292,38 @@ class ValidibotOIDCProviderTests(TestCase):
                 "state": "state-123",
                 "code_challenge": self._code_challenge(TEST_CODE_VERIFIER),
                 "code_challenge_method": "S256",
+                "resource": TEST_MCP_AUDIENCE,
             },
         )
         self.assertEqual(response.status_code, 302)
 
         parsed = urlparse(response["Location"])
         query = parse_qs(parsed.query)
-        code = query.get("code", [None])[0]
-        self.assertIsNotNone(code)
-        return code
+        codes = query.get("code")
+        self.assertIsNotNone(codes)
+        assert codes is not None
+        return codes[0]
+
+    def _exchange_authorization_code(
+        self,
+        oidc_client: OIDCClient,
+    ) -> dict[str, Any]:
+        """Exchange a fresh PKCE authorization code through allauth's endpoint."""
+
+        authorization_code = self._authorization_code_for(oidc_client)
+        response = self.client.post(
+            reverse("idp:oidc:token"),
+            {
+                "grant_type": "authorization_code",
+                "client_id": oidc_client.id,
+                "code": authorization_code,
+                "redirect_uri": TEST_REDIRECT_URI,
+                "code_verifier": TEST_CODE_VERIFIER,
+                "resource": TEST_MCP_AUDIENCE,
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        return response.json()
 
     def _code_challenge(self, verifier: str) -> str:
         """Build the S256 PKCE challenge for a known verifier string."""
@@ -239,7 +331,7 @@ class ValidibotOIDCProviderTests(TestCase):
         digest = hashlib.sha256(verifier.encode("ascii")).digest()
         return base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
 
-    def _decode_jwt_payload(self, token: str) -> dict:
+    def _decode_jwt_payload(self, token: str) -> dict[str, Any]:
         """Decode a JWT payload without verifying it.
 
         The provider behavior under test is the emitted claim set, not the

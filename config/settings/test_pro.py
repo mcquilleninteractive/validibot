@@ -22,7 +22,19 @@ apps on top and already includes ``validibot_pro`` in its app list.
 """
 
 from .test import *  # noqa: F403
+from .test import DATABASES as _BASE_DATABASES
 from .test import INSTALLED_APPS as _BASE_INSTALLED_APPS
+
+DATABASES = {
+    alias: {
+        **configuration,
+        "TEST": {
+            **configuration.get("TEST", {}),
+            "NAME": f"test_{configuration['NAME']}_pro",
+        },
+    }
+    for alias, configuration in _BASE_DATABASES.items()
+}
 
 INSTALLED_APPS = [*_BASE_INSTALLED_APPS]
 if "validibot_pro" not in INSTALLED_APPS:

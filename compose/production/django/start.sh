@@ -57,8 +57,10 @@ fi
 WEB_CONCURRENCY="${WEB_CONCURRENCY:-4}"
 GUNICORN_TIMEOUT_SECONDS="${GUNICORN_TIMEOUT_SECONDS:-3600}"
 
-# Launch Gunicorn to serve the Django application.
-gunicorn config.wsgi:application \
+# Serve the composed Django + MCP ASGI application. Gunicorn remains the
+# process manager while Uvicorn workers provide the ASGI protocol server.
+exec gunicorn config.asgi:application \
   --bind 0.0.0.0:8000 \
+  --worker-class uvicorn_worker.UvicornWorker \
   --workers "${WEB_CONCURRENCY}" \
   --timeout "${GUNICORN_TIMEOUT_SECONDS}"

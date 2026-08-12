@@ -1,9 +1,0 @@
-# The production Dockerfile needs only dependency metadata and Python source.
-# Deny everything else so local environments, tests, credentials, and future
-# workspace files cannot enter the build context accidentally.
-**
-!pyproject.toml
-!uv.lock
-!src/
-!src/**/
-!src/**/*.py

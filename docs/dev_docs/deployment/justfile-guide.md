@@ -43,15 +43,11 @@ just/
 │   └── mod.just      # Community + validibot-pro local dev
 ├── local-cloud/
 │   └── mod.just      # Community + pro + cloud local dev
-├── gcp/
-│   ├── mod.just      # Google Cloud Platform deployment
-│   └── django/
-│       └── mod.just  # Django-only GCP ops (just gcp django ...)
-├── mcp/
-│   └── mod.just      # MCP server build/deploy/secrets/logs/test
-│                     # (also re-exposed under gcp via `mod mcp '../mcp'`
-│                     #  in just/gcp/mod.just, so "just gcp mcp ..." works)
-├── aws/
+	├── gcp/
+	│   ├── mod.just      # Google Cloud Platform deployment
+	│   └── django/
+	│       └── mod.just  # Django-only GCP ops (just gcp django ...)
+	├── aws/
 │   └── mod.just      # AWS deployment (stub - not implemented)
 └── self-hosted/
     └── mod.just      # Self-hosted Docker Compose on a VM
@@ -67,21 +63,14 @@ The root `justfile` serves as the orchestrator. It:
 
 ### Modules and submodules
 
-Every platform-specific group of commands is a module. Deployment
-targets with multiple sub-areas (like GCP, which hosts the Django web
-service plus optionally the MCP server plus per-service secret
-management) use **submodules** for clean grouping:
+Every platform-specific group of commands is a module. Deployment targets with
+multiple sub-areas use **submodules** for clean grouping:
 
 ```bash
-just gcp deploy-all prod        # Umbrella: web + worker + scheduler + MCP
-just gcp secrets prod           # Umbrella: pushes .django AND .mcp
+just gcp deploy-all prod        # Umbrella: web + worker + scheduler
+just gcp secrets prod           # Upload the shared .django environment
 just gcp django secrets prod    # Surgical: only .django → django-env
-just gcp mcp deploy prod        # Surgical: only rebuild/redeploy MCP
 ```
-
-The same mcp module is also mounted at the top level so `just mcp ...`
-works as an alias for `just gcp mcp ...` — useful for target-agnostic
-commands like `just mcp test` (local pytest).
 
 ### Imports vs Modules
 
@@ -149,7 +138,7 @@ just -f just/gcp/mod.just --list
 # Deployment (web + worker)
 just gcp deploy prod         # Hotfix path: web only
 just gcp deploy-worker prod  # Hotfix path: worker only
-just gcp deploy-all prod     # Full: web + worker + scheduler + MCP (if enabled)
+just gcp deploy-all prod     # Full: web + worker + scheduler
 
 # Operations
 just gcp logs prod           # View logs
@@ -164,9 +153,8 @@ just gcp setup-data prod               # Explicitly refresh all initialized data
 just gcp management-cmd prod "shell"   # Run any command via a temp Cloud Run Job
 
 # Secrets — umbrella and surgical paths
-just gcp secrets prod                  # Umbrella: .django AND .mcp (when MCP enabled)
+just gcp secrets prod                  # Upload .django → django-env
 just gcp django secrets prod           # Surgical: only .django → django-env
-just gcp mcp secrets prod              # Surgical: only .mcp → mcp-env
 
 # Infrastructure
 just gcp init-stage dev                # Create web/worker SAs + Cloud SQL, etc.
@@ -199,34 +187,20 @@ slow provider maintenance cannot outlive the local CLI wait; the default
 `GCP_SQL_TRANSITION_TIMEOUT_SECONDS`. Runtime cleanup is best-effort across
 individual Cloud Run, scheduler, and queue operations: it skips resources
 already isolated, records failures, and attempts every remaining safeguard
-before returning non-zero. Optional MCP revisions are deployed with
-`VALIDIBOT_MCP_ENABLED=false`; `mode-live` makes web reachable first and
-then restores the configured MCP value so its normal startup license check can
-succeed without weakening the gate.
+before returning non-zero. MCP has no independent lifecycle: Pro web revisions
+serve `/mcp`, and maintenance/live transitions apply to that route together
+with the rest of the Django application.
 
-#### MCP server commands
+#### MCP verification
 
-When the deployment runs the MCP server (`ENABLE_MCP_SERVER=true` in
-the stage's `.build` file), it has its own Cloud Run service and
-lifecycle. The commands are submodule-scoped under `gcp mcp`:
+Run the embedded MCP suites through the normal Community test environment:
 
 ```bash
-just gcp mcp setup prod      # First-time: create MCP SA + IAM bindings
-just mcp build-local         # Build local MCP image; never pushes
-just gcp mcp build-push      # Build + push MCP image to Artifact Registry
-just gcp mcp deploy prod     # Deploy MCP image to Cloud Run
-just gcp mcp secrets prod    # Upload .mcp → mcp-env Secret Manager secret
-just gcp mcp lb-add prod mcp.yourdomain.com  # Wire MCP into the LB
-just gcp mcp logs prod       # Tail MCP service logs
-just gcp mcp status prod     # MCP service URL + revision info
-just gcp mcp test            # Run MCP pytest suite locally (no GCP calls)
+uv run pytest -q validibot/mcp_server/tests validibot/idp/tests
 ```
 
-Same module is also reachable as `just mcp ...` at the top level;
-`just mcp check`, `just mcp test`, and `just mcp test-e2e` are the natural
-entry points for local verification. `just mcp build` remains a compatibility
-alias for the historical build-and-push behavior; use `build-local` or
-`build-push` in new automation so publication is explicit.
+There are no `just gcp mcp` deployment commands because there is no separate
+image, Cloud Run service, secret, or load-balancer backend.
 
 ### Self-hosted Docker Compose
 

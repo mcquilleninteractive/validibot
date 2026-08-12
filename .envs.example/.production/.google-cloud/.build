@@ -4,13 +4,9 @@
 #
 # Copy this file to ``.envs/.production/.google-cloud/.build`` before
 # your first ``just gcp deploy-all prod``. The ``just gcp`` module
-# sources this file at the top of any recipe that needs deploy-time
-# knobs — currently MCP activation and the shared MCP public URLs stamped
-# onto the Cloud Run services. (x402 payment config is no longer here; it
-# moved to ``.django`` when the MCP server stopped handling payments.)
+# sources this file at the top of recipes that need deploy-time knobs.
 #
-# Unlike the other files in this directory (``.django``, ``.mcp``,
-# ``.just``), this file is NOT uploaded to GCP Secret Manager — it
+# Unlike ``.django`` and ``.just``, this file is NOT uploaded to GCP Secret Manager — it
 # only affects local ``just`` behavior at deploy time. Values here
 # become ``--set-env-vars`` on the Cloud Run service, so they do
 # reach a running container, but as public env vars, not secrets.
@@ -24,74 +20,6 @@
 # with a loud error listing the missing variable.
 # =============================================================================
 
-
-# -- Recipe-level knobs ----------------------------------------------------
-
-# ENABLE_MCP_SERVER
-# -----------------
-# Controls whether ``just gcp deploy-all <stage>`` builds and deploys
-# the MCP Cloud Run service as part of the full deploy. When unset or
-# false, deploy-all skips the MCP step silently (web + worker +
-# scheduler still deploy as normal).
-#
-# Requires validibot-pro (or enterprise) to be installed in the
-# deployment — the MCP server calls ``GET /api/v1/license/features/``
-# at startup and refuses to boot if ``mcp_server`` isn't advertised.
-# If you set this to true without Pro installed, the MCP Cloud Run
-# service will deploy but fail its license check and 503 every request.
-#
-# Also read by the standalone ``just gcp mcp build`` / ``deploy``
-# (and their legacy aliases ``just mcp build`` / ``deploy``) — the
-# same knob controls both the unified deploy-all path and surgical
-# MCP-only paths.
-#
-#   true   — include MCP build + deploy
-#   false  — omit MCP (default)
-ENABLE_MCP_SERVER=false
-
-# VALIDIBOT_MCP_API_BASE_URL
-# --------------------------
-# Public URL of the Validibot Django API the MCP server should proxy
-# tool calls to. Gets stamped into the MCP Cloud Run service as
-# ``VALIDIBOT_API_BASE_URL`` at deploy time.
-#
-# Required when ENABLE_MCP_SERVER=true. There is no default — set this
-
-#
-#   # your own self-hosted deployment
-#   VALIDIBOT_MCP_API_BASE_URL=https://app.example.com
-#
-# The deploy recipes use this one value in three places:
-#   1. stamp it onto MCP as ``VALIDIBOT_API_BASE_URL``;
-#   2. stamp it onto Django web as ``MCP_OIDC_AUDIENCE``; and
-#   3. use the corresponding Django service in ``just gcp mcp setup`` when
-#      granting the MCP service account ``roles/run.invoker``.
-#
-# Do not duplicate this URL elsewhere just to keep OIDC in sync; the recipes
-# derive the MCP->Django auth wiring from this value plus the stage/app config.
-VALIDIBOT_MCP_API_BASE_URL=
-
-# VALIDIBOT_MCP_BASE_URL
-# ----------------------
-# Public URL of the MCP service itself. Gets stamped onto BOTH Django web and
-# MCP Cloud Run services as ``VALIDIBOT_MCP_BASE_URL``.
-#
-# Django uses it to derive the OIDC resource audience and confidential-client
-# redirect URI. MCP uses the same value for RFC 9728 protected-resource
-# metadata and audience validation. Author it here once; do not repeat it in
-# .django or .mcp.
-#
-#   VALIDIBOT_MCP_BASE_URL=https://mcp.example.com
-VALIDIBOT_MCP_BASE_URL=
-
-# VALIDIBOT_MCP_ENABLED
-# ---------------------
-# Runtime kill switch, stamped onto the MCP Cloud Run revision by the
-# deploy recipe (defaults to true when unset). Set false to make the MCP
-# server return 503 on every tool call without a rebuild. This is the
-# RUNTIME switch; ENABLE_MCP_SERVER above is the BUILD-time switch that
-# decides whether the MCP service is deployed at all.
-# VALIDIBOT_MCP_ENABLED=true
 
 # -- x402 payments (moved to .django) -------------------------------------
 #

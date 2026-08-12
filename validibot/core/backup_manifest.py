@@ -159,7 +159,7 @@ class BackupConfigComponent(BaseModel):
         description=(
             "Map of Secret Manager resource name to the version that was "
             "active at backup time, e.g. "
-            "``{'django-env': '17', 'mcp-env': '4'}``. Empty for "
+            "``{'django-env': '17', 'worker-env': '4'}``. Empty for "
             "self-hosted backups."
         ),
     )

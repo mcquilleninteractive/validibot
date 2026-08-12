@@ -95,29 +95,29 @@ The worker security tests are particularly important because the callback
 endpoint is how validator Services and retained Jobs report their results. If
 this endpoint were exposed, attackers could spoof validation results.
 
-### MCP Server (if enabled)
+### MCP Server (Pro)
 
-If this deployment runs the MCP server (`ENABLE_MCP_SERVER=true` in the stage's `.build` file), a few extra manual checks are worth running after a deploy:
+On a Pro deployment, run these checks against the same public application
+origin as normal Django traffic:
 
 ```bash
-# 1. MCP service is healthy and license check passed
-just gcp mcp status prod
-just gcp mcp logs prod | grep "MCP license check passed"
+# 1. Public OAuth metadata describes the exact embedded resource
+curl -s https://app.your-domain.example/.well-known/oauth-protected-resource/mcp | jq .
+curl -s https://app.your-domain.example/.well-known/oauth-authorization-server | jq .
 
-# 2. Public OAuth discovery endpoints respond
-curl -s https://mcp.your-domain.example/.well-known/oauth-protected-resource/mcp | jq .
-curl -s https://mcp.your-domain.example/.well-known/oauth-authorization-server | jq .
-
-# 3. Unauthenticated MCP requests get a 401 (not 4xx-other)
-curl -s -o /dev/null -w "%{http_code}\n" -X POST https://mcp.your-domain.example/mcp
+# 2. Unauthenticated MCP requests get a 401 (not 4xx-other)
+curl -s -o /dev/null -w "%{http_code}\n" -X POST https://app.your-domain.example/mcp
 # → expect 401
 
-# 4. Django verifies MCP → Django identity tokens (check logs for allowlist rejections)
-just gcp logs prod | grep "MCP OIDC"
-# → should be silent; any "allowlist is empty" or "non-allowlisted SA" is a misconfig
+# 3. The normal web revision serves both route families
+just gcp status prod
+just gcp logs prod
 ```
 
-Connecting an actual MCP client (Claude Desktop, Cursor) end-to-end is the final validation. See [MCP integration (user docs)](https://docs.validibot.com/api/mcp-integration/) for client setup.
+Connecting ChatGPT in developer mode, completing OAuth, calling all tools, and
+testing representative attachments is the final validation. Maintainers should
+follow `docs/operations/mcp-server.md` in the adjacent `validibot-project`
+repository for the private deployment checklist.
 
 ## Commands
 

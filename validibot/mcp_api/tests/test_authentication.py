@@ -1,6 +1,6 @@
-"""Tests for MCP service identity and forwarded user authentication.
+"""Tests for legacy adapter identity and forwarded user authentication.
 
-The MCP helper API trusts forwarded user headers *after* the service
+The compatibility API trusts forwarded user headers *after* the service
 identity is verified. Any gap in the service-identity verification
 translates directly into user-impersonation risk, so the allowlist is
 the single most important defence here. These tests lock it in:

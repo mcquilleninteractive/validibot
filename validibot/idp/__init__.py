@@ -1,22 +1,21 @@
 """OIDC provider customizations for Validibot.
 
 This app sits on top of django-allauth's generic OIDC authorization-server
-implementation and adds the Validibot-specific pieces needed to issue
-JWT access tokens that the standalone FastMCP server (and Claude Desktop
-via OAuth) will accept:
+implementation and adds the small Validibot-specific policy needed for JWT
+access tokens accepted by the embedded MCP resource server:
 
-- A custom adapter (``adapter.ValidibotOIDCAdapter``) that stamps the
-  ``validibot:mcp`` scope label and an audience claim onto access tokens.
-- RFC 8414 / OpenID Connect discovery views rooted at ``SITE_URL`` so the
-  published metadata is stable behind proxies and in tests.
+- A custom adapter (``adapter.ValidibotOIDCAdapter``) that labels the
+  ``validibot:mcp`` scope, restricts RFC 8707 resources, and adjusts allauth's
+  discovery metadata to the canonical ``SITE_URL`` origin.
+- A second URL for allauth's discovery view at the RFC 8414 metadata path
+  required by MCP clients.
 - An ``ensure_oidc_clients`` management command that idempotently creates
-  the two OIDC clients used by the MCP OAuth flow (Claude Desktop public
-  client, MCP server confidential client).
+  the predefined public clients used by Claude Desktop and ChatGPT.
 
 Placement note: this app lives in the community repo (not in
 ``validibot-pro`` or ``validibot-cloud``) because self-hosted Pro users
 need MCP OAuth to work. There is no proprietary IP in the code — it's a
 thin customization of a public spec (OIDC) wrapped around django-allauth.
-Cloud overrides the MCP audience URL and supplies the confidential
-client's secret via its own settings, but the business logic is here.
+The MCP audience is the deployment's exact same-origin ``/mcp`` resource and
+the business logic remains here for every deployment target.
 """

@@ -88,21 +88,6 @@ validator_backend_git_sha := `git -C ../validibot-validator-backends rev-parse -
 # Container Lifecycle
 # =============================================================================
 
-# Translate the cross-target ENABLE_MCP_SERVER flag into the Compose profile
-# that docker-compose.production.yml uses to gate the optional MCP service.
-# The recipes below `eval $(just ... _mcp-profile-env)` into their environment
-# so the setting is consistent across up/build/build-only.
-[private]
-_mcp-profile-env:
-    #!/usr/bin/env bash
-    case "${ENABLE_MCP_SERVER:-false}" in
-        true|True|TRUE|1|yes|Yes|YES)
-            echo "export COMPOSE_PROFILES=\"\${COMPOSE_PROFILES:+\${COMPOSE_PROFILES},}mcp\""
-            ;;
-        *)
-            ;;
-    esac
-
 # Source recipe-level knobs from .envs/.production/.self-hosted/.build
 # if present. Kept as a helper so every lifecycle recipe (up, build,
 # build-only) picks up the same variables. The file's build-time vars
@@ -113,7 +98,7 @@ _load-build-env:
     #!/usr/bin/env bash
     overrides=""
     for variable_name in \
-        ENABLE_MCP_SERVER MCP_HOST_PORT VALIDATOR_CONTAINER_SOCKET \
+        VALIDATOR_CONTAINER_SOCKET \
         VALIDIBOT_COMMERCIAL_PACKAGE VALIDIBOT_COMMERCIAL_NETRC; do
         if [ "${!variable_name+x}" = x ]; then
             printf -v override 'export %s=%q\n' "$variable_name" "${!variable_name}"
@@ -132,45 +117,32 @@ _load-build-env:
     echo 'export VALIDIBOT_VERSION="${VALIDIBOT_VERSION:-{{validibot_version}}}"'
     echo 'export VALIDIBOT_REVISION="${VALIDIBOT_REVISION:-{{git_sha}}}"'
 
-# Start all services in production mode.
-# Brings up web, worker, database, redis, and any other services. When
-# ENABLE_MCP_SERVER=true (set inline or in .envs/.production/
-# .self-hosted/.build), also starts the MCP container (profile: mcp).
+# Start all services in production mode. The licensed MCP endpoint is part of
+# the web service and needs no separate Compose profile.
 up:
     #!/usr/bin/env bash
     set -euo pipefail
     eval "$(just self-hosted _load-build-env)"
-    eval "$(just self-hosted _mcp-profile-env)"
     docker compose {{compose_env_args}} -f {{compose_file}} -p {{compose_project}} up -d
 
-# Stop all services (containers remain, data persists)
-# Always acts on every profile so the MCP container is torn down
-# regardless of whether it was started via the flag.
+# Stop all services (containers remain, data persists).
 down:
     #!/usr/bin/env bash
     set -euo pipefail
-    export COMPOSE_PROFILES="${COMPOSE_PROFILES:+${COMPOSE_PROFILES},}mcp"
     docker compose {{compose_env_args}} -f {{compose_file}} -p {{compose_project}} down
 
 # Build images and start services.
-# Use this after code changes or dependency updates. Honours
-# ENABLE_MCP_SERVER=true (inline or from
-# .envs/.production/.self-hosted/.build) to include the MCP
-# container in the build.
 build:
     #!/usr/bin/env bash
     set -euo pipefail
     eval "$(just self-hosted _load-build-env)"
-    eval "$(just self-hosted _mcp-profile-env)"
     docker compose {{compose_env_args}} -f {{compose_file}} -p {{compose_project}} up -d --build
 
 # Build images without starting (useful for CI/CD).
-# Same ENABLE_MCP_SERVER semantics as `build`.
 build-only:
     #!/usr/bin/env bash
     set -euo pipefail
     eval "$(just self-hosted _load-build-env)"
-    eval "$(just self-hosted _mcp-profile-env)"
     docker compose {{compose_env_args}} -f {{compose_file}} -p {{compose_project}} build
 
 # Wait until the web container accepts management commands
@@ -193,11 +165,8 @@ _wait-web:
 # Builds and starts the stack, applies migrations, seeds default data,
 # registers OIDC clients (for MCP OAuth), and verifies the installation.
 #
-# ensure_oidc_clients is a no-op when no OIDC clients are configured in
-# the env file — so this step is safe on community-only deployments
-# too. For Pro deployments that have set IDP_OIDC_MCP_SERVER_CLIENT_SECRET,
-# this is what creates the Claude Desktop + MCP confidential client
-# rows that make OAuth actually work.
+# ensure_oidc_clients creates the predefined public OAuth clients configured
+# in the Django environment and is safe to run repeatedly.
 bootstrap: check-env build _wait-web
     docker compose {{compose_env_args}} -f {{compose_file}} -p {{compose_project}} exec -T web python manage.py check_migration_history
     docker compose {{compose_env_args}} -f {{compose_file}} -p {{compose_project}} exec -T web python manage.py migrate --noinput
@@ -633,7 +602,6 @@ check-env:
     DJANGO_ENV_FILE="{{django_env_file}}"
     POSTGRES_ENV_FILE="{{postgres_env_file}}"
     BUILD_ENV_FILE="{{build_env_file}}"
-    MCP_ENV_FILE=".envs/.production/.self-hosted/.mcp"
 
     for env_file in "$DJANGO_ENV_FILE" "$POSTGRES_ENV_FILE"; do
         if [ ! -f "$env_file" ]; then
@@ -699,7 +667,7 @@ check-env:
         # explicit recipe environment, then .build, then recipe defaults.
         overrides=""
         for variable_name in \
-            ENABLE_MCP_SERVER MCP_HOST_PORT VALIDATOR_CONTAINER_SOCKET \
+            VALIDATOR_CONTAINER_SOCKET \
             VALIDIBOT_COMMERCIAL_PACKAGE VALIDIBOT_COMMERCIAL_NETRC; do
             if [ "${!variable_name+x}" = x ]; then
                 printf -v override 'export %s=%q\n' "$variable_name" "${!variable_name}"
@@ -760,44 +728,6 @@ check-env:
     else
         echo "  OK: Docker-compatible socket exists: $VALIDATOR_CONTAINER_SOCKET"
     fi
-
-    case "${ENABLE_MCP_SERVER:-false}" in
-        true|True|TRUE|1|yes|Yes|YES)
-            echo ""
-            echo "Checking MCP public transport settings..."
-            if [ ! -f "$MCP_ENV_FILE" ]; then
-                echo "  ERROR: MCP is enabled but $MCP_ENV_FILE is missing"
-                PLACEHOLDER_MATCHES=$((PLACEHOLDER_MATCHES + 1))
-            else
-                MCP_BASE_URL=$(grep -E '^VALIDIBOT_MCP_BASE_URL=' "$MCP_ENV_FILE" | tail -1 | cut -d= -f2- || true)
-                DJANGO_MCP_BASE_URL=$(grep -E '^VALIDIBOT_MCP_BASE_URL=' "$DJANGO_ENV_FILE" | tail -1 | cut -d= -f2- || true)
-
-                case "$MCP_BASE_URL" in
-                    https://*)
-                        echo "  OK: MCP public base URL requires HTTPS"
-                        ;;
-                    *)
-                        echo "  ERROR: VALIDIBOT_MCP_BASE_URL in .mcp must start with https://"
-                        PLACEHOLDER_MATCHES=$((PLACEHOLDER_MATCHES + 1))
-                        ;;
-                esac
-
-                if [ -z "$DJANGO_MCP_BASE_URL" ] || [ "$DJANGO_MCP_BASE_URL" != "$MCP_BASE_URL" ]; then
-                    echo "  ERROR: VALIDIBOT_MCP_BASE_URL must match in .django and .mcp"
-                    PLACEHOLDER_MATCHES=$((PLACEHOLDER_MATCHES + 1))
-                else
-                    echo "  OK: Django and MCP use the same public base URL"
-                fi
-
-                if grep -Eq 'replace-me|replace-with' "$MCP_ENV_FILE"; then
-                    echo "  ERROR: Placeholder values still exist in $MCP_ENV_FILE"
-                    PLACEHOLDER_MATCHES=$((PLACEHOLDER_MATCHES + 1))
-                fi
-            fi
-            ;;
-        *)
-            ;;
-    esac
 
     echo ""
     if [ "$MISSING" -gt 0 ] || [ "$PLACEHOLDER_MATCHES" -gt 0 ]; then
@@ -1785,7 +1715,6 @@ _run-upgrade args:
     # or pyproject changes happened between attempts.
     echo "Step 3/7: Building images (pinned to ${VALIDIBOT_VERSION} @ ${VALIDIBOT_REVISION})..."
     eval "$(just self-hosted _load-build-env)"
-    eval "$(just self-hosted _mcp-profile-env)"
     docker compose {{compose_env_args}} -f {{compose_file}} -p {{compose_project}} build
     echo "  ✓ Images built."
     echo ""

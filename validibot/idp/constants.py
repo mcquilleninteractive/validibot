@@ -1,12 +1,14 @@
-"""Constants shared by the cloud OIDC provider and client bootstrap.
+"""Constants shared by the OIDC provider and public client bootstrap.
 
 These values define the default Claude Desktop / Claude Code client
-registration for the cloud-only MCP OAuth flow. The management command and
+registration for the MCP OAuth flow. The management command and
 settings layer both import from here so the canonical client shape lives in
 one place.
 """
 
 from __future__ import annotations
+
+MCP_OIDC_SCOPE = "validibot:mcp"
 
 CLAUDE_OIDC_CLIENT_ID = "validibot-claude-desktop"
 CLAUDE_OIDC_CLIENT_NAME = "Claude Desktop"
@@ -14,7 +16,7 @@ CLAUDE_OIDC_SCOPES = (
     "openid",
     "profile",
     "email",
-    "validibot:mcp",
+    MCP_OIDC_SCOPE,
 )
 CLAUDE_OIDC_GRANT_TYPES = (
     "authorization_code",
@@ -32,27 +34,24 @@ CLAUDE_OIDC_REDIRECT_URIS = (
 )
 
 
-# ── MCP server confidential client ────────────────────────────────────
-# The MCP Cloud Run service registers as a confidential OAuth client so
-# it can proxy the OAuth flow on behalf of MCP clients like Claude Desktop.
-# This is required because Claude Desktop ignores external authorization
-# endpoints and constructs auth URLs from the MCP server's base URL.
-# See: https://github.com/anthropics/claude-ai-mcp/issues/82
+# ── ChatGPT predefined public client ──────────────────────────────────
+# The exact callback URI is installation-specific and therefore supplied in
+# settings after the plugin builder shows it. This public client always uses
+# authorization code + PKCE and has no secret.
 
-MCP_SERVER_OIDC_CLIENT_ID = "validibot-mcp-server"
-MCP_SERVER_OIDC_CLIENT_NAME = "Validibot MCP Server"
-MCP_SERVER_OIDC_SCOPES = (
+CHATGPT_OIDC_CLIENT_ID = "validibot-chatgpt"
+CHATGPT_OIDC_CLIENT_NAME = "ChatGPT"
+CHATGPT_OIDC_SCOPES = (
     "openid",
     "profile",
     "email",
-    "validibot:mcp",
+    MCP_OIDC_SCOPE,
 )
-MCP_SERVER_OIDC_GRANT_TYPES = (
+CHATGPT_OIDC_GRANT_TYPES = (
     "authorization_code",
     "refresh_token",
 )
-MCP_SERVER_OIDC_RESPONSE_TYPES = ("code",)
-MCP_SERVER_OIDC_REDIRECT_URIS = ("https://mcp.validibot.com/auth/callback",)
+CHATGPT_OIDC_RESPONSE_TYPES = ("code",)
 
 
 def normalize_oidc_values(values: list[str] | tuple[str, ...]) -> tuple[str, ...]:
