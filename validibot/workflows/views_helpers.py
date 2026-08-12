@@ -164,22 +164,10 @@ def describe_workflow_file_type_violation(
     workflow: Workflow,
     file_type: str,
 ) -> str | None:
-    """
-    Describe why the given workflow cannot accept submissions of the given file type.
+    """Return the shared primary-submission admission message, if any.
 
-    Phase 2 of ADR-2026-04-27: this helper now delegates to
-    :class:`validibot.workflows.services.launch_contract.LaunchContract`
-    so the web view, REST API, and MCP helper API (all callers of
-    this helper) share their file-type/step-compatibility decisions
-    with the x402 cloud agent (which calls ``LaunchContract.validate``
-    directly).
-
-    Why this signature stays string-returning: the existing callers
-    (form ``clean_*`` methods, API serializers, MCP helper) all expect
-    a translatable error string for direct display. Changing them
-    all to consume a structured ``LaunchContractViolation`` is the
-    next refactor — for now, this delegation gets the unification at
-    the decision-logic layer and leaves the rendering shape unchanged.
+    Form and API adapters use the display string while the launch contract
+    remains the authoritative structured decision service.
     """
     # Local import to avoid a circular import (services import models;
     # models indirectly import this module via signals).
@@ -1818,10 +1806,10 @@ def build_portfolio_manager_config(
 
 
 def build_pdf_config(form: PdfStepConfigForm) -> dict[str, Any]:
-    """Build strict PDF inventory and fixed exact-selector configuration."""
+    """Build fixed static-text policy and exact-selector configuration."""
     cleaned = form.cleaned_data
     config = {
-        "profile": cleaned.get("profile") or "inventory_v1",
+        "profile": "static_text_package_v1",
         "emit_extracted_files_bundle": bool(cleaned.get("emit_extracted_files_bundle")),
     }
     for suffix in ("xml", "json", "step_p21"):
@@ -1845,9 +1833,6 @@ def build_pdf_config(form: PdfStepConfigForm) -> dict[str, Any]:
                 "discovery_kinds": list(
                     cleaned.get(f"{selector_key}_discovery_kinds") or []
                 ),
-                "rich_media_asset_name": (
-                    cleaned.get(f"{selector_key}_rich_media_asset_name") or ""
-                ).strip(),
             }
             if suffix == "xml":
                 selector["xml_root_qname"] = (
@@ -2075,28 +2060,6 @@ def save_workflow_step(
         config, ruleset = build_tabular_config(workflow, form, step)
     elif vtype == ValidationType.ENERGYPLUS:
         config, template_vars = build_energyplus_config(form, step)
-        # File type enforcement: parameterized templates require JSON-only
-        # submissions (the submitter sends variable values as a flat JSON
-        # object, not an IDF or epJSON file).  Allowing other file types
-        # alongside JSON would let users upload IDF files that the launcher
-        # would attempt to parse as JSON parameters — causing a confusing
-        # error downstream instead of a clear rejection at upload time.
-        has_template = bool(template_vars) or (
-            step is not None
-            and step.pk is not None
-            and step_has_template_variables(step)
-        )
-        if has_template:
-            allowed = [ft.lower() for ft in (workflow.allowed_file_types or [])]
-            if allowed != [SubmissionFileType.JSON.lower()]:
-                raise ValidationError(
-                    _(
-                        "This step uses a parameterized template, which "
-                        "requires JSON-only submissions. Please set the "
-                        "workflow's allowed file types to JSON only before "
-                        "activating a template."
-                    )
-                )
     elif vtype == ValidationType.FMU:
         config, fmu_vars = build_fmu_config(form, step)
     elif vtype == ValidationType.AI_ASSIST:
@@ -2111,8 +2074,8 @@ def save_workflow_step(
         config = {}
 
     # Container execution shape is a semantic part of the workflow contract.
-    # Omit the stable default to keep legacy and newly-authored fast-response
-    # steps canonical; selecting long-running adds the one explicit override.
+    # Omit the stable fast-response default; selecting long-running adds the
+    # one explicit override.
     existing_config = getattr(step, "config", None) or {}
     execution_profile = form.cleaned_data.get("execution_profile")
     if execution_profile == ValidatorExecutionProfile.LONG_RUNNING:
@@ -2144,11 +2107,9 @@ def save_workflow_step(
     elif vtype not in (ValidationType.JSON_SCHEMA, ValidationType.XML_SCHEMA):
         step.ruleset = None
 
-    # Split the freshly-built config into the semantic (``config``, hashed) and
-    # cosmetic (``display_settings``, never hashed) buckets. Replacing both
-    # wholesale mirrors the previous single-field ``step.config = config`` — the
-    # per-builder keep-reads above already re-read prior cosmetic values from
-    # ``display_settings`` so nothing an author set is dropped (ADR-2026-06-18).
+    # Split the freshly-built settings into semantic (hashed) and cosmetic
+    # (unhashed) buckets. Builders already preserve author-selected cosmetic
+    # values through ``display_settings``.
     step.config, step.display_settings = partition_step_config(vtype, config)
 
     if is_new:

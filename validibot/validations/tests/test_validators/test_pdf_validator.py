@@ -40,6 +40,13 @@ def test_pdf_step_config_rejects_a_deadline_above_the_backend_ceiling() -> None:
         PdfStepConfig(execution_timeout_seconds=301)
 
 
+@pytest.mark.parametrize("legacy_profile", ["inventory_v1", "safe_static_package_v1"])
+def test_pdf_step_config_rejects_every_legacy_profile(legacy_profile: str) -> None:
+    """Machine-authored workflows cannot bypass the fixed static-text policy."""
+    with pytest.raises(ValidationError, match="static_text_package_v1"):
+        PdfStepConfig(profile=legacy_profile)
+
+
 def _file_port(
     *,
     validator,
@@ -88,8 +95,10 @@ def test_pdf_catalog_declares_isolated_fixed_typed_ports() -> None:
     assert config.validation_type == ValidationType.PDF
     assert config.compute_tier == ComputeTier.LOW
     assert config.execution_backend_slug == "pdf"
+    assert "static_text_package_v1" in config.description
+    assert "there is no less restrictive mode" in config.description
     assert config.output_envelope_class == "validibot_shared.pdf.PdfOutputEnvelope"
-    assert config.supported_file_types == [SubmissionFileType.PDF]
+    assert entries["pdf_document"].accepted_file_types == [SubmissionFileType.PDF]
     assert ValidationType.PDF in ADVANCED_VALIDATION_TYPES
     assert set(entries) >= {
         "pdf_document",
@@ -138,7 +147,6 @@ def test_pdf_form_builds_exact_typed_selectors_and_file_source() -> None:
         data={
             "name": "Inspect engineering PDF",
             "description": "Inventory and expose the handover XML.",
-            "profile": "inventory_v1",
             "pdf_document_source": BindingSourceScope.SUBMISSION_FILE,
             "select_xml": "on",
             "selected_xml_required": "on",
@@ -154,7 +162,6 @@ def test_pdf_form_builds_exact_typed_selectors_and_file_source() -> None:
             "selected_json_required": "on",
             "selected_json_filename": "asset-index.json",
             "selected_json_declared_media_type": "application/json",
-            "selected_json_rich_media_asset_name": "asset-index",
             "select_step_p21": "on",
             "selected_step_p21_required": "on",
             "selected_step_p21_filename": "assembly.p21",
@@ -167,6 +174,7 @@ def test_pdf_form_builds_exact_typed_selectors_and_file_source() -> None:
     )
 
     assert form.is_valid(), form.errors
+    assert "profile" not in form.fields
     assert form.build_file_port_binding_updates()[0]["source_data_path"] == "primary"
     built_config = build_pdf_config(form)
     assert built_config["selected_xml"] == {
@@ -176,7 +184,6 @@ def test_pdf_form_builds_exact_typed_selectors_and_file_source() -> None:
         "af_relationship": "",
         "detected_media_type": "application/xml",
         "discovery_kinds": ["embedded_files_name_tree", "associated_file"],
-        "rich_media_asset_name": "",
         "xml_root_qname": "{urn:example:asset}handover",
     }
     assert built_config["selected_json"] == {
@@ -186,7 +193,6 @@ def test_pdf_form_builds_exact_typed_selectors_and_file_source() -> None:
         "af_relationship": "",
         "detected_media_type": "",
         "discovery_kinds": [],
-        "rich_media_asset_name": "asset-index",
     }
     assert built_config["selected_step_p21"] == {
         "required": True,
@@ -195,7 +201,6 @@ def test_pdf_form_builds_exact_typed_selectors_and_file_source() -> None:
         "af_relationship": "",
         "detected_media_type": "",
         "discovery_kinds": [],
-        "rich_media_asset_name": "",
         "step_file_schema": ["AP242_FIXTURE", "CONFIG_CONTROL_DESIGN"],
     }
 
@@ -210,12 +215,11 @@ def test_pdf_form_round_trips_every_exact_selector_field() -> None:
         config={
             "selected_json": {
                 "required": True,
-                "discovery_kinds": ["rich_media_asset"],
+                "discovery_kinds": ["file_attachment_annotation"],
                 "original_filename": "index.json",
                 "declared_media_type": "application/json",
                 "detected_media_type": "application/json",
                 "af_relationship": "Data",
-                "rich_media_asset_name": "asset-index",
             },
             "selected_step_p21": {
                 "required": True,
@@ -232,11 +236,12 @@ def test_pdf_form_round_trips_every_exact_selector_field() -> None:
         proposed_order=step.order,
     )
 
-    assert form.fields["selected_json_discovery_kinds"].initial == ["rich_media_asset"]
+    assert form.fields["selected_json_discovery_kinds"].initial == [
+        "file_attachment_annotation"
+    ]
     assert form.fields["selected_json_detected_media_type"].initial == (
         "application/json"
     )
-    assert form.fields["selected_json_rich_media_asset_name"].initial == ("asset-index")
     assert form.fields["selected_step_p21_file_schema"].initial == (
         "AP242_FIXTURE\nCONFIG_CONTROL_DESIGN"
     )

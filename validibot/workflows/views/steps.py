@@ -33,8 +33,6 @@ from validibot.actions.models import SlackMessageAction
 from validibot.actions.registry import get_action_form
 from validibot.core.utils import reverse_with_org
 from validibot.core.view_helpers import hx_trigger_response
-from validibot.submissions.constants import SubmissionDataFormat
-from validibot.submissions.constants import SubmissionFileType
 from validibot.validations.constants import BindingSourceScope
 from validibot.validations.constants import CatalogRunStage
 from validibot.validations.constants import JSONSchemaVersion
@@ -91,6 +89,7 @@ def workflow_step_validator_queryset(
     workflow: Workflow,
     *,
     include_coming_soon: bool = False,
+    include_unavailable: bool = False,
 ):
     """Return validators that are visible for workflow-step authoring."""
 
@@ -101,9 +100,12 @@ def workflow_step_validator_queryset(
     )
     queryset = Validator.objects.filter(
         accessible_to_workflow,
-        availability_state=ValidatorAvailabilityState.AVAILABLE,
-        is_enabled=True,
     )
+    if not include_unavailable:
+        queryset = queryset.filter(
+            availability_state=ValidatorAvailabilityState.AVAILABLE,
+            is_enabled=True,
+        )
     if include_coming_soon:
         queryset = queryset.exclude(release_state=ValidatorReleaseState.DRAFT)
     else:
@@ -361,7 +363,11 @@ class WorkflowStepWizardView(WorkflowObjectMixin, View):
         final display order is restored in Python afterwards.
         """
         latest_per_slug = (
-            workflow_step_validator_queryset(workflow, include_coming_soon=True)
+            workflow_step_validator_queryset(
+                workflow,
+                include_coming_soon=True,
+                include_unavailable=True,
+            )
             .order_by("slug", "-version", "-pk")
             .distinct("slug")
         )
@@ -369,8 +375,6 @@ class WorkflowStepWizardView(WorkflowObjectMixin, View):
             latest_per_slug,
             key=lambda v: (v.validation_type, v.name.lower(), v.pk),
         )
-        for validator in validators:
-            self._ensure_validator_defaults(validator)
         return validators
 
     def _available_action_definitions(self) -> list[ActionDefinition]:
@@ -542,44 +546,12 @@ class WorkflowStepWizardView(WorkflowObjectMixin, View):
 
         return tabs, options
 
-    def _ensure_validator_defaults(self, validator: Validator) -> None:
-        """
-        Backfill expected supported formats/file types for validators created
-        before defaults expanded (notably FMU, which now accepts JSON/TEXT).
-        """
-        if validator.validation_type != ValidationType.FMU:
-            return
-        changed = False
-        if validator.supported_file_types is None:
-            validator.supported_file_types = []
-            changed = True
-        if validator.supported_data_formats is None:
-            validator.supported_data_formats = []
-            changed = True
-        for ft in (SubmissionFileType.JSON, SubmissionFileType.TEXT):
-            if ft not in validator.supported_file_types:
-                validator.supported_file_types.append(ft)
-                changed = True
-        for fmt in (SubmissionDataFormat.JSON, SubmissionDataFormat.TEXT):
-            if fmt not in validator.supported_data_formats:
-                validator.supported_data_formats.append(fmt)
-                changed = True
-        # Only persist on a mutating request. A GET that renders the step
-        # wizard (plus crawlers, link-preview bots, and browser prefetch) must
-        # be side-effect-free per HTTP semantics. The in-memory backfill above
-        # already makes the rendered validator show the right types; the row
-        # is persisted the next time a POST actually touches this validator.
-        if changed and self.request.method == "POST":
-            validator.save(
-                update_fields=["supported_file_types", "supported_data_formats"],
-            )
-
     def _serialize_validator(
         self,
         validator: Validator,
     ) -> dict[str, object]:
         cfg = get_config(validator.validation_type)
-        disabled_reason = None
+        disabled_reason: str | None = None
         is_disabled = False
         short_description = validator.short_description
         if not short_description and cfg is not None:
@@ -591,7 +563,10 @@ class WorkflowStepWizardView(WorkflowObjectMixin, View):
         # to typed outputs from earlier steps.
         if validator.is_coming_soon:
             is_disabled = True
-            disabled_reason = _("Coming soon")
+            disabled_reason = str(_("Coming soon"))
+        elif not validator.is_runtime_available:
+            is_disabled = True
+            disabled_reason = validator.runtime_unavailable_reason()
 
         return {
             "value": f"validator:{validator.pk}",

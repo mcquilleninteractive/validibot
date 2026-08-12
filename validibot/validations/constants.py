@@ -854,9 +854,18 @@ def get_resource_types_for_validator(validation_type: str) -> list[str]:
     from validibot.validations.validators.base.config import get_config
 
     cfg = get_config(validation_type)
-    if cfg:
-        return list(cfg.resource_types)
-    return []
+    if not cfg:
+        return []
+    return sorted(
+        {
+            entry.resource_type
+            for entry in cfg.catalog_entries
+            if entry.entry_type == CatalogEntryType.IO_DEFINITION
+            and entry.run_stage == CatalogRunStage.INPUT
+            and entry.io_medium == StepIOMedium.ARTIFACT
+            and entry.resource_type
+        }
+    )
 
 
 # CEL evaluation limits (adjust as needed)

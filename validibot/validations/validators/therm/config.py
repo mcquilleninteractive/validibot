@@ -40,18 +40,12 @@ config = ValidatorConfig(
     ),
     validation_type=ValidationType.THERM,
     validator_class=("validibot.validations.validators.therm.validator.ThermValidator"),
-    version=2,
+    version=3,
     order=30,
     has_processor=False,
     is_system=True,
     supports_assertions=True,
     compute_tier=ComputeTier.HIGH,
-    supported_file_types=[SubmissionFileType.XML, SubmissionFileType.BINARY],
-    supported_data_formats=[
-        SubmissionDataFormat.THERM_THMX,
-        SubmissionDataFormat.THERM_THMZ,
-    ],
-    allowed_extensions=["thmx", "thmz"],
     catalog_entries=[
         CatalogEntrySpec(
             slug="therm_model",
@@ -62,7 +56,8 @@ config = ValidatorConfig(
             description=(
                 "Resolved THMX or THMZ model parsed and checked by this step."
             ),
-            metadata={"accepted_extensions": ["thmx", "thmz"]},
+            accepted_file_types=[SubmissionFileType.XML, SubmissionFileType.BINARY],
+            accepted_extensions=["thmx", "thmz"],
             is_required=True,
             on_missing="error",
             order=1,

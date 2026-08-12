@@ -100,14 +100,17 @@ class TabularValidator(BaseValidator):
 
         dialect, limits, report_max_examples = self._load_settings(ruleset)
 
-        # 2. Read the body. Content arrives pre-decoded from get_content(); we
-        #    re-encode as UTF-8 and read as UTF-8. Encoding is pinned to UTF-8
-        #    in V1 (there is no editable encoding setting) because get_content()
-        #    has already decoded the submission — honoring another encoding needs
-        #    a raw-bytes read path (a future slice). A read failure (oversized,
-        #    ragged, undecodable) becomes a single finding carrying its code.
-        content = submission.get_content() or ""
-        content_bytes = content.encode("utf-8") if isinstance(content, str) else content
+        resolved_file = (
+            (run_context.resolved_file_inputs or {}).get("table_document")
+            if run_context is not None
+            else None
+        )
+        if resolved_file is None or resolved_file.content is None:
+            return self._single_error(
+                "required_input_missing",
+                "The table document input was not resolved.",
+            )
+        content_bytes = resolved_file.content
         declared_columns = None if dialect.has_header else schema.field_names()
         try:
             read_result = read_csv(
@@ -126,7 +129,7 @@ class TabularValidator(BaseValidator):
         # 3. Dataset input values (i.*) — built before the dataset gate so
         #    `i.num_rows`/`i.column_names`/… resolve, and returned for downstream
         #    steps. Derived only from the parsed dataframe + submission.
-        self._input_values = self._build_input_values(read_result, submission)
+        self._input_values = self._build_input_values(read_result, resolved_file.name)
 
         # 4. Dataset (input-stage) CEL assertions run BEFORE the native / row /
         #    column passes (ADR-2026-05-26): a *failing* dataset assertion
@@ -437,13 +440,8 @@ class TabularValidator(BaseValidator):
     def _build_input_values(
         self,
         read_result: ReadResult,
-        submission: Submission,
+        filename: str,
     ) -> dict[str, Any]:
-        filename = (
-            getattr(submission, "input_filename", None)
-            or getattr(submission, "original_filename", None)
-            or ""
-        )
         preflight = read_result.preflight
         values = {
             "num_rows": read_result.num_rows,

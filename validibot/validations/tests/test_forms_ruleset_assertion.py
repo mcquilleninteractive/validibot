@@ -734,7 +734,7 @@ class RulesetAssertionFormTests(TestCase):
             description="New Desc",
             notes="New Notes",
             allow_custom_assertion_targets=True,
-            supported_data_formats=["json"],
+            input_data_format="json",
         )
         updated.validator.refresh_from_db()
         self.assertEqual(updated.validator.name, "New Name")
@@ -742,7 +742,11 @@ class RulesetAssertionFormTests(TestCase):
         self.assertEqual(updated.validator.description, "New Desc")
         self.assertEqual(updated.validator.version, original_version)
         self.assertTrue(updated.validator.allow_custom_assertion_targets)
-        self.assertEqual(updated.validator.supported_data_formats, ["json"])
+        document_port = updated.validator.step_io_definitions.get(
+            contract_key="document",
+            direction="input",
+        )
+        self.assertEqual(document_port.accepted_data_formats, ["json"])
         self.assertEqual(updated.notes, "New Notes")
 
     def test_target_resolution_prefers_input_without_prefix(self):

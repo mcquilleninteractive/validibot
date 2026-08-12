@@ -90,6 +90,22 @@ class AdvancedValidationProcessor(ValidationStepProcessor):
 
         run_context = self._build_run_context()
 
+        # Input contracts are evaluated before an execution attempt or provider
+        # dispatch exists. A concrete mismatch is a normal validation failure,
+        # not an infrastructure launch failure.
+        from validibot.validations.services.input_contracts import InputResolutionError
+        from validibot.validations.services.input_contracts import (
+            validate_runtime_input_contracts,
+        )
+
+        try:
+            validate_runtime_input_contracts(
+                run=self.validation_run,
+                step=self.workflow_step,
+            )
+        except InputResolutionError as exc:
+            return self._handle_error(exc)
+
         # Create durable identity before any provider work. A redelivery that
         # observes an already-claimed attempt must not call the provider again;
         # reconciliation owns that case.
@@ -500,13 +516,27 @@ class AdvancedValidationProcessor(ValidationStepProcessor):
 
     def _handle_error(self, error: Exception) -> StepProcessingResult:
         """Handle validation errors gracefully."""
-        issues = [
-            ValidationIssue(
-                path="",
-                message=str(error),
-                severity=Severity.ERROR,
-            ),
-        ]
+        from validibot.validations.services.input_contracts import InputResolutionError
+
+        if isinstance(error, InputResolutionError):
+            issues = [
+                ValidationIssue(
+                    path=diagnostic.contract_key,
+                    message=diagnostic.message,
+                    severity=Severity.ERROR,
+                    code=diagnostic.code,
+                    meta=diagnostic.as_meta(),
+                )
+                for diagnostic in error.diagnostics
+            ]
+        else:
+            issues = [
+                ValidationIssue(
+                    path="",
+                    message=str(error),
+                    severity=Severity.ERROR,
+                ),
+            ]
         severity_counts, _ = self.persist_findings(issues)
         self.finalize_step(StepStatus.FAILED, {}, error=str(error))
 
@@ -514,7 +544,7 @@ class AdvancedValidationProcessor(ValidationStepProcessor):
             passed=False,
             step_run=self.step_run,
             severity_counts=severity_counts,
-            total_findings=1,
+            total_findings=len(issues),
             assertion_failures=0,
             assertion_total=0,
         )

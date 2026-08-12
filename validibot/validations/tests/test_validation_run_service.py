@@ -18,19 +18,26 @@ from validibot.users.constants import RoleCode
 from validibot.users.tests.factories import OrganizationFactory
 from validibot.users.tests.factories import UserFactory
 from validibot.users.tests.factories import grant_role
+from validibot.validations.constants import ArtifactKind
+from validibot.validations.constants import BindingSourceScope
+from validibot.validations.constants import CatalogValueType
 from validibot.validations.constants import RulesetType
 from validibot.validations.constants import Severity
+from validibot.validations.constants import StepIODirection
+from validibot.validations.constants import StepIOMedium
 from validibot.validations.constants import StepStatus
 from validibot.validations.constants import ValidationRunStatus
 from validibot.validations.constants import ValidationType
 from validibot.validations.models import ValidationFinding
 from validibot.validations.models import ValidationRun
 from validibot.validations.models import ValidationRunSummary
+from validibot.validations.services.artifact_bindings import set_artifact_input_binding
 from validibot.validations.services.step_orchestrator import StepOrchestrator
 from validibot.validations.services.step_processor.result import StepProcessingResult
 from validibot.validations.services.validation_run import ValidationRunService
 from validibot.validations.tests.factories import RulesetAssertionFactory
 from validibot.validations.tests.factories import RulesetFactory
+from validibot.validations.tests.factories import StepIODefinitionFactory
 from validibot.validations.tests.factories import ValidatorFactory
 from validibot.workflows.tests.factories import WorkflowFactory
 from validibot.workflows.tests.factories import WorkflowStepFactory
@@ -229,8 +236,6 @@ def test_execute_rejects_incompatible_file_type():
         org=org,
         validation_type=ValidationType.JSON_SCHEMA,
         is_system=False,
-        supported_data_formats=[SubmissionDataFormat.JSON],
-        supported_file_types=["json"],
     )
     ruleset = RulesetFactory(
         org=org,
@@ -238,6 +243,28 @@ def test_execute_rejects_incompatible_file_type():
         ruleset_type=RulesetType.JSON_SCHEMA,
     )
     step = WorkflowStepFactory(workflow=workflow, validator=validator, ruleset=ruleset)
+    port = StepIODefinitionFactory(
+        validator=validator,
+        workflow_step=None,
+        contract_key="json_document",
+        direction=StepIODirection.INPUT,
+        data_type=CatalogValueType.ARTIFACT_REF,
+        io_medium=StepIOMedium.ARTIFACT,
+        artifact_kind=ArtifactKind.FILE,
+        data_format=SubmissionDataFormat.JSON,
+        accepted_data_formats=[SubmissionDataFormat.JSON],
+        accepted_file_types=[SubmissionFileType.JSON],
+        accepted_extensions=["json"],
+        allowed_source_scopes=[BindingSourceScope.SUBMISSION_FILE],
+        min_items=1,
+        max_items=1,
+    )
+    set_artifact_input_binding(
+        consumer_step=step,
+        consumer_port=port,
+        source_scope=BindingSourceScope.SUBMISSION_FILE,
+        source_data_path="primary",
+    )
     submission = SubmissionFactory(
         org=org,
         project=workflow.project,
@@ -260,7 +287,8 @@ def test_execute_rejects_incompatible_file_type():
 
     assert result.passed is False
     assert result.issues
-    assert "not supported" in result.issues[0].message
+    assert result.issues[0].code == "input_file_type_incompatible"
+    assert "requires JSON" in result.issues[0].message
 
 
 @pytest.mark.django_db

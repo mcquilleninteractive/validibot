@@ -553,6 +553,9 @@ class Submission(TimeStampedModel):
     def clean(self, *args, **kwargs):
         errors = {}
 
+        if not isinstance(self.metadata, dict):
+            errors["metadata"] = _("Submission metadata must be a JSON object.")
+
         # Require same-org relationships (DB can't enforce this natively)
         if self.project_id and self.project.org_id != self.org_id:
             errors["project"] = _("Project must belong to the same organization.")
@@ -578,6 +581,10 @@ class Submission(TimeStampedModel):
         super().clean()
 
     def save(self, *args, **kwargs):
+        if not isinstance(self.metadata, dict):
+            raise ValidationError(
+                {"metadata": _("Submission metadata must be a JSON object.")}
+            )
         update_fields = kwargs.get("update_fields")
         touched_fields: set[str] = set()
 

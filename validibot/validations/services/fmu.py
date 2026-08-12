@@ -19,7 +19,6 @@ from validibot_shared.fmu import FMUProbeResult as FMUProbeResultSchema
 from validibot_shared.fmu import FMUVariableMeta
 
 from validibot.submissions.constants import SubmissionDataFormat
-from validibot.submissions.constants import SubmissionFileType
 from validibot.validations.constants import FMU_MODEL_RESOURCE
 from validibot.validations.constants import ArtifactKind
 from validibot.validations.constants import BindingSourceScope
@@ -516,6 +515,7 @@ def _fmu_model_port_step_io_defaults() -> dict[str, Any]:
         "data_format": SubmissionDataFormat.FMU,
         "accepted_data_formats": [SubmissionDataFormat.FMU],
         "accepted_media_types": ["application/vnd.fmi.fmu"],
+        "accepted_extensions": ["fmu"],
         "allowed_source_scopes": [
             BindingSourceScope.SYSTEM,
             BindingSourceScope.WORKFLOW_RESOURCE,
@@ -531,7 +531,7 @@ def _fmu_model_port_step_io_defaults() -> dict[str, Any]:
             "envelope_channel": EnvelopeChannel.INPUT_FILES,
             "role": "fmu",
         },
-        "metadata": {"accepted_extensions": ["fmu"]},
+        "metadata": {},
         "on_missing": "error",
         "order": 1,
     }
@@ -699,8 +699,6 @@ def create_fmu_validator(
             validation_type=ValidationType.FMU,
             has_processor=True,
             fmu_model=fmu,
-            supported_file_types=[SubmissionFileType.BINARY],
-            supported_data_formats=[SubmissionDataFormat.FMU],
             supports_assertions=True,
         )
 

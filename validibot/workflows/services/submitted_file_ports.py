@@ -54,9 +54,9 @@ def submitted_file_port_requirements(
 ) -> list[SubmittedFilePortRequirement]:
     """Return submitted-file artifact ports that need launch-page file fields.
 
-    The historical primary submission field continues to satisfy primary model
-    ports. This helper returns only extra submitted-file ports by default, such
-    as EnergyPlus ``weather_file`` when the author selected "Submitted file".
+    The primary submission has its own launch field. This helper returns only
+    auxiliary submitted-file ports by default, such as an EnergyPlus
+    ``weather_file`` whose author-selected source is "Submitted file".
     """
 
     from validibot.validations.models import StepInputBinding
@@ -102,10 +102,9 @@ def submitted_file_port_requirements(
 
 
 def _accepted_extensions(io_definition) -> tuple[str, ...]:
-    """Return lowercase extensions declared on the artifact port metadata."""
+    """Return lowercase extensions declared on the artifact port."""
 
-    metadata = io_definition.metadata or {}
-    extensions = metadata.get("accepted_extensions") or []
+    extensions = io_definition.accepted_extensions or []
     normalized = []
     for ext in extensions:
         value = str(ext or "").strip().lower().lstrip(".")

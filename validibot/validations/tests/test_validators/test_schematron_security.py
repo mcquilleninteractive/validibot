@@ -18,6 +18,8 @@ container-side and covered by the backend repo's tests (layer C).
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 from django.core.exceptions import ValidationError
 
@@ -196,7 +198,9 @@ def test_schematron_source_guard_enforces_size_and_depth_caps(settings):
         validate_schematron_source(deep)
 
 
-def test_preprocess_submission_converts_guard_failures_to_validation_errors():
+def test_preprocess_submission_converts_guard_failures_to_validation_errors(
+    monkeypatch,
+):
     """The validator's preprocess hook rejects unsafe XML pre-dispatch.
 
     ``AdvancedValidator.validate()`` converts the ``ValidationError`` raised
@@ -204,12 +208,22 @@ def test_preprocess_submission_converts_guard_failures_to_validation_errors():
     compute cost for a payload we would refuse anyway (D8a).
     """
     validator = SchematronValidator()
+    monkeypatch.setattr(
+        validator,
+        "resolve_file_input",
+        lambda *args, **kwargs: SimpleNamespace(content=XXE_PAYLOAD.encode()),
+    )
     with pytest.raises(ValidationError):
         validator.preprocess_submission(
             step=None,
             submission=_StubSubmission(XXE_PAYLOAD),
         )
     # And a benign submission passes the same hook without complaint.
+    monkeypatch.setattr(
+        validator,
+        "resolve_file_input",
+        lambda *args, **kwargs: SimpleNamespace(content=b"<invoice/>"),
+    )
     assert (
         validator.preprocess_submission(
             step=None,

@@ -54,6 +54,7 @@ from validibot.validations.services.findings_display import format_failed_rows
 from validibot.validations.tests.factories import RulesetAssertionFactory
 from validibot.validations.tests.factories import RulesetFactory
 from validibot.validations.tests.factories import ValidatorFactory
+from validibot.validations.tests.resolved_file_inputs import run_context_with_file
 from validibot.validations.validators.tabular.native import CODE_ENUM_VIOLATION
 from validibot.validations.validators.tabular.native import CODE_OUT_OF_RANGE
 from validibot.validations.validators.tabular.native import CODE_PATTERN_MISMATCH
@@ -145,7 +146,18 @@ def _run(*, content: str, row_rules: tuple[tuple[str, str], ...] = ()):
             message_template=message,
         )
     submission = SubmissionFactory(content=content, file_type=SubmissionFileType.TEXT)
-    return TabularValidator().validate(validator, submission, ruleset)
+    run_context = run_context_with_file(
+        contract_key="table_document",
+        content=content,
+        file_type=SubmissionFileType.TEXT,
+        name="occurrence.csv",
+    )
+    return TabularValidator().validate(
+        validator,
+        submission,
+        ruleset,
+        run_context=run_context,
+    )
 
 
 def _paths_for(result, code: str) -> set[str]:

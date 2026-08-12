@@ -20,10 +20,11 @@ class PdfValidator(AdvancedValidator):
 
     def preprocess_submission(self, *, step, submission) -> dict[str, object]:
         """Reject non-PDF carriers before spending isolated compute."""
-        del step
-        if Path(submission.original_filename or "").suffix.casefold() != ".pdf":
+        del step, submission
+        resolved = self.resolve_file_input("pdf_document", load_content=False)
+        if Path(resolved.name).suffix.casefold() != ".pdf":
             raise ValidationError("PDF Package Validator requires one .pdf file.")
-        if submission.size_bytes > PDF_MAX_SUBMISSION_BYTES:
+        if resolved.identity.size_bytes > PDF_MAX_SUBMISSION_BYTES:
             raise ValidationError("PDF submissions must be 250 MB or smaller.")
         return {}
 

@@ -38,6 +38,8 @@ from validibot.validations.tests.factories import ValidatorFactory
 from validibot.workflows.tests.factories import WorkflowStepFactory
 
 EXPECTED_SYSTEM_ARTIFACT_INPUTS = {
+    "ai-assisted-validator": {"document"},
+    "basic-validator": {"document"},
     "energyplus-idf-validator": {"primary_model", "weather_file"},
     "fmu-validator": {"fmu_model"},
     "json-schema-validator": {"json_document"},
@@ -48,6 +50,7 @@ EXPECTED_SYSTEM_ARTIFACT_INPUTS = {
     },
     "schematron-validator": {"xml_document"},
     "shacl-validator": {"data_graph"},
+    "tabular-validator": {"table_document"},
     "therm-validator": {"therm_model"},
     "xml-validator": {"xml_document"},
 }
@@ -461,20 +464,16 @@ class TestEnsureStepInputBindingsIdempotency(TestCase):
 
 
 # ── source_kind and is_path_editable ────────────────────────────────
-# These fields live on StepIODefinition and describe how the port's
-# value is obtained. They should NOT affect binding creation — bindings
-# are always created regardless of source_kind or path editability.
+# These fields live on StepIODefinition and describe how the port's value is
+# obtained. Internal values belong to the validator and must not be exposed as
+# author-selectable external bindings.
 
 
 class TestEnsureStepInputBindingsSourceKind(TestCase):
-    """Verify that source_kind/is_path_editable don't affect binding creation."""
+    """Verify that source ownership determines whether a binding is created."""
 
-    def test_internal_non_editable_inputs_still_get_bindings(self):
-        """INTERNAL I/O definitions with is_path_editable=False should still get
-        StepInputBinding rows. The binding exists so the resolution engine
-        activates — the is_path_editable flag only controls UI editability,
-        not whether a binding is created.
-        """
+    def test_internal_inputs_do_not_get_external_bindings(self):
+        """Validator-produced inputs must not be mapped to submission paths."""
         from validibot.validations.constants import StepIOSourceKind
 
         validator = ValidatorFactory()
@@ -490,7 +489,7 @@ class TestEnsureStepInputBindingsSourceKind(TestCase):
 
         count = ensure_step_input_bindings(step)
 
-        self.assertEqual(count, 1)
-        self.assertTrue(
+        self.assertEqual(count, 0)
+        self.assertFalse(
             StepInputBinding.objects.filter(workflow_step=step).exists(),
         )

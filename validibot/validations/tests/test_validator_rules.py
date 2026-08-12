@@ -3,6 +3,7 @@ from http import HTTPStatus
 import pytest
 from django.urls import reverse
 
+from validibot.submissions.constants import SubmissionDataFormat
 from validibot.users.constants import RoleCode
 from validibot.users.tests.factories import OrganizationFactory
 from validibot.users.tests.factories import UserFactory
@@ -156,6 +157,7 @@ def test_default_assertion_move_reorders(client):
         name="Movable",
         description="",
         custom_type="BASIC",
+        input_data_format=SubmissionDataFormat.JSON,
     ).validator
     default_ruleset = validator.ensure_default_ruleset()
     RulesetAssertion.objects.create(
@@ -217,6 +219,7 @@ def test_author_not_creator_cannot_move(client):
         name="Movable",
         description="",
         custom_type="BASIC",
+        input_data_format=SubmissionDataFormat.JSON,
     ).validator
     default_ruleset = created.ensure_default_ruleset()
     assertion = RulesetAssertion.objects.create(

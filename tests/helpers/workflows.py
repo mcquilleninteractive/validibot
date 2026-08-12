@@ -11,6 +11,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from typing import Any
 
+from validibot.validations.services.custom_validator_contracts import (
+    sync_configured_io_contract,
+)
 from validibot.validations.services.input_bindings import ensure_step_input_bindings
 from validibot.workflows.tests.factories import WorkflowStepFactory
 
@@ -27,6 +30,9 @@ def create_workflow_step_with_default_bindings(**step_fields: Any) -> WorkflowSt
     config-managed input receives an explicit ``StepInputBinding`` before the
     workflow can launch.
     """
+    validator = step_fields.get("validator")
+    if validator is not None:
+        sync_configured_io_contract(validator=validator)
     step = WorkflowStepFactory(**step_fields)
     ensure_step_input_bindings(step)
     return step

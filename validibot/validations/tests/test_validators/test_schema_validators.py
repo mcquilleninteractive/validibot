@@ -17,16 +17,11 @@ from validibot.validations.tests.factories import RulesetAssertionFactory
 from validibot.validations.tests.factories import RulesetFactory
 from validibot.validations.tests.factories import ValidationRunFactory
 from validibot.validations.tests.factories import ValidatorFactory
+from validibot.validations.tests.resolved_file_inputs import resolved_file_input
+from validibot.validations.tests.resolved_file_inputs import run_context_with_file
 from validibot.validations.validators.json_schema.validator import JsonSchemaValidator
 from validibot.validations.validators.xml_schema.validator import XmlSchemaValidator
 from validibot.workflows.tests.factories import WorkflowStepFactory
-
-
-class _ResolvedFile:
-    """Minimal resolved-file fixture carrying authoritative artifact bytes."""
-
-    def __init__(self, content: bytes):
-        self.content = content
 
 
 def _run_context_for(validator, submission):
@@ -43,7 +38,18 @@ def _run_context_for(validator, submission):
     submission.workflow = step.workflow
     submission.save(update_fields=["org", "project", "workflow", "modified"])
     run = ValidationRunFactory(workflow=step.workflow, submission=submission)
-    return RunContext(validation_run=run, step=step, upstream_steps={})
+    contract_key = {
+        ValidationType.JSON_SCHEMA: "json_document",
+        ValidationType.XML_SCHEMA: "xml_document",
+    }[validator.validation_type]
+    return run_context_with_file(
+        contract_key=contract_key,
+        content=submission.content,
+        file_type=submission.file_type,
+        validation_run=run,
+        step=step,
+        upstream_steps={},
+    )
 
 
 def test_json_schema_validator_runs_step_assertions_after_schema_validation(db):
@@ -72,7 +78,16 @@ def test_json_schema_validator_runs_step_assertions_after_schema_validation(db):
         file_type=SubmissionFileType.JSON,
     )
 
-    result = JsonSchemaValidator().validate(validator, submission, ruleset)
+    result = JsonSchemaValidator().validate(
+        validator,
+        submission,
+        ruleset,
+        run_context=run_context_with_file(
+            contract_key="json_document",
+            content=submission.content,
+            file_type=SubmissionFileType.JSON,
+        ),
+    )
 
     assert result.passed is False
     assert result.stats["schema_error_count"] == 0
@@ -116,7 +131,16 @@ def test_xml_schema_validator_runs_step_assertions_after_schema_validation(db):
         file_type=SubmissionFileType.XML,
     )
 
-    result = XmlSchemaValidator().validate(validator, submission, ruleset)
+    result = XmlSchemaValidator().validate(
+        validator,
+        submission,
+        ruleset,
+        run_context=run_context_with_file(
+            contract_key="xml_document",
+            content=submission.content,
+            file_type=SubmissionFileType.XML,
+        ),
+    )
 
     assert result.passed is False
     assert result.stats["schema_error_count"] == 0
@@ -144,7 +168,13 @@ def test_json_schema_validator_prefers_resolved_artifact_bytes(db):
         file_type=SubmissionFileType.BINARY,
     )
     run_context = RunContext(
-        resolved_file_inputs={"json_document": _ResolvedFile(b'{"asset_id": "A-42"}')}
+        resolved_file_inputs={
+            "json_document": resolved_file_input(
+                contract_key="json_document",
+                content=b'{"asset_id": "A-42"}',
+                file_type=SubmissionFileType.JSON,
+            )
+        }
     )
 
     result = JsonSchemaValidator().validate(
@@ -177,7 +207,13 @@ def test_xml_schema_validator_prefers_resolved_artifact_bytes(db):
         file_type=SubmissionFileType.BINARY,
     )
     run_context = RunContext(
-        resolved_file_inputs={"xml_document": _ResolvedFile(b"<asset>A-42</asset>")}
+        resolved_file_inputs={
+            "xml_document": resolved_file_input(
+                contract_key="xml_document",
+                content=b"<asset>A-42</asset>",
+                file_type=SubmissionFileType.XML,
+            )
+        }
     )
 
     result = XmlSchemaValidator().validate(

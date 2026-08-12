@@ -101,6 +101,52 @@ needs network access.
 Per-validator network capabilities and allowlists are future work. Until that
 policy exists, network access is a deployment-wide operator choice.
 
+The PDF validator is stricter than this deployment-wide default. It always
+forces `network_mode="none"`, even when `VALIDATOR_NETWORK` is set for another
+backend. It also uses no IPC, a reduced PID ceiling, a read-only root filesystem,
+and a non-executable `tmpfs` for scratch files.
+
+For internet-facing or otherwise adversarial PDF uploads, install a stronger
+container runtime such as gVisor and require it rather than silently falling
+back to the host's ordinary runtime:
+
+```dotenv
+VALIDATOR_PDF_CONTAINER_RUNTIME=runsc
+VALIDATOR_PDF_REQUIRE_STRONG_SANDBOX=true
+```
+
+Test that `runsc` is installed and registered with the selected Docker daemon
+before enabling the requirement. A missing or misspelled runtime intentionally
+causes PDF launches to fail closed. Kata Containers can be selected by its
+locally registered Docker runtime name instead.
+
+The PDF backend also reduces its parser surface through the fixed
+`static_text_package_v1` content policy. It accepts only unencrypted PDFs,
+document-level XML XMP, and XML, JSON, or STEP Part 21 attachments reached
+through a small allowlist of standard attachment routes. XMP and member streams
+may be unfiltered or use one plain `FlateDecode` filter; unsupported filters,
+binary members, scripts, forms, multimedia, 3D, Collections, object metadata,
+unsafe or duplicate names, and unlisted file-bearing routes fail the run. URI
+hyperlinks and digital signatures are outside scope and are neither followed
+nor validated. There is no configuration switch for a more permissive policy.
+
+On any PDF policy or selector error, the backend publishes the bounded
+inventory only. It withholds document XMP, selected member artifacts, and the
+extraction ZIP as one atomic supplementary set. This prevents downstream steps
+from consuming an apparently valid XML, JSON, or STEP file from an otherwise
+prohibited package. See [PDF Package Validator](../../dev_docs/data-model/pdf-validator.md)
+for the exact allowlist and authoring contract.
+
+Malware scanning is a separate control, not a PDF parser library. Deployments
+that require it should scan the immutable uploaded bytes with a separately
+isolated and resource-limited ClamAV service whose signature age is monitored.
+Do not place the signature database or updater in the network-disabled PDF
+image, and do not treat a clean signature result as proof of safety. If users
+need a reduced-risk viewing copy, generate a separate content-disarmed
+derivative (for example with Dangerzone) while retaining the original as the
+validation and evidence source; a rendered derivative necessarily discards
+attachments, forms, signatures, and other package semantics.
+
 ### 7. Keep the rootless Docker default
 
 The default Docker daemon runs as root, which means its API socket carries
@@ -213,6 +259,9 @@ these controls automatically. Risk-averse operators should explicitly:
 - use `VALIDATOR_BACKEND_IMAGE_POLICY=digest`, or `signed-digest` after
   configuring cosign verification;
 - leave `VALIDATOR_NETWORK` unset;
+- configure `VALIDATOR_PDF_CONTAINER_RUNTIME=runsc` (or an installed Kata
+  runtime) and `VALIDATOR_PDF_REQUIRE_STRONG_SANDBOX=true` when PDFs can arrive
+  from untrusted public users;
 - keep the rootless socket default and confirm `VB322`;
 - keep telemetry integrations unset;
 - allow only operator-reviewed validator images.

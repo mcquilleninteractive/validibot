@@ -1078,6 +1078,20 @@ VALIDATOR_TIER_2_CPU_LIMIT = env(
     default="1.0",
 )
 
+# Native PDF parsing is always network-isolated by the Docker runner. Operators
+# serving public hostile uploads should install gVisor or Kata, select it here,
+# and enable the fail-closed requirement. The empty/default pair preserves a
+# usable runc deployment for self-hosters who have not installed another
+# runtime while retaining capabilities, mount, PID, IPC, and egress controls.
+VALIDATOR_PDF_CONTAINER_RUNTIME = env(
+    "VALIDATOR_PDF_CONTAINER_RUNTIME",
+    default="",
+)
+VALIDATOR_PDF_REQUIRE_STRONG_SANDBOX = env.bool(
+    "VALIDATOR_PDF_REQUIRE_STRONG_SANDBOX",
+    default=False,
+)
+
 # Validator backend image policy (Trust ADR Phase 5 Session B)
 # ------------------------------------------------------------------------------
 # Every deployment target may choose ``tag``, ``digest``, or

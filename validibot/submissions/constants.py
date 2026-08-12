@@ -135,6 +135,40 @@ class SubmissionFileType(models.TextChoices):
     UNKNOWN = "UNKNOWN", _("Unknown")
 
 
+# Primary-submission admission extensions. Validator-specific extensions live
+# on typed input ports; this map answers only which filenames may enter a
+# workflow for each broad carrier selected by its author.
+SUBMISSION_FILE_TYPE_EXTENSIONS: dict[str, frozenset[str]] = {
+    SubmissionFileType.JSON: frozenset({"json", "jsonld"}),
+    SubmissionFileType.XML: frozenset({"xml", "rdf", "xsd"}),
+    SubmissionFileType.TEXT: frozenset(
+        {"txt", "csv", "tsv", "idf", "ttl", "nt", "nq", "p21", "step"}
+    ),
+    SubmissionFileType.YAML: frozenset({"yaml", "yml"}),
+    SubmissionFileType.PDF: frozenset({"pdf"}),
+    SubmissionFileType.BINARY: frozenset({"xls", "xlsx", "fmu", "zip", "thmz"}),
+    # UNKNOWN deliberately has no extension restriction.
+    SubmissionFileType.UNKNOWN: frozenset(),
+}
+
+
+def submission_file_type_extensions(file_types: list[str]) -> set[str]:
+    """Return admission extensions for broad primary-submission types.
+
+    An explicit UNKNOWN selection means any extension, represented by an empty
+    result because upload forms apply their extension gate only to non-empty
+    sets.
+    """
+
+    normalized = list(dict.fromkeys(file_types))
+    if SubmissionFileType.UNKNOWN in normalized:
+        return set()
+    extensions: set[str] = set()
+    for file_type in normalized:
+        extensions.update(SUBMISSION_FILE_TYPE_EXTENSIONS.get(file_type, ()))
+    return extensions
+
+
 class SubmissionDataFormat(models.TextChoices):
     """
     The data format that the submission represents.

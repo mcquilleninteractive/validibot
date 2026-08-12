@@ -50,7 +50,6 @@ def _make_workflow_mock(
     has_steps: bool = True,
     first_unavailable_step: object | None = None,
     supports_file_type: bool = True,
-    first_incompatible_step: object | None = None,
     allowed_file_type_labels: list[str] | None = None,
 ) -> MagicMock:
     """Build a minimal Workflow mock for contract tests.
@@ -74,7 +73,6 @@ def _make_workflow_mock(
     workflow.steps.exists.return_value = has_steps
     workflow.first_unavailable_validator_step.return_value = first_unavailable_step
     workflow.supports_file_type.return_value = supports_file_type
-    workflow.first_incompatible_step.return_value = first_incompatible_step
     workflow.allowed_file_type_labels.return_value = allowed_file_type_labels or [
         "JSON",
         "XML",
@@ -203,31 +201,16 @@ class LaunchContractFileTypeTests(TestCase):
         # Message should communicate what IS allowed.
         self.assertIn("JSON", result.message)
 
-    def test_step_incompatible_returns_incompatible_step(self):
-        """Workflow accepts the file type but a specific step doesn't.
+    def test_step_input_contract_is_not_an_admission_gate(self):
+        """Concrete step/source compatibility belongs to run execution.
 
-        E.g. a workflow that accepts JSON or XML, but step 3 only
-        does XML — submitting JSON gets caught here. Distinct from
-        unsupported_file_type because the fix is different (move the
-        step or split the workflow vs. send a different file).
+        Admission checks only the workflow's allowed primary file types. This
+        permits a multi-type workflow to accept a file that a particular step
+        may later reject with a structured input-contract finding.
         """
-        # Mock the incompatible step. We mimic just the attributes
-        # the contract reads — if the model adds new fields the
-        # contract uses, this fixture needs updating.
-        incompatible_step = MagicMock()
-        incompatible_step.step_number_display = "3"
-        incompatible_step.validator.name = "Custom XML"
-
-        workflow = _make_workflow_mock(
-            supports_file_type=True,
-            first_incompatible_step=incompatible_step,
-        )
+        workflow = _make_workflow_mock(supports_file_type=True)
         result = LaunchContract.validate(workflow=workflow, file_type="JSON")
-        self.assertIsNotNone(result)
-        self.assertEqual(result.code, ViolationCode.INCOMPATIBLE_STEP)
-        self.assertIn("3", result.message)
-        self.assertIn("Custom XML", result.message)
-        self.assertIn("JSON", result.message)
+        self.assertIsNone(result)
 
     def test_no_file_type_skips_file_type_checks(self):
         """When file_type is None, the contract doesn't check it.

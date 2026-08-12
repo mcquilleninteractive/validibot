@@ -376,11 +376,12 @@ The system automatically detects content types using multiple strategies:
 
 #### Submission File Types
 
-Deterministic MIME headers are not enough for authoring decisions, so we classify every submission into a small set of logical **SubmissionFileType** values (JSON, XML, TEXT, YAML, BINARY, etc.). Those values power three complementary contracts:
+Deterministic MIME headers are not enough for authoring decisions, so we classify every primary submission into a small set of broad **SubmissionFileType** values (JSON, XML, TEXT, YAML, PDF, BINARY, or UNKNOWN). Those values participate in separate admission and execution contracts:
 
-- **Workflows** store an `allowed_file_types` array. Authors decide whether a workflow accepts a single format or multiple formats (for example, an EnergyPlus workflow can allow both TEXT/IDF and JSON/epJSON inputs). The workflow builder surfaces only validators that intersect with the selected file types.
-- **Validators** declare `supported_file_types`. System validators receive defaults (JSON Schema → JSON, XML Schema → XML, EnergyPlus → TEXT + JSON, and so on) and custom validators must be explicit.
-- **Launch-time enforcement** verifies that the selected payload type is included in the workflow allow-list and that every validator in the run can process it. When something doesn’t align, the UI form surfaces a validation error and the API returns `FILE_TYPE_UNSUPPORTED` along with the offending step name.
+- **Workflows** store an `allowed_file_types` array. Authors decide which primary file carriers may create a run. The workflow builder does not use this array to filter the validator catalog.
+- **Validator input ports** declare the precise data formats, carrier types, extensions, media types, cardinality, and source scopes they consume. Each step stores an explicit binding from a port to its selected source.
+- **Launch-time enforcement** verifies only the workflow's primary-submission admission contract plus structural, authorization, and runtime-availability requirements.
+- **Step execution** resolves each selected source against its port contract. A concrete mismatch creates a structured failed-step finding; it does not invalidate the workflow definition or retroactively reject an otherwise admitted submission.
 
 Incoming requests still provide concrete MIME types (`Content-Type` headers, multipart metadata, etc.) so storage helpers can pick safe extensions. After we ingest the payload we re-run lightweight detection; if the actual content clearly differs from the transport hint, we update the stored `SubmissionFileType` so downstream automation, reporting, and billing all see the canonical format.
 

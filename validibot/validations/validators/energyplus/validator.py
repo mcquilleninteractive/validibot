@@ -38,6 +38,8 @@ import logging
 from typing import TYPE_CHECKING
 from typing import Any
 
+from django.core.exceptions import ValidationError
+
 from validibot.validations.constants import Severity
 from validibot.validations.validators.base.advanced import AdvancedValidator
 
@@ -146,6 +148,18 @@ class EnergyPlusValidator(AdvancedValidator):
             preprocess_energyplus_submission,
         )
 
+        resolved = self.resolve_file_input(
+            "primary_model",
+            load_content=True,
+            max_bytes=100 * 1024 * 1024,
+        )
+        if resolved.content is None:
+            raise ValidationError("The EnergyPlus primary model input is unavailable.")
+        try:
+            submission.content = resolved.content.decode("utf-8")
+        except UnicodeDecodeError:
+            submission.content = resolved.content.decode("latin-1")
+        submission.original_filename = resolved.name
         result = preprocess_energyplus_submission(step=step, submission=submission)
         if result.was_template and self.run_context is not None:
             from validibot.validations.constants import StepIOOriginKind

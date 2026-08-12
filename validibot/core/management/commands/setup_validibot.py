@@ -537,7 +537,7 @@ class Command(BaseCommand):
         # current code state" command — operators run it precisely because
         # they want the DB updated. ``--allow-drift`` matches that intent:
         # without it, every dev iteration that touches a semantic config
-        # field (catalog_entries, supported_file_types, etc.) blocks
+        # field in the catalog port contract blocks
         # setup_validibot until the operator manually runs
         # ``sync_validators --allow-drift`` to clear the digest mismatch.
         #

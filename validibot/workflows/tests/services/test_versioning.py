@@ -76,7 +76,7 @@ from validibot.workflows.version_utils import parse_workflow_version
 
 pytestmark = pytest.mark.django_db
 
-EXPECTED_CONTRACT_TREE_STEP_IO_DEFINITIONS = 2
+EXPECTED_CONTRACT_TREE_STEP_IO_DEFINITIONS = 3
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -562,6 +562,12 @@ class WorkflowVersioningServiceCloneTests(TestCase):
             contract_key="shacl_total_count",
             direction=StepIODirection.OUTPUT,
         )
+        input_definition = StepIODefinitionFactory(
+            validator=None,
+            workflow_step=step,
+            contract_key="assertion_limit",
+            direction=StepIODirection.INPUT,
+        )
         StepIODefinitionFactory(
             validator=None,
             workflow_step=step,
@@ -583,7 +589,7 @@ class WorkflowVersioningServiceCloneTests(TestCase):
         )
         StepInputBindingFactory(
             workflow_step=step,
-            io_definition=io_definition,
+            io_definition=input_definition,
             default_value=0,
         )
         DerivationFactory(
@@ -630,7 +636,10 @@ class WorkflowVersioningServiceCloneTests(TestCase):
         # Author rationale is non-semantic but part of the copied contract, so a
         # new version carries the reasoning forward rather than dropping it.
         assert new_assertion.notes == "No findings expected once the model passes QA."
-        assert new_step.input_bindings.get().io_definition_id == new_io_definition.pk
+        assert (
+            new_step.input_bindings.get().io_definition.contract_key
+            == "assertion_limit"
+        )
         assert new_step.derivations.get(contract_key="has_findings").pk is not None
         assert report.components_copied["rulesets"] == 1
         assert report.components_copied["assertions"] == 1

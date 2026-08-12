@@ -35,12 +35,10 @@ Semantic (covered by the digest):
   paths that resolve to executable code; changing these changes
   what's actually run
 - ``image_name`` — the container image used by advanced validators
-- ``supported_file_types`` / ``supported_data_formats`` /
-  ``allowed_extensions`` — the input contract
-- ``resource_types`` — what extra files the validator accepts
 - ``compute_tier`` — affects scheduling/resourcing
-- ``catalog_entries`` — the step I/O contract; CHANGES IN
-  this list mean the validator's input/output schema changed
+- ``catalog_entries`` — the complete step I/O contract, including accepted
+  submission file types, logical formats, media types, extensions, source
+  scopes, and managed resource types
 
 Not semantic (excluded — cosmetic, identity, or runtime-only):
 
@@ -85,10 +83,6 @@ SEMANTIC_FIELDS: frozenset[str] = frozenset(
         "validator_class",
         "output_envelope_class",
         "image_name",
-        "supported_file_types",
-        "supported_data_formats",
-        "allowed_extensions",
-        "resource_types",
         "compute_tier",
         "catalog_entries",
         # Trust ADR Phase 5 Session C — trust_tier is semantic
@@ -113,10 +107,8 @@ def _canonicalise(value: Any) -> Any:
     here we normalise child values. Non-container values pass
     through unchanged.
 
-    The reason for sorting list-of-strings is so
-    ``supported_file_types=["json", "xml"]`` and ``["xml", "json"]``
-    produce the same digest — the order is meaningless to the
-    validator's behavior. But list-of-dicts (like
+    The reason for sorting list-of-strings is so equivalent unordered contract
+    lists produce the same digest. But list-of-dicts (like
     ``catalog_entries``) keeps insertion order because the order of
     catalog entries IS semantic (the ``order`` field on each entry
     drives display + position-sensitive logic).

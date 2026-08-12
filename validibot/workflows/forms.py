@@ -2060,6 +2060,19 @@ class ArtifactInputBindingsFormMixin(forms.Form):
             )
             self.fields[source_name].initial = initial_scope
             self.artifact_default_sources[port.contract_key] = initial_scope
+            selected_scope = (
+                self.data.get(self.add_prefix(source_name), initial_scope)
+                if self.is_bound
+                else initial_scope
+            )
+            if selected_scope == BindingSourceScope.SUBMISSION_FILE and workflow:
+                from validibot.validations.services.input_contracts import (
+                    primary_source_advisory,
+                )
+
+                advisory = primary_source_advisory(workflow=workflow, port=port)
+                if advisory:
+                    self.fields[source_name].help_text = advisory
             if (
                 output_name in self.fields
                 and binding
@@ -2072,6 +2085,7 @@ class ArtifactInputBindingsFormMixin(forms.Form):
         """Return author-facing choices for materializable declared scopes."""
         source_labels = {
             BindingSourceScope.SUBMISSION_FILE: _("Submitted file"),
+            BindingSourceScope.SUBMISSION_METADATA: _("Submission metadata (JSON)"),
             BindingSourceScope.UPSTREAM_ARTIFACT: _("Earlier step output"),
             BindingSourceScope.WORKFLOW_RESOURCE: _("Workflow resource"),
             BindingSourceScope.SYSTEM: _("System resource"),
@@ -2219,7 +2233,10 @@ class ArtifactInputBindingsFormMixin(forms.Form):
                     "",
                 )
             source_data_path = self.artifact_source_data_path(port, source)
-            if not source_data_path and source != BindingSourceScope.UPSTREAM_ARTIFACT:
+            if not source_data_path and source not in {
+                BindingSourceScope.SUBMISSION_METADATA,
+                BindingSourceScope.UPSTREAM_ARTIFACT,
+            }:
                 binding = self.artifact_input_binding_map.get(port.pk)
                 source_data_path = getattr(binding, "source_data_path", "")
             updates.append(
@@ -5050,25 +5067,9 @@ class PdfStepConfigForm(BaseStepConfigForm):
 
     _DISCOVERY_KIND_CHOICES = [
         ("embedded_files_name_tree", _("Embedded-files name tree")),
-        ("file_specification", _("File specification")),
         ("associated_file", _("Associated file")),
         ("file_attachment_annotation", _("File-attachment annotation")),
-        ("rich_media_asset", _("Rich-media asset")),
     ]
-
-    profile = forms.ChoiceField(
-        label=_("Inspection profile"),
-        choices=[
-            ("inventory_v1", _("Inventory only")),
-            ("safe_static_package_v1", _("Safe static package")),
-        ],
-        initial="inventory_v1",
-        help_text=_(
-            "Inventory records package structure. Safe static package also rejects "
-            "dangerous active or external behavior; ordinary hyperlinks are "
-            "inventoried as warnings."
-        ),
-    )
     emit_extracted_files_bundle = forms.BooleanField(
         label=_("Create an extracted-files evidence bundle"),
         required=False,
@@ -5082,7 +5083,8 @@ class PdfStepConfigForm(BaseStepConfigForm):
         required=False,
         help_text=_(
             "The PDF step will emit selected_xml only when exactly one member "
-            "matches the exact fields below."
+            "matches the exact fields below. XML parsing is only a carrier "
+            "preflight; use a later validator for the XML vocabulary and rules."
         ),
     )
     selected_xml_required = forms.BooleanField(
@@ -5128,14 +5130,13 @@ class PdfStepConfigForm(BaseStepConfigForm):
         choices=_DISCOVERY_KIND_CHOICES,
         help_text=_("The member must be reachable through every selected route."),
     )
-    selected_xml_rich_media_asset_name = forms.CharField(
-        label=_("Exact rich-media asset name"),
-        required=False,
-        max_length=512,
-    )
     select_json = forms.BooleanField(
         label=_("Expose one embedded JSON document to a later step"),
         required=False,
+        help_text=_(
+            "The selected bytes receive a bounded JSON carrier preflight only. "
+            "Use a later validator for JSON Schema or domain rules."
+        ),
     )
     selected_json_required = forms.BooleanField(
         label=_("Fail when no matching JSON document exists"),
@@ -5171,14 +5172,13 @@ class PdfStepConfigForm(BaseStepConfigForm):
         choices=_DISCOVERY_KIND_CHOICES,
         help_text=_("The member must be reachable through every selected route."),
     )
-    selected_json_rich_media_asset_name = forms.CharField(
-        label=_("Exact JSON rich-media asset name"),
-        required=False,
-        max_length=512,
-    )
     select_step_p21 = forms.BooleanField(
         label=_("Expose one embedded STEP Part 21 file to a later step"),
         required=False,
+        help_text=_(
+            "The selected bytes receive a bounded Part 21 carrier preflight only. "
+            "This does not establish IFC, AP242, or other domain conformance."
+        ),
     )
     selected_step_p21_required = forms.BooleanField(
         label=_("Fail when no matching STEP file exists"),
@@ -5214,11 +5214,6 @@ class PdfStepConfigForm(BaseStepConfigForm):
         choices=_DISCOVERY_KIND_CHOICES,
         help_text=_("The member must be reachable through every selected route."),
     )
-    selected_step_p21_rich_media_asset_name = forms.CharField(
-        label=_("Exact STEP rich-media asset name"),
-        required=False,
-        max_length=512,
-    )
     selected_step_p21_file_schema = forms.CharField(
         label=_("Exact STEP FILE_SCHEMA identifiers"),
         required=False,
@@ -5233,7 +5228,6 @@ class PdfStepConfigForm(BaseStepConfigForm):
     def __init__(self, *args, step=None, **kwargs):
         super().__init__(*args, step=step, **kwargs)
         config = getattr(step, "config", None) or {}
-        self.fields["profile"].initial = config.get("profile", "inventory_v1")
         self.fields["emit_extracted_files_bundle"].initial = bool(
             config.get("emit_extracted_files_bundle", False)
         )
@@ -5267,10 +5261,6 @@ class PdfStepConfigForm(BaseStepConfigForm):
             "discovery_kinds",
             [],
         )
-        self.fields["selected_xml_rich_media_asset_name"].initial = selector.get(
-            "rich_media_asset_name",
-            "",
-        )
         for selector_key, default_media_type in (
             ("selected_json", "application/json"),
             ("selected_step_p21", "model/step"),
@@ -5302,10 +5292,6 @@ class PdfStepConfigForm(BaseStepConfigForm):
                 "discovery_kinds",
                 [],
             )
-            self.fields[f"{selector_key}_rich_media_asset_name"].initial = selector.get(
-                "rich_media_asset_name",
-                "",
-            )
         step_selector = config.get("selected_step_p21") or {}
         self.fields["selected_step_p21_file_schema"].initial = "\n".join(
             step_selector.get("step_file_schema") or [],
@@ -5332,7 +5318,6 @@ class PdfStepConfigForm(BaseStepConfigForm):
                 "selected_xml_declared_media_type",
                 "selected_xml_detected_media_type",
                 "selected_xml_discovery_kinds",
-                "selected_xml_rich_media_asset_name",
             ),
             "json": (
                 "selected_json_filename",
@@ -5340,7 +5325,6 @@ class PdfStepConfigForm(BaseStepConfigForm):
                 "selected_json_declared_media_type",
                 "selected_json_detected_media_type",
                 "selected_json_discovery_kinds",
-                "selected_json_rich_media_asset_name",
             ),
             "step_p21": (
                 "selected_step_p21_filename",
@@ -5348,7 +5332,6 @@ class PdfStepConfigForm(BaseStepConfigForm):
                 "selected_step_p21_declared_media_type",
                 "selected_step_p21_detected_media_type",
                 "selected_step_p21_discovery_kinds",
-                "selected_step_p21_rich_media_asset_name",
                 "selected_step_p21_file_schema",
             ),
         }
@@ -6099,6 +6082,17 @@ class StepInputBindingEditForm(forms.Form):
         if current_scope not in allowed:
             current_scope = next(iter(allowed), "")
         self.fields["file_source"].initial = current_scope
+        if current_scope == BindingSourceScope.SUBMISSION_FILE and step is not None:
+            from validibot.validations.services.input_contracts import (
+                primary_source_advisory,
+            )
+
+            advisory = primary_source_advisory(
+                workflow=step.workflow,
+                port=self.io_definition,
+            )
+            if advisory:
+                self.fields["file_source"].help_text = advisory
 
         if BindingSourceScope.UPSTREAM_ARTIFACT in allowed:
             self.fields[

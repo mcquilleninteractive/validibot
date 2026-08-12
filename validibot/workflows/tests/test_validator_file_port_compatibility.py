@@ -9,10 +9,13 @@ rejected even though their file-port contracts are compatible.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from validibot.submissions.constants import SubmissionDataFormat
 from validibot.submissions.constants import SubmissionFileType
+from validibot.submissions.tests.factories import SubmissionFactory
 from validibot.validations.constants import ArtifactKind
 from validibot.validations.constants import BindingSourceScope
 from validibot.validations.constants import CatalogValueType
@@ -20,11 +23,20 @@ from validibot.validations.constants import StepIODirection
 from validibot.validations.constants import StepIOMedium
 from validibot.validations.constants import StepIOOriginKind
 from validibot.validations.constants import ValidationType
+from validibot.validations.models import ExecutionAttempt
 from validibot.validations.services.artifact_bindings import set_artifact_input_binding
+from validibot.validations.services.input_contracts import InputResolutionError
+from validibot.validations.services.input_contracts import (
+    validate_runtime_input_contracts,
+)
+from validibot.validations.services.step_processor.advanced import (
+    AdvancedValidationProcessor,
+)
 from validibot.validations.tests.factories import StepIODefinitionFactory
+from validibot.validations.tests.factories import ValidationRunFactory
+from validibot.validations.tests.factories import ValidationStepRunFactory
 from validibot.validations.tests.factories import ValidatorFactory
 from validibot.workflows.services.launch_contract import LaunchContract
-from validibot.workflows.services.launch_contract import ViolationCode
 from validibot.workflows.tests.factories import WorkflowFactory
 from validibot.workflows.tests.factories import WorkflowStepFactory
 
@@ -63,6 +75,11 @@ def _artifact_port(
         accepted_data_formats=[data_format],
         media_type=media_type,
         accepted_media_types=[media_type],
+        accepted_file_types=[
+            SubmissionFileType.XML
+            if data_format == SubmissionDataFormat.XML
+            else SubmissionFileType.JSON
+        ],
         allowed_source_scopes=allowed_source_scopes,
         min_items=1,
         max_items=1,
@@ -145,11 +162,10 @@ def test_launch_allows_pdf_workflow_with_typed_validator_bound_upstream(
     )
 
     assert violation is None
-    assert workflow.first_incompatible_step(SubmissionFileType.PDF) is None
 
 
-def test_launch_rejects_xml_validator_bound_to_primary_pdf():
-    """An XML file port must not silently accept the original PDF itself."""
+def test_primary_pdf_mismatch_is_a_structured_runtime_failure():
+    """An XML port rejects a concrete PDF at execution, after admission."""
     workflow = WorkflowFactory(allowed_file_types=[SubmissionFileType.PDF])
     xml_validator = ValidatorFactory(validation_type=ValidationType.XML_SCHEMA)
     step = WorkflowStepFactory(
@@ -176,26 +192,71 @@ def test_launch_rejects_xml_validator_bound_to_primary_pdf():
         file_type=SubmissionFileType.PDF,
     )
 
-    assert violation is not None
-    assert violation.code == ViolationCode.INCOMPATIBLE_STEP
-    assert workflow.first_incompatible_step(SubmissionFileType.PDF) == step
+    assert violation is None
+
+    submission = SubmissionFactory(
+        workflow=workflow,
+        file_type=SubmissionFileType.PDF,
+        content="%PDF-1.7",
+        original_filename="document.pdf",
+    )
+    with pytest.raises(InputResolutionError) as exc_info:
+        validate_runtime_input_contracts(
+            run=SimpleNamespace(submission=submission),
+            step=step,
+        )
+
+    diagnostic = exc_info.value.diagnostics[0]
+    assert diagnostic.code == "input_file_type_incompatible"
+    assert diagnostic.contract_key == "xml_document"
+    assert diagnostic.expected_file_types == (SubmissionFileType.XML,)
+    assert diagnostic.actual_file_type == SubmissionFileType.PDF
 
 
-def test_launch_keeps_legacy_check_for_validator_without_file_ports():
-    """Validators lacking explicit file ports still describe the whole payload."""
+def test_advanced_mismatch_fails_before_execution_attempt_allocation():
+    """A known port mismatch must never reserve or contact advanced compute."""
     workflow = WorkflowFactory(allowed_file_types=[SubmissionFileType.PDF])
-    xml_validator = ValidatorFactory(validation_type=ValidationType.XML_SCHEMA)
+    xml_validator = ValidatorFactory(
+        validation_type=ValidationType.XML_SCHEMA,
+        has_processor=True,
+    )
     step = WorkflowStepFactory(
         workflow=workflow,
         validator=xml_validator,
-        name="Legacy XML validator",
+        name="Validate XML through advanced lifecycle",
     )
-
-    violation = LaunchContract.validate(
+    input_port = _artifact_port(
+        validator=xml_validator,
+        contract_key="xml_document",
+        direction=StepIODirection.INPUT,
+        data_format=SubmissionDataFormat.XML,
+        media_type="application/xml",
+    )
+    set_artifact_input_binding(
+        consumer_step=step,
+        consumer_port=input_port,
+        source_scope=BindingSourceScope.SUBMISSION_FILE,
+        source_data_path="primary",
+    )
+    submission = SubmissionFactory(
         workflow=workflow,
         file_type=SubmissionFileType.PDF,
+        content="%PDF-1.7",
+        original_filename="document.pdf",
+    )
+    run = ValidationRunFactory(workflow=workflow, submission=submission)
+    step_run = ValidationStepRunFactory(
+        validation_run=run,
+        workflow_step=step,
+        step_order=step.order,
     )
 
-    assert violation is not None
-    assert violation.code == ViolationCode.INCOMPATIBLE_STEP
-    assert workflow.first_incompatible_step(SubmissionFileType.PDF) == step
+    result = AdvancedValidationProcessor(run, step_run).execute()
+
+    step_run.refresh_from_db()
+    assert result.passed is False
+    assert step_run.status == "FAILED"
+    assert ExecutionAttempt.objects.filter(step_run=step_run).count() == 0
+    finding = step_run.findings.get()
+    assert finding.code == "input_file_type_incompatible"
+    assert finding.meta["expected_file_types"] == [SubmissionFileType.XML]

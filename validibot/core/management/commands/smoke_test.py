@@ -478,13 +478,23 @@ class Command(BaseCommand):
             metadata={"schema_type": JSONSchemaVersion.DRAFT_2020_12.value},
             version="1",
         )
-        return WorkflowStep.objects.create(
+        from validibot.validations.services.custom_validator_contracts import (
+            sync_configured_io_contract,
+        )
+        from validibot.validations.services.input_bindings import (
+            ensure_step_input_bindings,
+        )
+
+        sync_configured_io_contract(validator=validator)
+        step = WorkflowStep.objects.create(
             workflow=workflow,
             validator=validator,
             ruleset=ruleset,
             order=10,
             name=DEMO_STEP_NAME,
         )
+        ensure_step_input_bindings(step)
+        return step
 
     # ── Step 2: Submission (ST002) ─────────────────────────────────────
 

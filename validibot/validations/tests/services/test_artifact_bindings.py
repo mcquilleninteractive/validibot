@@ -79,7 +79,8 @@ class _TwoPortStepForm(forms.Form):
 
 def _artifact_port(
     *,
-    validator,
+    validator=None,
+    workflow_step=None,
     contract_key: str,
     direction: str,
     data_format: str,
@@ -91,7 +92,7 @@ def _artifact_port(
     """Create one singleton file port with the fields compatibility needs."""
     return StepIODefinitionFactory(
         validator=validator,
-        workflow_step=None,
+        workflow_step=workflow_step,
         contract_key=contract_key,
         native_name=contract_key,
         direction=direction,
@@ -175,6 +176,69 @@ def test_choices_only_include_compatible_earlier_outputs() -> None:
 
     assert [choice.output_definition_id for choice in choices] == [compatible.pk]
     assert choices[0].reference == f"{producer.step_key}.selected_xml"
+
+
+def test_compatible_choices_query_count_does_not_scale_with_producer_steps(
+    django_assert_num_queries,
+) -> None:
+    """A long workflow must not issue one artifact-port query per producer."""
+
+    workflow = WorkflowFactory()
+    xml_validator = ValidatorFactory(validation_type=ValidationType.XML_SCHEMA)
+    consumer = WorkflowStepFactory(
+        workflow=workflow,
+        validator=xml_validator,
+        order=100,
+        name="Validate XML",
+    )
+    consumer_port = _artifact_port(
+        validator=xml_validator,
+        contract_key="xml_document",
+        direction=StepIODirection.INPUT,
+        data_format=SubmissionDataFormat.XML,
+        media_type="application/xml",
+        allow_upstream=True,
+    )
+
+    def add_producer(*, order: int, step_owned: bool = False) -> None:
+        """Add one earlier step with one compatible declared output."""
+
+        validator = ValidatorFactory()
+        producer = WorkflowStepFactory(
+            workflow=workflow,
+            validator=validator,
+            order=order,
+            name=f"Extract XML {order}",
+        )
+        _artifact_port(
+            validator=None if step_owned else validator,
+            workflow_step=producer if step_owned else None,
+            contract_key="selected_xml",
+            direction=StepIODirection.OUTPUT,
+            data_format=SubmissionDataFormat.XML,
+            media_type="application/xml",
+        )
+
+    add_producer(order=10)
+    with django_assert_num_queries(2):
+        one_choice = compatible_artifact_choices(
+            consumer_step=consumer,
+            consumer_port=consumer_port,
+            workflow=workflow,
+        )
+
+    expected_producer_count = 8
+    for order in range(20, (expected_producer_count + 1) * 10, 10):
+        add_producer(order=order, step_owned=order == expected_producer_count * 10)
+    with django_assert_num_queries(2):
+        many_choices = compatible_artifact_choices(
+            consumer_step=consumer,
+            consumer_port=consumer_port,
+            workflow=workflow,
+        )
+
+    assert len(one_choice) == 1
+    assert len(many_choices) == expected_producer_count
 
 
 def test_relational_edge_blocks_producer_deletion_and_invalid_reordering() -> None:

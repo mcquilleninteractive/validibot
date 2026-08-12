@@ -11,8 +11,8 @@ import json
 
 from django.test import TestCase
 
-from validibot.actions.protocols import RunContext
 from validibot.projects.tests.factories import ProjectFactory
+from validibot.submissions.constants import SubmissionFileType
 from validibot.submissions.tests.factories import SubmissionFactory
 from validibot.users.tests.factories import OrganizationFactory
 from validibot.users.tests.factories import UserFactory
@@ -23,6 +23,7 @@ from validibot.validations.tests.factories import RulesetAssertionFactory
 from validibot.validations.tests.factories import RulesetFactory
 from validibot.validations.tests.factories import StepIODefinitionFactory
 from validibot.validations.tests.factories import ValidatorFactory
+from validibot.validations.tests.resolved_file_inputs import run_context_with_file
 from validibot.validations.validators.basic import BasicValidator
 
 
@@ -69,7 +70,16 @@ class BasicValidatorComparisonTests(TestCase):
         submission.save(update_fields=["content"])
         engine = BasicValidator()
 
-        result = engine.validate(self.validator, submission, self.ruleset)
+        result = engine.validate(
+            self.validator,
+            submission,
+            self.ruleset,
+            run_context=run_context_with_file(
+                contract_key="document",
+                content=submission.content,
+                file_type=SubmissionFileType.JSON,
+            ),
+        )
 
         self.assertFalse(result.passed)
         self.assertEqual(len(result.issues), 1)
@@ -138,7 +148,12 @@ class BasicValidatorComparisonTests(TestCase):
         )
         submission.content = json.dumps({"name": "not-bubba"})
         submission.save(update_fields=["content"])
-        run_context = RunContext(workflow_constants={"bubba": "dance"})
+        run_context = run_context_with_file(
+            contract_key="document",
+            content=submission.content,
+            file_type=SubmissionFileType.JSON,
+            workflow_constants={"bubba": "dance"},
+        )
         engine = BasicValidator()
 
         result = engine.validate(
@@ -171,7 +186,12 @@ class BasicValidatorComparisonTests(TestCase):
         )
         submission.content = json.dumps({"name": "bubba"})
         submission.save(update_fields=["content"])
-        run_context = RunContext(workflow_constants={"bubba": "dance"})
+        run_context = run_context_with_file(
+            contract_key="document",
+            content=submission.content,
+            file_type=SubmissionFileType.JSON,
+            workflow_constants={"bubba": "dance"},
+        )
         engine = BasicValidator()
 
         result = engine.validate(

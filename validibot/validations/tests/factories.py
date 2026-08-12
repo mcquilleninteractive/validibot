@@ -34,8 +34,6 @@ from validibot.validations.models import ValidationRunContinuation
 from validibot.validations.models import ValidationStepRun
 from validibot.validations.models import Validator
 from validibot.validations.models import ValidatorResourceFile
-from validibot.validations.models import default_supported_data_formats_for_validation
-from validibot.validations.models import default_supported_file_types_for_validation
 from validibot.workflows.tests.factories import WorkflowStepFactory
 
 
@@ -115,12 +113,6 @@ class ValidatorFactory(DjangoModelFactory):
                 ValidationType.THERM,
             )
         )
-    )
-    supported_data_formats = factory.LazyAttribute(
-        lambda obj: default_supported_data_formats_for_validation(obj.validation_type),
-    )
-    supported_file_types = factory.LazyAttribute(
-        lambda obj: default_supported_file_types_for_validation(obj.validation_type),
     )
 
     @factory.post_generation

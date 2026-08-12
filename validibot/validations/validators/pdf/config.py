@@ -25,6 +25,7 @@ def _output_port(
     data_format: str,
     media_type: str,
     artifact_kind: str = ArtifactKind.FILE,
+    accepted_extensions: list[str],
     required: bool = False,
     order: int,
 ) -> CatalogEntrySpec:
@@ -37,7 +38,7 @@ def _output_port(
         data_type=CatalogValueType.ARTIFACT_REF,
         description=description,
         binding_config={"source": "output_artifact", "role": slug},
-        metadata={"accepted_extensions": []},
+        accepted_extensions=accepted_extensions,
         is_required=required,
         on_missing="error" if required else "null",
         order=order,
@@ -62,15 +63,25 @@ config = ValidatorConfig(
     slug="pdf-validator",
     name="PDF Package Validator",
     short_description=(
-        "Inventory PDF metadata and embedded files, then expose exact typed "
-        "payloads to later validation steps."
+        "Apply the fixed static_text_package_v1 policy to unencrypted PDFs "
+        "containing document XMP and static XML, JSON, or STEP text files."
     ),
     description=(
-        "Inspect standardized PDF package mechanisms without rendering or "
-        "executing active content. The validator emits a canonical inventory "
-        "and can select exact XML, JSON, or STEP Part 21 payloads for later "
-        "domain validators. It validates the carrier and extraction boundary, "
-        "not the meaning of the extracted domain data."
+        "This validator always enforces the static_text_package_v1 security "
+        "policy; there is no less restrictive mode. It accepts an unencrypted "
+        "PDF only when document-level XMP uses XML and every embedded or "
+        "attached file is bounded static text detected as XML, JSON, or STEP "
+        "Part 21. Files must be reached through the PDF EmbeddedFiles name "
+        "tree, catalog/page/annotation Associated Files, or a FileAttachment "
+        "annotation. The validator rejects scripts, forms, launch and remote "
+        "actions, multimedia, 3D, collections, object-level metadata, unsafe "
+        "or ambiguous filenames, unsupported stream filters, other attachment "
+        "routes, and every other member format. Ordinary URI hyperlinks and "
+        "digital signatures are outside scope: they are neither followed nor "
+        "validated. On any policy error, only the inventory is published; no "
+        "XMP, selected file, or extraction bundle is released. Carrier checks "
+        "do not establish domain conformance, and passing is not a malware-free "
+        "or safe-to-open guarantee."
     ),
     validation_type=ValidationType.PDF,
     execution_backend_slug="pdf",
@@ -80,11 +91,8 @@ config = ValidatorConfig(
     image_name="validibot-validator-backend-pdf",
     has_processor=True,
     processor_name="PDF Package Inspection",
-    version=1,
+    version=2,
     order=8,
-    supported_file_types=[SubmissionFileType.PDF],
-    supported_data_formats=[SubmissionDataFormat.PDF],
-    allowed_extensions=["pdf"],
     supports_assertions=True,
     compute_tier=ComputeTier.LOW,
     icon="bi-file-earmark-pdf",
@@ -97,7 +105,8 @@ config = ValidatorConfig(
             run_stage=CatalogRunStage.INPUT,
             data_type=CatalogValueType.ARTIFACT_REF,
             description="Immutable PDF document inspected by this step.",
-            metadata={"accepted_extensions": ["pdf"]},
+            accepted_file_types=[SubmissionFileType.PDF],
+            accepted_extensions=["pdf"],
             is_required=True,
             on_missing="error",
             order=1,
@@ -126,16 +135,21 @@ config = ValidatorConfig(
             data_format=SubmissionDataFormat.JSON,
             media_type="application/json",
             artifact_kind=ArtifactKind.REPORT,
+            accepted_extensions=["json"],
             required=True,
             order=10,
         ),
         _output_port(
             slug="extracted_files_bundle",
             label="Extracted files bundle",
-            description="Deterministic ZIP evidence bundle of eligible members.",
+            description=(
+                "Deterministic ZIP evidence bundle containing only policy-eligible "
+                "XML, JSON, and STEP Part 21 members; omitted on any policy error."
+            ),
             data_format=SubmissionDataFormat.ZIP,
             media_type="application/zip",
             artifact_kind=ArtifactKind.ARCHIVE,
+            accepted_extensions=["zip"],
             order=20,
         ),
         _output_port(
@@ -144,6 +158,7 @@ config = ValidatorConfig(
             description="Original safely readable document-level XMP packet.",
             data_format=SubmissionDataFormat.XML,
             media_type="application/xml",
+            accepted_extensions=["xml"],
             order=30,
         ),
         _output_port(
@@ -152,6 +167,7 @@ config = ValidatorConfig(
             description="Exactly one selected and carrier-preflighted XML member.",
             data_format=SubmissionDataFormat.XML,
             media_type="application/xml",
+            accepted_extensions=["xml"],
             order=40,
         ),
         _output_port(
@@ -160,6 +176,7 @@ config = ValidatorConfig(
             description="Exactly one selected and carrier-preflighted JSON member.",
             data_format=SubmissionDataFormat.JSON,
             media_type="application/json",
+            accepted_extensions=["json"],
             order=50,
         ),
         _output_port(
@@ -168,6 +185,7 @@ config = ValidatorConfig(
             description="Exactly one selected STEP physical file carrier.",
             data_format=SubmissionDataFormat.STEP_P21,
             media_type="model/step",
+            accepted_extensions=["p21", "step", "stp"],
             order=60,
         ),
         CatalogEntrySpec(

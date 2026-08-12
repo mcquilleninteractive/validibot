@@ -74,19 +74,8 @@ config = ValidatorConfig(
     # never in the worker). The semantic digest changes with image_name /
     # output_envelope_class / has_processor, so the version MUST bump — see
     # services/validator_digest.py. compute_tier stays LOW: billing is unchanged.
-    version=4,
+    version=5,
     order=4,
-    supported_file_types=[
-        SubmissionFileType.TEXT,
-        SubmissionFileType.JSON,
-        SubmissionFileType.XML,
-    ],
-    supported_data_formats=[
-        SubmissionDataFormat.TEXT,
-        SubmissionDataFormat.JSON,
-        SubmissionDataFormat.XML,
-    ],
-    allowed_extensions=["ttl", "rdf", "jsonld", "nt", "nq"],
     supports_assertions=True,
     catalog_entries=[
         CatalogEntrySpec(
@@ -99,7 +88,12 @@ config = ValidatorConfig(
                 "Resolved RDF data graph passed to the SHACL backend as the "
                 "primary submission file."
             ),
-            metadata={"accepted_extensions": ["ttl", "rdf", "jsonld", "nt", "nq"]},
+            accepted_file_types=[
+                SubmissionFileType.TEXT,
+                SubmissionFileType.JSON,
+                SubmissionFileType.XML,
+            ],
+            accepted_extensions=["ttl", "rdf", "jsonld", "nt", "nq"],
             is_required=True,
             on_missing="error",
             order=1,
@@ -142,7 +136,7 @@ config = ValidatorConfig(
                 "as Turtle for evidence and downstream artifact references."
             ),
             binding_config={"source": "output_artifact", "role": "shacl-report"},
-            metadata={"accepted_extensions": ["ttl"]},
+            accepted_extensions=["ttl"],
             is_required=False,
             on_missing="null",
             order=5,

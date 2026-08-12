@@ -11,6 +11,7 @@ the Django process.
 from __future__ import annotations
 
 import hashlib
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -19,9 +20,12 @@ from urllib.parse import urlparse
 if TYPE_CHECKING:
     from collections.abc import Collection
     from collections.abc import Mapping
+    from collections.abc import Sequence
 
 from django.conf import settings
 
+from validibot.submissions.constants import SubmissionDataFormat
+from validibot.submissions.constants import SubmissionFileType
 from validibot.validations.constants import BindingSourceScope
 from validibot.validations.constants import StepIODirection
 from validibot.validations.models import Artifact
@@ -31,6 +35,9 @@ from validibot.validations.services import artifact_ports
 from validibot.validations.services.artifact_bindings import effective_artifact_ports
 from validibot.validations.services.artifacts import build_artifact_ref
 from validibot.validations.services.file_identity import FileIdentity
+from validibot.validations.services.input_contracts import InputResolutionError
+from validibot.validations.services.input_contracts import diagnostics_for_binding
+from validibot.validations.services.input_contracts import generic_resolution_diagnostic
 
 DEFAULT_IN_PROCESS_FILE_LIMIT_BYTES = 25 * 1024 * 1024
 
@@ -44,6 +51,7 @@ class ResolvedFileInput:
     source_scope: str
     data_format: str
     media_type: str
+    file_type: str
     identity: FileIdentity
     content: bytes | None
     source_data_path: str = ""
@@ -93,7 +101,7 @@ def resolve_file_inputs(
     )
     bindings = {binding.io_definition_id: binding for binding in queryset}
     resolved: dict[str, ResolvedFileInput] = {}
-    errors: list[str] = []
+    errors = []
     traces: list[ResolvedInputTrace] = []
 
     selected_contracts = set(contract_keys) if contract_keys is not None else None
@@ -106,8 +114,42 @@ def resolve_file_inputs(
         binding = bindings.get(port.pk)
         if binding is None:
             if port.min_items:
+                from validibot.validations.services.input_contracts import (
+                    InputDiagnostic,
+                )
+                from validibot.validations.services.input_contracts import (
+                    InputDiagnosticCode,
+                )
+
                 errors.append(
-                    f"Required artifact port '{port.contract_key}' has no binding."
+                    InputDiagnostic(
+                        code=InputDiagnosticCode.REQUIRED_INPUT_MISSING,
+                        message=(
+                            f"Required artifact port '{port.contract_key}' has no "
+                            "binding."
+                        ),
+                        contract_key=port.contract_key,
+                    )
+                )
+            continue
+        binding_diagnostics = diagnostics_for_binding(
+            run=run,
+            port=port,
+            binding=binding,
+        )
+        if binding_diagnostics:
+            errors.extend(binding_diagnostics)
+            if step_run is not None:
+                traces.append(
+                    _trace(
+                        step_run=step_run,
+                        port=port,
+                        binding=binding,
+                        resolved=False,
+                        error_message="; ".join(
+                            diagnostic.message for diagnostic in binding_diagnostics
+                        ),
+                    )
                 )
             continue
         try:
@@ -121,6 +163,14 @@ def resolve_file_inputs(
                     max_bytes=byte_limit,
                     load_content=load_content,
                     materialized_file_identities=materialized_file_identities,
+                )
+            elif binding.source_scope == BindingSourceScope.SUBMISSION_METADATA:
+                item = _resolve_submission_metadata(
+                    run=run,
+                    port=port,
+                    binding=binding,
+                    max_bytes=byte_limit,
+                    load_content=load_content,
                 )
             elif binding.source_scope == BindingSourceScope.UPSTREAM_ARTIFACT:
                 item = _resolve_upstream_artifact(
@@ -150,8 +200,14 @@ def resolve_file_inputs(
                 )
             else:
                 errors.append(
-                    f"File source '{binding.source_scope}' cannot be materialized "
-                    f"for artifact port '{port.contract_key}'."
+                    generic_resolution_diagnostic(
+                        port=port,
+                        binding=binding,
+                        message=(
+                            f"File source '{binding.source_scope}' cannot be "
+                            f"materialized for artifact port '{port.contract_key}'."
+                        ),
+                    )
                 )
                 continue
             if item is None:
@@ -168,7 +224,13 @@ def resolve_file_inputs(
                     )
                 )
         except ValueError as exc:
-            errors.append(str(exc))
+            errors.append(
+                generic_resolution_diagnostic(
+                    port=port,
+                    binding=binding,
+                    message=str(exc),
+                )
+            )
             if step_run is not None:
                 traces.append(
                     _trace(
@@ -183,7 +245,7 @@ def resolve_file_inputs(
     if traces:
         ResolvedInputTrace.objects.bulk_create(traces)
     if errors:
-        raise ValueError("; ".join(errors))
+        raise InputResolutionError(errors)
     return resolved
 
 
@@ -192,6 +254,7 @@ def _trace_value_snapshot(item: ResolvedFileInput) -> dict[str, object]:
     snapshot: dict[str, object] = {
         "name": item.name,
         "source": item.source_scope,
+        "file_type": item.file_type,
         "size_bytes": item.identity.size_bytes,
         "sha256": item.identity.sha256,
         "storage_version": item.identity.storage_version,
@@ -220,13 +283,13 @@ def _resolve_submission(
     materialized_file_identities: Mapping[str, FileIdentity] | None,
 ) -> ResolvedFileInput:
     """Resolve the immutable primary submission through a file port."""
+    submission = run.submission
     if load_content and binding.source_data_path != "primary":
         raise ValueError(
             f"In-process port '{port.contract_key}' only supports the primary "
             "submitted file."
         )
     if load_content:
-        submission = run.submission
         content = submission.read_bytes(max_bytes=max_bytes)
         if not content:
             raise ValueError(
@@ -241,7 +304,7 @@ def _resolve_submission(
             raise ValueError(
                 "Submitted file hash no longer matches its stored identity."
             )
-        name = Path(submission.original_filename or "submission").name
+        name = _submission_name(submission)
         identity = FileIdentity(
             uri=_submission_file_uri(submission),
             size_bytes=len(content),
@@ -249,19 +312,35 @@ def _resolve_submission(
             storage_version=f"sha256:{sha256}",
         )
     else:
-        identity = _materialized_submission_identity(
-            port=port,
-            binding=binding,
-            identities=materialized_file_identities,
-        )
+        try:
+            identity = _materialized_submission_identity(
+                port=port,
+                binding=binding,
+                identities=materialized_file_identities,
+            )
+        except ValueError:
+            if binding.source_data_path != "primary":
+                raise
+            identity = FileIdentity(
+                uri=_submission_file_uri(submission),
+                size_bytes=int(submission.size_bytes or 0),
+                sha256=str(submission.checksum_sha256 or ""),
+                storage_version=(
+                    f"sha256:{submission.checksum_sha256}"
+                    if submission.checksum_sha256
+                    else ""
+                ),
+            )
         content = None
-        name = _filename_from_uri(identity.uri) or "submission"
+        name = _submission_name(submission)
     # Inline submissions can have an opaque evidence URI (``submission:<uuid>``)
     # because no storage object exists.  The sanitized original filename is the
     # carrier identity in that case and is therefore what the extension
     # contract must validate.  Materialized execution paths still validate the
     # concrete workspace/cloud URI supplied by the adapter.
-    validation_uri = name if load_content else identity.uri or name
+    validation_uri = (
+        name if binding.source_data_path == "primary" else identity.uri or name
+    )
     artifact_ports.validate_file_uri(port=port, uri=validation_uri)
     return ResolvedFileInput(
         contract_key=port.contract_key,
@@ -269,12 +348,77 @@ def _resolve_submission(
         source_scope=BindingSourceScope.SUBMISSION_FILE,
         data_format=str(port.data_format or ""),
         media_type=str(port.media_type or ""),
+        file_type=str(run.submission.file_type or ""),
         identity=identity,
         content=content,
         source_data_path=binding.source_data_path,
         role=str(port.role or ""),
         envelope_channel=str(port.envelope_channel or ""),
     )
+
+
+def _resolve_submission_metadata(
+    *,
+    run,
+    port,
+    binding,
+    max_bytes: int,
+    load_content: bool,
+) -> ResolvedFileInput:
+    """Materialize the whole submission metadata object as canonical JSON."""
+
+    metadata = run.submission.metadata
+    try:
+        content = json.dumps(
+            metadata,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Submission metadata is not valid JSON.") from exc
+    if len(content) > max_bytes:
+        raise ValueError(
+            f"Submission metadata exceeds the {max_bytes}-byte input limit."
+        )
+    sha256 = hashlib.sha256(content).hexdigest()
+    identity = FileIdentity(
+        uri=f"submission-metadata:{run.submission.pk}",
+        size_bytes=len(content),
+        sha256=sha256,
+        storage_version=f"sha256:{sha256}",
+    )
+    return ResolvedFileInput(
+        contract_key=port.contract_key,
+        name="submission-metadata.json",
+        source_scope=BindingSourceScope.SUBMISSION_METADATA,
+        data_format=SubmissionDataFormat.JSON,
+        media_type="application/json",
+        file_type=SubmissionFileType.JSON,
+        identity=identity,
+        content=content if load_content else None,
+        source_data_path="",
+        role=str(port.role or ""),
+        envelope_channel=str(port.envelope_channel or ""),
+    )
+
+
+def _submission_name(submission) -> str:
+    """Return a safe carrier name, including one for filename-free API input."""
+
+    if submission.original_filename:
+        return Path(submission.original_filename).name
+    default_extensions = {
+        SubmissionFileType.JSON: "json",
+        SubmissionFileType.XML: "xml",
+        SubmissionFileType.TEXT: "txt",
+        SubmissionFileType.YAML: "yaml",
+        SubmissionFileType.PDF: "pdf",
+        SubmissionFileType.BINARY: "bin",
+    }
+    extension = default_extensions.get(submission.file_type, "")
+    return f"submission.{extension}" if extension else "submission"
 
 
 def _resolve_upstream_artifact(
@@ -320,12 +464,18 @@ def _resolve_upstream_artifact(
                 "Upstream artifact bytes do not match their trusted identity."
             )
     identity = FileIdentity.from_artifact_ref(ref)
+    name = Path(artifact.label or ref["name"]).name
     return ResolvedFileInput(
         contract_key=port.contract_key,
-        name=Path(artifact.label or ref["name"]).name,
+        name=name,
         source_scope=BindingSourceScope.UPSTREAM_ARTIFACT,
         data_format=artifact.data_format,
         media_type=artifact.content_type,
+        file_type=_resolved_file_type(
+            name=name,
+            data_format=artifact.data_format,
+            accepted_file_types=port.accepted_file_types,
+        ),
         identity=identity,
         content=content,
         source_data_path=binding.source_data_path,
@@ -393,6 +543,11 @@ def _resolve_workflow_resource(
         source_data_path=binding.source_data_path,
         data_format=str(port.data_format or resource_type),
         media_type=str(port.media_type or ""),
+        file_type=_resolved_file_type(
+            name=name,
+            data_format=str(port.data_format or resource_type),
+            accepted_file_types=port.accepted_file_types,
+        ),
         role=str(port.role or ""),
         envelope_channel=str(port.envelope_channel or ""),
         identity=identity,
@@ -421,18 +576,70 @@ def _resolve_system_file(
             "byte reader."
         )
     artifact_ports.validate_file_uri(port=port, uri=identity.uri)
+    name = _filename_from_uri(identity.uri) or port.contract_key
     return ResolvedFileInput(
         contract_key=port.contract_key,
-        name=_filename_from_uri(identity.uri) or port.contract_key,
+        name=name,
         source_scope=BindingSourceScope.SYSTEM,
         source_data_path=binding.source_data_path,
         data_format=str(port.data_format or ""),
         media_type=str(port.media_type or ""),
+        file_type=_resolved_file_type(
+            name=name,
+            data_format=str(port.data_format or ""),
+            accepted_file_types=port.accepted_file_types,
+        ),
         role=str(port.role or ""),
         envelope_channel=str(port.envelope_channel or ""),
         identity=identity,
         content=None,
     )
+
+
+def _resolved_file_type(
+    *,
+    name: str,
+    data_format: str,
+    accepted_file_types: Sequence[str] | None,
+) -> str:
+    """Classify non-submission artifacts from declared semantic metadata."""
+
+    format_mapping: dict[str, str] = {
+        SubmissionDataFormat.JSON: SubmissionFileType.JSON,
+        SubmissionDataFormat.ENERGYPLUS_EPJSON: SubmissionFileType.JSON,
+        SubmissionDataFormat.XML: SubmissionFileType.XML,
+        SubmissionDataFormat.YAML: SubmissionFileType.YAML,
+        SubmissionDataFormat.PDF: SubmissionFileType.PDF,
+        SubmissionDataFormat.TEXT: SubmissionFileType.TEXT,
+        SubmissionDataFormat.CSV: SubmissionFileType.TEXT,
+        SubmissionDataFormat.ENERGYPLUS_IDF: SubmissionFileType.TEXT,
+        SubmissionDataFormat.STEP_P21: SubmissionFileType.TEXT,
+        SubmissionDataFormat.FMU: SubmissionFileType.BINARY,
+        SubmissionDataFormat.THERM_THMZ: SubmissionFileType.BINARY,
+        SubmissionDataFormat.ZIP: SubmissionFileType.BINARY,
+    }
+    if resolved := format_mapping.get(data_format):
+        return str(resolved)
+
+    extension = Path(name).suffix.casefold().lstrip(".")
+    extension_mapping: dict[str, str] = {
+        "json": SubmissionFileType.JSON,
+        "jsonld": SubmissionFileType.JSON,
+        "epjson": SubmissionFileType.JSON,
+        "xml": SubmissionFileType.XML,
+        "rdf": SubmissionFileType.XML,
+        "xsd": SubmissionFileType.XML,
+        "yaml": SubmissionFileType.YAML,
+        "yml": SubmissionFileType.YAML,
+        "pdf": SubmissionFileType.PDF,
+    }
+    if resolved := extension_mapping.get(extension):
+        return str(resolved)
+
+    normalized_types = tuple(
+        dict.fromkeys(str(value) for value in (accepted_file_types or []) if value)
+    )
+    return normalized_types[0] if len(normalized_types) == 1 else ""
 
 
 def _materialized_submission_identity(

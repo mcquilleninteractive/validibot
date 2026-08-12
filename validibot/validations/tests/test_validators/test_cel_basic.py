@@ -22,6 +22,7 @@ from django.test import TestCase
 
 from validibot.actions.protocols import RunContext
 from validibot.projects.tests.factories import ProjectFactory
+from validibot.submissions.constants import SubmissionFileType
 from validibot.submissions.tests.factories import SubmissionFactory
 from validibot.users.tests.factories import OrganizationFactory
 from validibot.validations.constants import AssertionOperator
@@ -33,7 +34,33 @@ from validibot.validations.tests.factories import RulesetAssertionFactory
 from validibot.validations.tests.factories import RulesetFactory
 from validibot.validations.tests.factories import StepIODefinitionFactory
 from validibot.validations.tests.factories import ValidatorFactory
-from validibot.validations.validators.basic import BasicValidator
+from validibot.validations.tests.resolved_file_inputs import resolved_file_input
+from validibot.validations.validators.basic import BasicValidator as _BasicValidator
+
+
+class BasicValidator(_BasicValidator):
+    """Bind each focused engine test to the Basic validator's document port."""
+
+    def validate(
+        self,
+        validator,
+        submission,
+        ruleset,
+        run_context=None,
+    ):
+        """Supply the exact submission bytes through a typed resolved input."""
+        context = run_context or RunContext()
+        context.resolved_file_inputs["document"] = resolved_file_input(
+            contract_key="document",
+            content=submission.content,
+            file_type=SubmissionFileType.JSON,
+        )
+        return super().validate(
+            validator,
+            submission,
+            ruleset,
+            run_context=context,
+        )
 
 
 class CelBasicValidatorTests(TestCase):

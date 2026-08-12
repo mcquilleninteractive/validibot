@@ -41,6 +41,10 @@ from validibot.validations.constants import ValidationType
 from validibot.validations.constants import XMLSchemaType
 from validibot.validations.models import Ruleset
 from validibot.validations.models import ValidationRun
+from validibot.validations.services.custom_validator_contracts import (
+    sync_configured_io_contract,
+)
+from validibot.validations.services.input_bindings import ensure_step_input_bindings
 from validibot.validations.services.validation_run import ValidationRunLaunchResults
 from validibot.validations.tests.factories import ValidationRunFactory
 from validibot.validations.tests.factories import ValidatorFactory
@@ -400,9 +404,9 @@ def test_launch_upload_rejects_turtle_when_workflow_allows_only_json(
         },
     )
 
-    assert response.status_code == HTTPStatus.BAD_REQUEST
+    assert response.status_code == HTTPStatus.OK
     body = response.content.decode()
-    assert "This workflow accepts JSON submissions." in body
+    assert "File extension &#x27;.ttl&#x27; is not allowed." in body
     assert ValidationRun.objects.filter(workflow=workflow).count() == 0
 
 
@@ -1247,11 +1251,15 @@ def test_public_visibility_toggle_updates_card(client):
     assert "Visible" in response.content.decode()
 
 
-def test_launch_start_rejects_incompatible_file_type(client):
+def test_launch_start_allows_admitted_file_type_even_when_step_will_reject_it(client):
+    """Workflow admission stays permissive and runtime reports the mismatch."""
     workflow = WorkflowFactory(
         allowed_file_types=[SubmissionFileType.JSON, SubmissionFileType.XML],
     )
-    WorkflowStepFactory(workflow=workflow)
+    validator = ValidatorFactory(validation_type=ValidationType.JSON_SCHEMA)
+    sync_configured_io_contract(validator=validator)
+    step = WorkflowStepFactory(workflow=workflow, validator=validator)
+    ensure_step_input_bindings(step)
     user = workflow.user
     user.set_current_org(workflow.org)
     grant_role(user, workflow.org, RoleCode.EXECUTOR)
@@ -1265,9 +1273,11 @@ def test_launch_start_rejects_incompatible_file_type(client):
         },
     )
 
-    assert response.status_code == HTTPStatus.BAD_REQUEST
-    body = response.content.decode()
-    assert "does not support" in body
+    assert response.status_code == HTTPStatus.CREATED
+    run = ValidationRun.objects.get(workflow=workflow)
+    assert run.status == ValidationRunStatus.FAILED
+    finding = run.findings.get(code="input_file_type_incompatible")
+    assert finding.message
 
 
 def test_public_info_view_hides_schema_when_not_shared(client):

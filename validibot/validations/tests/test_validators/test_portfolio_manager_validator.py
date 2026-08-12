@@ -566,13 +566,19 @@ def test_zip_envelope_materializes_report_ebl_and_resolved_inputs() -> None:
     assert traces["expected_buildings_list"].resolved is True
 
 
-def test_preflight_enforces_the_author_selected_submission_shape() -> None:
+def test_preflight_enforces_the_author_selected_submission_shape(monkeypatch) -> None:
     """Single mode refuses a ZIP before container compute is allocated."""
     validator = PortfolioManagerValidator()
     step = SimpleNamespace(config={"submission_structure": "single_report"})
-    submission = SimpleNamespace(
-        original_filename="portfolio.zip",
-        size_bytes=100,
+    submission = SimpleNamespace()
+    resolved = SimpleNamespace(
+        name="portfolio.zip",
+        identity=SimpleNamespace(size_bytes=100),
+    )
+    monkeypatch.setattr(
+        validator,
+        "resolve_file_input",
+        lambda *args, **kwargs: resolved,
     )
 
     with pytest.raises(ValidationError, match="Single-report mode"):

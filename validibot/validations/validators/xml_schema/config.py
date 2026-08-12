@@ -30,11 +30,8 @@ config = ValidatorConfig(
     # v2 declares the XML document as a generic singleton file input. This
     # allows the same validator to consume the primary submission or exact XML
     # bytes produced by PDFValidator and other earlier steps.
-    version=2,
+    version=3,
     order=2,
-    supported_file_types=[SubmissionFileType.XML],
-    supported_data_formats=[SubmissionDataFormat.XML],
-    allowed_extensions=["xml", "xsd", "rng", "dtd"],
     supports_assertions=True,
     icon="bi-filetype-xml",
     card_image="XML_SCHEMA_card_img_small.png",
@@ -46,7 +43,7 @@ config = ValidatorConfig(
             run_stage=CatalogRunStage.INPUT,
             data_type=CatalogValueType.ARTIFACT_REF,
             description="XML document validated against this step's schema.",
-            metadata={"accepted_extensions": ["xml"]},
+            accepted_extensions=["xml"],
             is_required=True,
             on_missing="error",
             order=1,
@@ -58,6 +55,7 @@ config = ValidatorConfig(
             data_format=SubmissionDataFormat.XML,
             accepted_data_formats=[SubmissionDataFormat.XML],
             accepted_media_types=["application/xml", "text/xml"],
+            accepted_file_types=[SubmissionFileType.XML],
             allowed_source_scopes=[
                 BindingSourceScope.SUBMISSION_FILE,
                 BindingSourceScope.UPSTREAM_ARTIFACT,

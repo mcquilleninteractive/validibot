@@ -126,7 +126,7 @@ class FMUServiceTests(TestCase):
         self.assertEqual(fmu_port.role, "fmu")
         self.assertEqual(fmu_port.accepted_data_formats, ["fmu"])
         self.assertEqual(fmu_port.accepted_media_types, ["application/vnd.fmi.fmu"])
-        self.assertEqual(fmu_port.metadata["accepted_extensions"], ["fmu"])
+        self.assertEqual(fmu_port.accepted_extensions, ["fmu"])
         self.assertIn(BindingSourceScope.SYSTEM, fmu_port.allowed_source_scopes)
 
     def test_run_fmu_probe_refreshes_variables(self):

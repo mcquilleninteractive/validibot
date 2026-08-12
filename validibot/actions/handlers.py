@@ -28,11 +28,11 @@ class ValidatorStepHandler:
 
     Execution flow:
         1. Extracts the Validator from the WorkflowStep
-        2. Validates file type compatibility
-        3. Resolves the appropriate validator class from the registry
+        2. Resolves the appropriate validator class from the registry
+        3. Resolves and validates the step's typed input ports
         4. Instantiates the validator with step-level config
-        5. Calls validator.validate() with the submission and run_context
-        6. Translates ValidationResult → StepResult
+        5. Calls validator.validate() with the submission and run context
+        6. Translates ValidationResult into StepResult
 
     For advanced validators (EnergyPlus, FMU), the validator dispatches to a
     container job and returns a pending result. The workflow engine handles the
@@ -75,24 +75,9 @@ class ValidatorStepHandler:
                 ],
             )
 
-        # File type check
-        submission = run.submission
-        if submission and not validator.supports_file_type(submission.file_type):
-            return StepResult(
-                passed=False,
-                issues=[
-                    ValidationIssue(
-                        path="",
-                        message=_("File type '%(ft)s' not supported by this validator.")
-                        % {"ft": submission.file_type},
-                        severity=Severity.ERROR,
-                        code="unsupported_file_type",
-                    )
-                ],
-                stats={"file_type": submission.file_type},
-            )
-
-        # Resolve validator class
+        # Resolve the implementation before touching persisted port state. A
+        # missing plugin is a validator-loading failure, independent of whether
+        # the stored step also has input-contract problems.
         vtype = validator.validation_type
         try:
             validator_cls = get_validator_class(vtype)
@@ -112,6 +97,38 @@ class ValidatorStepHandler:
                         severity=Severity.ERROR,
                         code="validator_load_failed",
                     )
+                ],
+            )
+
+        submission = run.submission
+        from validibot.validations.services.input_contracts import InputResolutionError
+        from validibot.validations.services.input_contracts import (
+            validate_runtime_input_contracts,
+        )
+
+        try:
+            validate_runtime_input_contracts(run=run, step=step)
+            if not validator.has_processor:
+                from validibot.validations.services.resolved_files import (
+                    resolve_file_inputs,
+                )
+
+                run_context.resolved_file_inputs = resolve_file_inputs(
+                    run=run,
+                    step=step,
+                )
+        except InputResolutionError as exc:
+            return StepResult(
+                passed=False,
+                issues=[
+                    ValidationIssue(
+                        path=diagnostic.contract_key,
+                        message=diagnostic.message,
+                        severity=Severity.ERROR,
+                        code=diagnostic.code,
+                        meta=diagnostic.as_meta(),
+                    )
+                    for diagnostic in exc.diagnostics
                 ],
             )
 

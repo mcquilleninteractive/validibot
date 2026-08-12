@@ -1,67 +1,14 @@
-"""The launch contract — the single decision point for "can this workflow run?".
+"""Shared workflow launch admission for every public execution channel.
 
-ADR-2026-04-27 Phase 2: extract the four-way duplicated launch validation
-logic (web view, REST API, MCP helper API, x402 cloud agent) into one
-service. Every launch path must call :meth:`LaunchContract.validate`
-before persisting a submission, so that a rejection on one path produces
-the same violation kind and message as a rejection on any other path.
+This service checks workflow readiness, primary-submission admission, payload
+bounds, validator runtime availability, and structural step dependencies before
+a run is created. It deliberately does not test the primary file against every
+validator: each step resolves its selected source through its typed input-port
+contract and reports a concrete incompatibility as a normal failed-step result.
 
-Why a single service?
-=====================
-
-Before this extraction, each path enforced launch preconditions in its
-own way:
-
-- The web view used ``views_helpers.describe_workflow_file_type_violation``
-  which returned a free-form translated string.
-- The REST API used the same helper but mapped the string to a
-  ``LaunchValidationError`` with an ad-hoc error code.
-- The MCP helper API delegated to the REST API helper, so it inherited
-  the API's behaviour.
-- The x402 cloud agent path had its own copy of the file-type and
-  step-compatibility checks (``_enforce_launch_contract`` in
-  ``validibot-cloud``) which raised a different exception class with
-  yet another error code.
-
-The duplication meant the four paths could disagree on what a
-violation looked like, and adding a new precondition (e.g. payload
-size limit, which Phase 0 added only on x402) required four separate
-edits and four sets of tests.
-
-This module replaces that with one decision function and one
-structured violation type. Each path translates a returned violation
-to its own response shape — web → form error, API → 400 with code,
-MCP → JSON-RPC error envelope, x402 → AgentRunCreationError — but the
-*decision* is the same.
-
-What's in scope vs. out of scope
-================================
-
-In scope (this module):
-
-- Workflow active state
-- Workflow has steps
-- File type supported by the workflow
-- File type supported by every step that consumes the primary submission file
-- Payload size within configured maximum
-
-Out of scope (handled elsewhere):
-
-- Per-user permission checks (``WorkflowAccessResolver``, sibling
-  module). Two distinct concerns: "can this user launch this workflow?"
-  vs. "can this workflow be launched with this payload at all?". A
-  guest with a workflow grant might still hit a payload-size violation;
-  a user without permission shouldn't even reach the contract check.
-- Latest-version selection for public agent paths
-  (``AgentWorkflowResolver``, sibling module). The contract is checked
-  *after* a specific workflow version is resolved.
-- Authentication / auth challenges (handled by DRF authentication
-  classes upstream).
-
-Pattern adopted from how similar projects centralise launch
-validation: GitLab's CI pipeline pre-validation gate, GitHub Actions'
-workflow contract checks, and Argo Workflows' template validation.
-All implementation in this module is original work for Validibot.
+Callers translate the same structured violation into their own web, REST, MCP,
+CLI, or x402 response envelope. Authorization, authentication, workflow-version
+selection, and concrete validator input resolution remain separate concerns.
 """
 
 from __future__ import annotations
@@ -76,12 +23,8 @@ from django.utils.translation import gettext_lazy as _
 if TYPE_CHECKING:
     from validibot.workflows.models import Workflow
 
-# Maximum decoded payload size accepted by any launch path. Phase 0
-# added this limit on x402 only (10 MiB) to bound paid-orphan risk;
-# Phase 2 generalises it to all paths so an oversized JSON envelope
-# can't leak past the API rejecting it on x402 but accepting it via
-# CLI. Operators can override per-deployment via Django settings if
-# they need a higher cap (see ``MAX_LAUNCH_PAYLOAD_BYTES`` setting).
+# Maximum decoded payload size accepted by any launch path. Operators can
+# override the effective limit through the caller's launch policy.
 DEFAULT_MAX_PAYLOAD_BYTES = 10 * 1024 * 1024  # 10 MiB
 
 
@@ -103,7 +46,6 @@ class ViolationCode(StrEnum):
     VALIDATOR_UNAVAILABLE = "validator_unavailable"
     INVALID_STEP_DEPENDENCY = "invalid_step_dependency"
     UNSUPPORTED_FILE_TYPE = "unsupported_file_type"
-    INCOMPATIBLE_STEP = "incompatible_step"
     PAYLOAD_TOO_LARGE = "payload_too_large"
     PAYLOAD_EMPTY = "payload_empty"
 
@@ -180,10 +122,8 @@ class LaunchContract:
         2. Workflow has at least one step
         3. Every validator step has an available runtime config/class
         4. (If ``file_type`` provided) workflow accepts the file type
-        5. (If ``file_type`` provided) every step consuming the primary
-           submission accepts the file type
-        6. (If ``payload_size_bytes`` provided) payload is non-empty
-        7. (If ``payload_size_bytes`` provided) payload is within max
+        5. (If ``payload_size_bytes`` provided) payload is non-empty
+        6. (If ``payload_size_bytes`` provided) payload is within max
 
         We return on the *first* violation rather than aggregating.
         That matches operator expectation ("tell me the first thing
@@ -198,7 +138,7 @@ class LaunchContract:
                 ``AgentWorkflowResolver`` for public paths).
             file_type: Optional submission file type. Pass when the
                 payload includes a known file type so the contract
-                can verify file-type and step compatibility. Pass
+                can verify primary-submission admission. Pass
                 ``None`` for paths that haven't determined a file
                 type yet (rare — most callers know it by the time
                 they reach the contract).
@@ -215,19 +155,12 @@ class LaunchContract:
             A :class:`LaunchContractViolation` if the launch should
             be rejected, ``None`` otherwise.
         """
-        # 1. Workflow inactive — covered by the existing
-        # ``ensure_workflow_ready_for_launch`` check on most paths
-        # but the x402 path doesn't (yet) call that, so include it
-        # here for completeness. After Phase 2 wires every path
-        # through this contract, the path-specific check can be
-        # retired.
         if not workflow.is_active:
             return LaunchContractViolation(
                 code=ViolationCode.WORKFLOW_INACTIVE,
                 message=str(_("This workflow is not currently active.")),
             )
 
-        # 2. Workflow has no steps — same rationale as #1.
         if not workflow.steps.exists():
             return LaunchContractViolation(
                 code=ViolationCode.NO_STEPS,
@@ -273,7 +206,7 @@ class LaunchContract:
                 detail="; ".join(exc.messages),
             )
 
-        # 4. and 5. — file-type and step-compatibility checks.
+        # Primary file type is a workflow admission concern only.
         if file_type is not None:
             file_type_violation = LaunchContract._check_file_type(
                 workflow=workflow,
@@ -282,7 +215,7 @@ class LaunchContract:
             if file_type_violation is not None:
                 return file_type_violation
 
-        # 6. and 7. — payload size checks.
+        # Payload size checks apply uniformly to every channel.
         if payload_size_bytes is not None:
             payload_violation = LaunchContract._check_payload_size(
                 payload_size_bytes=payload_size_bytes,
@@ -301,12 +234,12 @@ class LaunchContract:
         workflow: Workflow,
         file_type: str,
     ) -> LaunchContractViolation | None:
-        """Verify the workflow and primary-file consumers accept ``file_type``.
+        """Verify the primary file satisfies workflow admission policy.
 
-        Later validators may consume typed artifacts exposed by earlier file
-        ports. ``Workflow.first_incompatible_step`` therefore checks the launch
-        type only for steps bound to the primary submitted file (and legacy
-        validators without declared artifact inputs).
+        Individual step contracts are evaluated against their selected concrete
+        sources during execution. A multi-type workflow may therefore admit a
+        file that a particular primary-bound step will reject with a structured
+        validation finding.
         """
         if not workflow.supports_file_type(file_type):
             allowed = workflow.allowed_file_type_labels()
@@ -318,33 +251,6 @@ class LaunchContract:
                     % {"allowed": allowed_display},
                 ),
                 detail=f"workflow accepts {allowed_display}; got {file_type}",
-            )
-
-        incompatible_step = workflow.first_incompatible_step(file_type)
-        if incompatible_step is not None:
-            validator_name = getattr(incompatible_step.validator, "name", "")
-            if validator_name:
-                msg = _(
-                    "Step %(step)s (%(validator)s) does not support "
-                    "%(file_type)s files.",
-                ) % {
-                    "step": incompatible_step.step_number_display,
-                    "validator": validator_name,
-                    "file_type": file_type,
-                }
-            else:
-                msg = _("Step %(step)s does not support %(file_type)s files.") % {
-                    "step": incompatible_step.step_number_display,
-                    "file_type": file_type,
-                }
-            return LaunchContractViolation(
-                code=ViolationCode.INCOMPATIBLE_STEP,
-                message=str(msg),
-                detail=(
-                    f"step {incompatible_step.step_number_display} "
-                    f"({validator_name or 'unknown validator'}) "
-                    f"rejected file_type={file_type}"
-                ),
             )
 
         return None

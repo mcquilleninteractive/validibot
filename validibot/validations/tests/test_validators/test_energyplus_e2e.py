@@ -247,6 +247,9 @@ def _call_validate(
 
     Returns the ``ValidationResult``.
     """
+    if not submission.original_filename:
+        submission.original_filename = "parameters.json"
+        submission.save(update_fields=["original_filename"])
     validator_cls = get_validator(ValidationType.ENERGYPLUS)
     validator_instance = validator_cls()
     run_context = RunContext(

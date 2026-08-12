@@ -822,17 +822,16 @@ class TestSyncResourcesTemplate:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# save_workflow_step() — file type enforcement
+# save_workflow_step() — permissive type authoring
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-class TestFileTypeEnforcement:
-    """Tests for JSON file type enforcement on parameterized template steps.
+class TestPermissiveFileTypeAuthoring:
+    """Tests for advisory-only template input compatibility.
 
-    Parameterized templates require JSON submissions because the submitter
-    sends variable values as a JSON payload.  The enforcement check in
-    ``save_workflow_step()`` rejects template activation on workflows that
-    don't allow JSON file types.
+    A template run needs JSON parameter data, but workflow creation does not
+    attempt to prove that every admitted run can satisfy every step. A concrete
+    incompatible run fails through the step input contract instead.
     """
 
     def test_template_allowed_when_json_in_file_types(self):
@@ -868,12 +867,8 @@ class TestFileTypeEnforcement:
             == expected_io_definition_count
         )
 
-    def test_template_rejected_when_json_not_in_file_types(self):
-        """Template activation fails when the workflow doesn't allow JSON.
-
-        The author must add JSON to ``allowed_file_types`` before
-        activating a parameterized template.
-        """
+    def test_template_configuration_is_allowed_without_json_admission(self):
+        """Authors may save a configuration that concrete runs cannot satisfy."""
         validator = _make_energyplus_validator()
         workflow = WorkflowFactory(
             allowed_file_types=[SubmissionFileType.XML],
@@ -885,8 +880,9 @@ class TestFileTypeEnforcement:
         )
         assert form.is_valid(), form.errors
 
-        with pytest.raises(ValidationError, match="JSON"):
-            save_workflow_step(workflow, validator, form)
+        step = save_workflow_step(workflow, validator, form)
+
+        assert step.validator == validator
 
     def test_no_template_no_enforcement(self):
         """Steps without templates don't trigger file type enforcement.
@@ -2346,7 +2342,7 @@ def _make_launcher_fixtures(
             "application/vnd.energyplus.idf",
             "application/vnd.energyplus.epjson",
         ],
-        metadata={"accepted_extensions": ["idf", "epjson", "json"]},
+        accepted_extensions=["idf", "epjson", "json"],
         envelope_channel=EnvelopeChannel.INPUT_FILES,
         role="primary-model",
         min_items=1,
@@ -2370,7 +2366,7 @@ def _make_launcher_fixtures(
         data_format=ResourceFileType.ENERGYPLUS_WEATHER,
         accepted_data_formats=[ResourceFileType.ENERGYPLUS_WEATHER],
         accepted_media_types=["application/vnd.energyplus.epw"],
-        metadata={"accepted_extensions": ["epw"]},
+        accepted_extensions=["epw"],
         envelope_channel=EnvelopeChannel.RESOURCE_FILES,
         resource_type=ResourceFileType.ENERGYPLUS_WEATHER,
         role="weather",

@@ -178,8 +178,9 @@ the download filename is just a convenient filesystem-safe wrapper around it.
 
 ## File type expectations
 
-- Every workflow stores an `allowed_file_types` array (JSON, XML, TEXT, YAML, etc.). Authors select these options on the workflow form; the launch UI now renders a dropdown only when there is more than one choice.
-- Every validator has a `supported_file_types` list. System validators get sane defaults, and custom validators must be explicit. The step builder only offers validators that overlap with the workflow's current allow list.
+- Every workflow stores an `allowed_file_types` array (JSON, XML, TEXT, YAML, PDF, BINARY, or UNKNOWN). This is only the admission contract for the primary submission. The launch UI renders a dropdown only when there is more than one choice.
+- Every validator declares typed artifact/value input ports. A file port records its accepted formats, media types, extensions, carrier types, and allowed source scopes. The step builder shows every accessible published validator; the workflow's primary file types do not filter the catalog.
+- Authors bind each input port explicitly. Depending on the port, the source can be the primary submission, the whole JSON `submission.metadata` object, an auxiliary submitted file, a workflow resource, or a compatible earlier step output.
 - During launch we re-inspect the payload. If we can prove the content is JSON even though it was submitted as `text/plain`, we store the Submission as JSON so downstream tooling has the right classification.
-- If a client sends a format the workflow doesn't allow—or one of the validators can't consume—the API returns `FILE_TYPE_UNSUPPORTED` with a detail that names the blocking step. The UI sticks the same message at the top of the launch form.
+- If a client sends a primary format the workflow does not admit, launch rejects it. If an admitted run reaches a step whose selected source is incompatible with that validator port, the step fails with a structured input-contract finding. This is deliberately a runtime result rather than a workflow-authoring or launch prohibition.
 - Use the `allowed_file_types` field exposed by `GET /api/v1/orgs/{org_slug}/workflows/` (and in the in-app workflow detail) to inform your integrations about the acceptable formats.

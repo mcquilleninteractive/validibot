@@ -75,6 +75,8 @@ class CatalogEntrySpec(BaseModel):
     data_format: str = ""
     accepted_data_formats: list[str] = Field(default_factory=list)
     accepted_media_types: list[str] = Field(default_factory=list)
+    accepted_file_types: list[str] = Field(default_factory=list)
+    accepted_extensions: list[str] = Field(default_factory=list)
     allowed_source_scopes: list[str] = Field(default_factory=list)
     default_source_strategy: str = "none"
     envelope_channel: str = ""
@@ -265,12 +267,6 @@ class ValidatorConfig(BaseModel):
         if self.image_name:
             return self.image_name
         return f"validibot-validator-backend-{self.validation_type.lower()}"
-
-    # --- File handling ---
-    supported_file_types: list[str] = Field(default_factory=list)
-    supported_data_formats: list[str] = Field(default_factory=list)
-    allowed_extensions: list[str] = Field(default_factory=list)
-    resource_types: list[str] = Field(default_factory=list)
 
     # --- Compute ---
     compute_tier: str = ComputeTier.LOW

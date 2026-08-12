@@ -14,6 +14,7 @@ from django.test import TestCase
 from django.test import override_settings
 
 from validibot.submissions.constants import SubmissionDataFormat
+from validibot.submissions.constants import SubmissionFileType
 from validibot.validations.constants import FMU_MODEL_RESOURCE
 from validibot.validations.constants import ArtifactKind
 from validibot.validations.constants import BindingSourceScope
@@ -25,6 +26,7 @@ from validibot.validations.constants import StepIOMedium
 from validibot.validations.constants import StepIOSourceKind
 from validibot.validations.constants import ValidationType
 from validibot.validations.constants import ValidatorAvailabilityState
+from validibot.validations.constants import get_resource_types_for_validator
 from validibot.validations.models import Derivation
 from validibot.validations.models import StepIODefinition
 from validibot.validations.models import Validator
@@ -310,7 +312,7 @@ class SyncValidatorsCommandTests(TestCase):
             eplusout_sql.envelope_channel,
             EnvelopeChannel.OUTPUT_ARTIFACTS,
         )
-        self.assertEqual(eplusout_sql.metadata["accepted_extensions"], ["sql"])
+        self.assertEqual(eplusout_sql.accepted_extensions, ["sql"])
         self.assertEqual(eplusout_sql.accepted_data_formats, ["sqlite"])
         self.assertEqual(
             eplusout_sql.accepted_media_types,
@@ -416,7 +418,7 @@ class SyncValidatorsCommandTests(TestCase):
         # Create a validator with different name but matching (slug, version).
         Validator.objects.create(
             slug="energyplus-idf-validator",
-            version=3,
+            version=4,
             name="Old Name",
             validation_type=ValidationType.ENERGYPLUS,
             is_system=True,
@@ -758,7 +760,7 @@ class DiscoverConfigsTests(TestCase):
         self.assertEqual(fmu_model.max_items, 1)
         self.assertEqual(fmu_model.accepted_data_formats, [SubmissionDataFormat.FMU])
         self.assertEqual(fmu_model.accepted_media_types, ["application/vnd.fmi.fmu"])
-        self.assertEqual(fmu_model.metadata["accepted_extensions"], ["fmu"])
+        self.assertEqual(fmu_model.accepted_extensions, ["fmu"])
         self.assertIn(
             BindingSourceScope.WORKFLOW_RESOURCE,
             fmu_model.allowed_source_scopes,
@@ -779,7 +781,7 @@ class DiscoverConfigsTests(TestCase):
             if entry.slug == "therm_model"
         )
 
-        self.assertEqual(therm_config.version, 2)
+        self.assertEqual(therm_config.version, 3)
         self.assertEqual(therm_model.data_type, CatalogValueType.ARTIFACT_REF)
         self.assertEqual(therm_model.io_medium, StepIOMedium.ARTIFACT)
         self.assertEqual(therm_model.artifact_kind, ArtifactKind.FILE)
@@ -800,14 +802,24 @@ class DiscoverConfigsTests(TestCase):
         self.assertEqual(therm_model.max_items, 1)
 
     def test_energyplus_has_file_handling_fields(self):
-        """EnergyPlus config has file type and extension fields populated."""
+        """EnergyPlus ports own model and resource input contracts."""
         configs = discover_configs()
         ep_config = next(c for c in configs if c.slug == "energyplus-idf-validator")
+        ports = {entry.slug: entry for entry in ep_config.catalog_entries}
 
-        self.assertIn("text", ep_config.supported_file_types)
-        self.assertIn("energyplus_idf", ep_config.supported_data_formats)
-        self.assertIn("idf", ep_config.allowed_extensions)
-        self.assertIn("energyplus_weather", ep_config.resource_types)
+        self.assertIn(
+            SubmissionFileType.TEXT,
+            ports["primary_model"].accepted_file_types,
+        )
+        self.assertIn(
+            SubmissionDataFormat.ENERGYPLUS_IDF,
+            ports["primary_model"].accepted_data_formats,
+        )
+        self.assertIn("idf", ports["primary_model"].accepted_extensions)
+        self.assertEqual(
+            ports["weather_file"].resource_type,
+            ResourceFileType.ENERGYPLUS_WEATHER,
+        )
 
     def test_energyplus_declares_artifact_ports(self):
         """EnergyPlus config declares its model and weather file contracts.
@@ -936,7 +948,7 @@ class DiscoverConfigsTests(TestCase):
             ],
         )
         self.assertEqual(
-            data_graph.metadata["accepted_extensions"],
+            data_graph.accepted_extensions,
             ["ttl", "rdf", "jsonld", "nt", "nq"],
         )
         self.assertEqual(
@@ -962,7 +974,7 @@ class DiscoverConfigsTests(TestCase):
             [SubmissionDataFormat.TEXT],
         )
         self.assertEqual(shacl_report.accepted_media_types, ["text/turtle"])
-        self.assertEqual(shacl_report.metadata["accepted_extensions"], ["ttl"])
+        self.assertEqual(shacl_report.accepted_extensions, ["ttl"])
 
     def test_schematron_declares_xml_document_artifact_port(self):
         """Schematron config declares the submitted/upstream XML document contract.
@@ -1001,7 +1013,7 @@ class DiscoverConfigsTests(TestCase):
             xml_document.accepted_media_types,
             ["application/xml", "text/xml"],
         )
-        self.assertEqual(xml_document.metadata["accepted_extensions"], ["xml"])
+        self.assertEqual(xml_document.accepted_extensions, ["xml"])
         self.assertEqual(
             xml_document.allowed_source_scopes,
             [
@@ -1022,7 +1034,7 @@ class DiscoverConfigsTests(TestCase):
             svrl_report.accepted_media_types,
             ["application/xml", "text/xml"],
         )
-        self.assertEqual(svrl_report.metadata["accepted_extensions"], ["svrl"])
+        self.assertEqual(svrl_report.accepted_extensions, ["svrl"])
 
     def test_configs_have_display_metadata(self):
         """All discovered configs have icon and card_image set."""
@@ -1090,14 +1102,31 @@ class ConfigRegistryTests(TestCase):
         self.assertIn("therm-validator", slugs)
 
     def test_energyplus_has_resource_types(self):
-        """EnergyPlus config declares weather resource type."""
-        cfg = get_config(ValidationType.ENERGYPLUS)
-        self.assertIn("energyplus_weather", cfg.resource_types)
+        """Resource discovery derives weather support from the input port."""
+        self.assertIn(
+            "energyplus_weather",
+            get_resource_types_for_validator(ValidationType.ENERGYPLUS),
+        )
 
     def test_basic_has_json_file_type(self):
-        """Basic config declares JSON as supported file type."""
+        """Basic's document port declares JSON as an accepted carrier."""
         cfg = get_config(ValidationType.BASIC)
-        self.assertIn("json", cfg.supported_file_types)
+        port = next(entry for entry in cfg.catalog_entries if entry.slug == "document")
+        self.assertIn(SubmissionFileType.JSON, port.accepted_file_types)
+
+    def test_every_config_declares_an_artifact_input_port(self):
+        """No registered validator may rely on an implicit document source."""
+        for cfg in get_all_configs():
+            artifact_inputs = [
+                entry
+                for entry in cfg.catalog_entries
+                if entry.run_stage == "input"
+                and entry.io_medium == StepIOMedium.ARTIFACT
+            ]
+            self.assertTrue(
+                artifact_inputs,
+                f"{cfg.slug} must declare at least one artifact input port",
+            )
 
     def test_configs_declare_supports_assertions(self):
         """Configs correctly declare assertion support."""
@@ -1158,6 +1187,7 @@ class CreateCustomValidatorTests(TestCase):
             short_description="A test custom validator",
             description="Test description",
             custom_type=CustomValidatorType.SIMPLE,
+            input_data_format=SubmissionDataFormat.JSON,
         )
         self.assertTrue(
             custom.validator.supports_assertions,
@@ -1178,7 +1208,10 @@ class BasicValidatorConfigRuntimeAlignmentTests(TestCase):
         from validibot.validations.validators.basic import BasicValidator
 
         cfg = get_config(ValidationType.BASIC)
-        config_types = set(cfg.supported_file_types)
+        document_port = next(
+            entry for entry in cfg.catalog_entries if entry.slug == "document"
+        )
+        config_types = set(document_port.accepted_file_types)
         runtime_types = BasicValidator._SUPPORTED_FILE_TYPES
 
         self.assertEqual(

@@ -462,8 +462,8 @@ class CustomValidatorCreateForm(forms.Form):
             "step inputs or step outputs."
         ),
     )
-    supported_data_formats = forms.ChoiceField(
-        label=_("Supported data format"),
+    input_data_format = forms.ChoiceField(
+        label=_("Input data format"),
         choices=[
             (SubmissionDataFormat.JSON, SubmissionDataFormat.JSON.label),
             (SubmissionDataFormat.YAML, SubmissionDataFormat.YAML.label),
@@ -489,7 +489,7 @@ class CustomValidatorCreateForm(forms.Form):
             "description",
             Row(
                 Column("allow_custom_assertion_targets", css_class="col-12 col-xl-6"),
-                Column("supported_data_formats", css_class="col-12 col-xl-6"),
+                Column("input_data_format", css_class="col-12 col-xl-6"),
             ),
             "notes",
         )
@@ -580,8 +580,8 @@ class CustomValidatorUpdateForm(forms.Form):
             "step inputs or step outputs."
         ),
     )
-    supported_data_formats = forms.ChoiceField(
-        label=_("Supported data format"),
+    input_data_format = forms.ChoiceField(
+        label=_("Input data format"),
         choices=[
             (SubmissionDataFormat.JSON, SubmissionDataFormat.JSON.label),
             (SubmissionDataFormat.YAML, SubmissionDataFormat.YAML.label),
@@ -605,7 +605,7 @@ class CustomValidatorUpdateForm(forms.Form):
             "description",
             Row(
                 Column("allow_custom_assertion_targets", css_class="col-12 col-md-6"),
-                Column("supported_data_formats", css_class="col-12 col-md-6"),
+                Column("input_data_format", css_class="col-12 col-md-6"),
             ),
             "notes",
         )

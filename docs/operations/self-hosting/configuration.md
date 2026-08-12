@@ -82,6 +82,8 @@ The doctor command's VB001-VB099 range checks these.
 |---|---|
 | `VALIDATOR_RUNNER` | `docker` for self-hosted (default). `google_cloud_run` for GCP. |
 | `VALIDATOR_BACKEND_IMAGE_POLICY` | `tag` (default), `digest`, or `signed-digest` (Phase 5). Production: `digest` or higher. Enforced at launch — only enable `digest` once validator images are digest-pinned, or launches fail. |
+| `VALIDATOR_PDF_CONTAINER_RUNTIME` | Optional registered Docker runtime for PDF parsing, such as `runsc` (gVisor) or a Kata runtime name. The default is the daemon runtime. |
+| `VALIDATOR_PDF_REQUIRE_STRONG_SANDBOX` | `false` by default. Set `true` for public hostile PDF ingress after configuring the runtime above; PDF launches then fail closed if no stronger runtime is selected. |
 | `VALIDATOR_RETAIN_HOURS` | How long stopped validator containers are kept before `cleanup` removes them. Default: `24`. |
 | `VALIDATOR_TIMEOUT_SECONDS` | Outer per-validator timeout and stuck-run watchdog deadline. Validators can request shorter via their manifest. |
 | `CELERY_VISIBILITY_TIMEOUT_SECONDS` | Redis redelivery window. Default: `3600`; it must remain greater than Celery's 30-minute hard task limit so a healthy long task is not delivered twice. |

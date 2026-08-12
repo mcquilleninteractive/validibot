@@ -32,6 +32,10 @@ from validibot.validations.models import Ruleset
 from validibot.validations.models import RulesetAssertion
 from validibot.validations.models import ValidationRun
 from validibot.validations.models import Validator
+from validibot.validations.services.custom_validator_contracts import (
+    sync_configured_io_contract,
+)
+from validibot.validations.services.input_bindings import ensure_step_input_bindings
 from validibot.validations.tests.factories import ValidationRunFactory
 from validibot.validations.tests.factories import ValidatorFactory
 from validibot.workflows.constants import WorkflowHistoryPolicy
@@ -811,7 +815,8 @@ def test_basic_workflow_api_flow_returns_failure_when_price_high(
         ruleset_type=RulesetType.BASIC,
         version="1.0.0",
     )
-    WorkflowStep.objects.create(
+    sync_configured_io_contract(validator=validator)
+    step = WorkflowStep.objects.create(
         workflow=workflow,
         validator=validator,
         ruleset=ruleset,
@@ -821,6 +826,7 @@ def test_basic_workflow_api_flow_returns_failure_when_price_high(
         notes="",
         config={},
     )
+    ensure_step_input_bindings(step)
     message = "The price {{price}} is too expensive! Limit {{ value }}"
     RulesetAssertion.objects.create(
         ruleset=ruleset,

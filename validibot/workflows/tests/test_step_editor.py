@@ -496,12 +496,7 @@ def test_create_xml_step_in_pdf_workflow_with_upstream_file_binding(client):
 
 
 def test_wizard_enables_pdf_validator_for_pdf_workflow(client):
-    """The dedicated PDF type must expose the PDF Package Validator card.
-
-    The stale Binary value models a catalog row created before PDF became an
-    explicit file type. Card availability is now independent of that coarse
-    field, while the accompanying data migration repairs the persisted row.
-    """
+    """The dedicated PDF type must expose the PDF Package Validator card."""
     workflow = WorkflowFactory(allowed_file_types=[SubmissionFileType.PDF])
     _login_for_workflow(client, workflow)
     pdf_validator = ensure_validator(
@@ -509,10 +504,6 @@ def test_wizard_enables_pdf_validator_for_pdf_workflow(client):
         "pdf-validator",
         "PDF Package Validator",
     )
-    Validator.objects.filter(pk=pdf_validator.pk).update(
-        supported_file_types=[SubmissionFileType.BINARY],
-    )
-
     url = reverse("workflows:workflow_step_wizard", args=[workflow.pk])
     response = client.get(url, HTTP_HX_REQUEST="true")
 

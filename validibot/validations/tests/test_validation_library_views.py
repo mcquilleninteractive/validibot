@@ -4,6 +4,7 @@ from http import HTTPStatus
 import pytest
 from django.urls import reverse
 
+from validibot.submissions.constants import SubmissionDataFormat
 from validibot.users.constants import RoleCode
 from validibot.users.tests.factories import MembershipFactory
 from validibot.users.tests.factories import OrganizationFactory
@@ -45,6 +46,7 @@ class TestValidationLibraryViews:
             name="Modelica Validator",
             description="Custom validator description",
             custom_type="MODELICA",
+            input_data_format=SubmissionDataFormat.JSON,
         )
 
         response = client.get(reverse("validations:validation_library"))
@@ -263,6 +265,7 @@ class TestValidationLibraryViews:
             name="Room Automation",
             description="Validates room schedules.",
             custom_type="MODELICA",
+            input_data_format=SubmissionDataFormat.JSON,
         )
         response = client.get(
             reverse(
@@ -323,6 +326,7 @@ class TestValidationLibraryViews:
             name="Transient Validator",
             description="Delete me",
             custom_type="MODELICA",
+            input_data_format=SubmissionDataFormat.JSON,
         )
         client.get(reverse("validations:validation_library"))
         csrf_token = client.cookies["csrftoken"].value
@@ -350,6 +354,7 @@ class TestValidationLibraryViews:
             name="In Use Validator",
             description="Still referenced",
             custom_type="MODELICA",
+            input_data_format=SubmissionDataFormat.JSON,
         )
         workflow = WorkflowFactory(org=org, user=user)
         WorkflowStepFactory(workflow=workflow, validator=custom_validator.validator)
@@ -380,6 +385,7 @@ class TestValidationLibraryViews:
             name="In Use Validator",
             description="Still referenced",
             custom_type="MODELICA",
+            input_data_format=SubmissionDataFormat.JSON,
         )
         workflow = WorkflowFactory(org=org, user=user)
         WorkflowStepFactory(workflow=workflow, validator=custom_validator.validator)
@@ -414,6 +420,7 @@ class TestValidationLibraryViews:
             name="In Use Validator",
             description="Still referenced",
             custom_type="MODELICA",
+            input_data_format=SubmissionDataFormat.JSON,
         )
         workflow = WorkflowFactory(org=org, user=user)
         WorkflowStepFactory(workflow=workflow, validator=custom_validator.validator)

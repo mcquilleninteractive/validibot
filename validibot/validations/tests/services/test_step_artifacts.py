@@ -78,7 +78,7 @@ def _declare_generated_model_output(step):
         data_format=SubmissionDataFormat.ENERGYPLUS_EPJSON,
         accepted_data_formats=[SubmissionDataFormat.ENERGYPLUS_EPJSON],
         accepted_media_types=["application/json"],
-        metadata={"accepted_extensions": ["epjson", "json"]},
+        accepted_extensions=["epjson", "json"],
         envelope_channel=EnvelopeChannel.OUTPUT_ARTIFACTS,
         role="generated-model",
         min_items=0,
@@ -534,7 +534,7 @@ class TestStepArtifactRegistration:
             accepted_media_types=["application/x-sqlite3", "application/vnd.sqlite3"],
             envelope_channel=EnvelopeChannel.OUTPUT_ARTIFACTS,
             role="simulation-db",
-            metadata={"accepted_extensions": ["sql"]},
+            accepted_extensions=["sql"],
             min_items=0,
             max_items=1,
         )
@@ -651,7 +651,7 @@ class TestStepArtifactRegistration:
             accepted_media_types=["application/json"],
             envelope_channel=EnvelopeChannel.OUTPUT_ARTIFACTS,
             role="portfolio-manager-property-results",
-            metadata={"accepted_extensions": ["json"]},
+            accepted_extensions=["json"],
             min_items=0,
             max_items=1,
         )
@@ -703,7 +703,7 @@ class TestStepArtifactRegistration:
             accepted_media_types=["application/x-sqlite3"],
             envelope_channel=EnvelopeChannel.OUTPUT_ARTIFACTS,
             role="simulation-db",
-            metadata={"accepted_extensions": ["sql"]},
+            accepted_extensions=["sql"],
             min_items=0,
             max_items=1,
         )
@@ -744,7 +744,7 @@ class TestStepArtifactRegistration:
             accepted_media_types=["application/x-sqlite3"],
             envelope_channel=EnvelopeChannel.OUTPUT_ARTIFACTS,
             role="simulation-db",
-            metadata={"accepted_extensions": ["sql"]},
+            accepted_extensions=["sql"],
             min_items=0,
             max_items=1,
         )
@@ -833,7 +833,7 @@ class TestStepArtifactRunContext:
             name="Build Model",
             order=10,
         )
-        _declare_generated_model_output(upstream_step)
+        producer_output = _declare_generated_model_output(upstream_step)
         downstream_step = WorkflowStepFactory(
             workflow=run.workflow,
             name="Run Simulation",
@@ -874,6 +874,8 @@ class TestStepArtifactRunContext:
             io_definition=io_definition,
             source_scope=BindingSourceScope.UPSTREAM_ARTIFACT,
             source_data_path=f"{upstream_step.step_key}.generated_model",
+            source_step=upstream_step,
+            source_output_io_definition=producer_output,
         )
         context = RunContextBuilder(run, downstream_step).build()
 

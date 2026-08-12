@@ -8,7 +8,6 @@ case to Cloud Run envelope assembly or trace persistence.
 
 from dataclasses import dataclass
 from types import SimpleNamespace
-from typing import Any
 
 import pytest
 from validibot_shared.validations.envelopes import InputFileItem
@@ -31,9 +30,10 @@ class ArtifactPort:
     data_format: str | None = None
     media_type: str | None = None
     accepted_data_formats: list[str] | None = None
+    accepted_extensions: list[str] | None = None
+    accepted_file_types: list[str] | None = None
     accepted_media_types: list[str] | None = None
     allowed_source_scopes: list[str] | None = None
-    metadata: dict[str, Any] | None = None
     min_items: int | None = None
     max_items: int | None = None
 
@@ -58,7 +58,7 @@ def _primary_model_port(**overrides) -> ArtifactPort:
             BindingSourceScope.SUBMISSION_FILE,
             BindingSourceScope.UPSTREAM_ARTIFACT,
         ],
-        "metadata": {"accepted_extensions": ["idf", "epjson", "json"]},
+        "accepted_extensions": ["idf", "epjson", "json"],
         "min_items": 1,
         "max_items": 1,
     }
@@ -82,7 +82,7 @@ def _weather_file_port(**overrides) -> ArtifactPort:
             BindingSourceScope.SUBMISSION_FILE,
             BindingSourceScope.UPSTREAM_ARTIFACT,
         ],
-        "metadata": {"accepted_extensions": ["epw"]},
+        "accepted_extensions": ["epw"],
         "min_items": 1,
         "max_items": 1,
     }
@@ -114,7 +114,7 @@ def _shacl_data_graph_port(**overrides) -> ArtifactPort:
             BindingSourceScope.SUBMISSION_FILE,
             BindingSourceScope.UPSTREAM_ARTIFACT,
         ],
-        "metadata": {"accepted_extensions": ["ttl", "rdf", "jsonld", "nt", "nq"]},
+        "accepted_extensions": ["ttl", "rdf", "jsonld", "nt", "nq"],
         "min_items": 1,
         "max_items": 1,
     }
@@ -139,7 +139,7 @@ def _schematron_xml_document_port(**overrides) -> ArtifactPort:
             BindingSourceScope.SUBMISSION_FILE,
             BindingSourceScope.UPSTREAM_ARTIFACT,
         ],
-        "metadata": {"accepted_extensions": ["xml"]},
+        "accepted_extensions": ["xml"],
         "min_items": 1,
         "max_items": 1,
     }
@@ -157,7 +157,7 @@ def _energyplus_sql_output_port(**overrides) -> ArtifactPort:
         "media_type": "application/x-sqlite3",
         "accepted_data_formats": ["sqlite"],
         "accepted_media_types": ["application/x-sqlite3", "application/vnd.sqlite3"],
-        "metadata": {"accepted_extensions": ["sql"]},
+        "accepted_extensions": ["sql"],
         "min_items": 0,
         "max_items": 1,
     }
@@ -178,7 +178,7 @@ def _schematron_svrl_report_port(**overrides) -> ArtifactPort:
             SupportedMimeType.APPLICATION_XML.value,
             SupportedMimeType.TEXT_XML.value,
         ],
-        "metadata": {"accepted_extensions": ["svrl"]},
+        "accepted_extensions": ["svrl"],
         "min_items": 0,
         "max_items": 1,
     }
@@ -196,7 +196,7 @@ def _portfolio_manager_property_results_port(**overrides) -> ArtifactPort:
         "media_type": "application/json",
         "accepted_data_formats": ["portfolio_manager_property_results_v1"],
         "accepted_media_types": ["application/json"],
-        "metadata": {"accepted_extensions": ["json"]},
+        "accepted_extensions": ["json"],
         "min_items": 0,
         "max_items": 1,
     }
@@ -256,7 +256,7 @@ class TestArtifactPortContractValidation:
             )
 
     def test_artifact_ref_accepts_generic_json_for_epjson_uri(self):
-        """Legacy upstream artifacts may use JSON MIME for epJSON filenames."""
+        """Generic JSON MIME remains valid for declared epJSON artifacts."""
 
         artifact_ports.validate_artifact_ref(
             port=_primary_model_port(),
@@ -281,7 +281,7 @@ class TestArtifactPortContractValidation:
             )
 
     def test_artifact_ref_accepts_generic_json_for_jsonld_uri(self):
-        """Legacy RDF artifacts may use generic JSON MIME for JSON-LD files."""
+        """Generic JSON MIME remains valid for declared JSON-LD artifacts."""
 
         artifact_ports.validate_artifact_ref(
             port=_shacl_data_graph_port(),

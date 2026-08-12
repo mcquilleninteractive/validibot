@@ -270,16 +270,13 @@ config = ValidatorConfig(
         "validibot_shared.portfolio_manager.envelopes.PortfolioManagerOutputEnvelope"
     ),
     image_name="validibot-validator-backend-portfolio-manager",
-    version=2,
+    version=3,
     order=6,
     has_processor=True,
     processor_name="Building Benchmark Report Validation",
     is_system=True,
     supports_assertions=True,
     compute_tier=ComputeTier.LOW,
-    supported_file_types=[SubmissionFileType.BINARY, SubmissionFileType.XML],
-    supported_data_formats=[SubmissionDataFormat.PORTFOLIO_MANAGER_REPORT],
-    allowed_extensions=["xls", "xlsx", "xml", "zip"],
     icon="bi-buildings",
     card_image="default_card_img_small.png",
     catalog_entries=[
@@ -290,7 +287,8 @@ config = ValidatorConfig(
             run_stage=CatalogRunStage.INPUT,
             data_type=CatalogValueType.ARTIFACT_REF,
             description=("Submitted XLS, XLSX, XML, or ZIP building benchmark report."),
-            metadata={"accepted_extensions": ["xls", "xlsx", "xml", "zip"]},
+            accepted_file_types=[SubmissionFileType.BINARY, SubmissionFileType.XML],
+            accepted_extensions=["xls", "xlsx", "xml", "zip"],
             is_required=True,
             on_missing="error",
             order=1,
@@ -348,7 +346,7 @@ config = ValidatorConfig(
                 "Optional versioned JSON roster used in ZIP mode for identity "
                 "reconciliation and per-building EUIt overrides."
             ),
-            metadata={"accepted_extensions": ["json"]},
+            accepted_extensions=["json"],
             is_required=False,
             on_missing="null",
             order=3,
