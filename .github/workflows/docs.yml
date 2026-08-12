@@ -67,6 +67,13 @@ jobs:
       - name: Check relative links in markdown docs
         run: python scripts/check_doc_links.py
 
+      # Install the complete docs-only environment before running either the
+      # supply-chain tests or the site build. The asset tests import
+      # defusedxml directly, so installing only immediately before zensical
+      # would leave the earlier test step with an incomplete environment.
+      - name: Install documentation dependencies
+        run: pip install --require-hashes -r requirements/docs.txt
+
       - name: Verify local documentation assets
         run: |
           npm ci
@@ -84,6 +91,5 @@ jobs:
       # requirements/docs.txt (command in that file's header).
       - name: Build dev docs site
         run: |
-          pip install --require-hashes -r requirements/docs.txt
           zensical build -f mkdocs.dev.yml --clean
           npm run harden:docs-build
