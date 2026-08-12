@@ -18,8 +18,8 @@ The clean package carries:
 - `requirements.ids`, synthetic buildingSMART IDS-shaped XML; and
 - `transmittal.json`, deterministic issue metadata.
 
-The validator always applies `static_text_package_v1`; there is no profile
-field to configure. With `emit_extracted_files_bundle=true` and the selectors
+The validator always applies `static_text_package_v1`; the policy is not
+configurable. With `emit_extracted_files_bundle=true` and the selectors
 printed on sheet G001, the clean package must succeed with three members and
 all six fixed artifacts:
 

@@ -22,7 +22,7 @@ from validibot_shared.energyplus.envelopes import EnergyPlusInputs
 from validibot_shared.fmu.envelopes import FMUInputEnvelope
 from validibot_shared.fmu.envelopes import FMUInputs
 from validibot_shared.fmu.envelopes import FMUSimulationConfig
-from validibot_shared.pdf import PDF_STATIC_TEXT_PROFILE
+from validibot_shared.pdf import PDF_STATIC_TEXT_POLICY
 from validibot_shared.pdf import PdfInputEnvelope
 from validibot_shared.pdf import PdfInputs
 from validibot_shared.pdf import PdfProcessingLimits
@@ -1516,7 +1516,7 @@ def build_input_envelope(
         pdf_config = step.config or {}
         pdf_inputs = PdfInputs.model_validate(
             {
-                "profile": PDF_STATIC_TEXT_PROFILE,
+                "policy": PDF_STATIC_TEXT_POLICY,
                 "emit_extracted_files_bundle": bool(
                     pdf_config.get("emit_extracted_files_bundle", False)
                 ),

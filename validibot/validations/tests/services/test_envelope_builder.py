@@ -565,7 +565,7 @@ def _build_pdf_file_port_run():
         name="Inspect PDF package",
         order=10,
         config={
-            "profile": "static_text_package_v1",
+            "policy": "static_text_package_v1",
             "emit_extracted_files_bundle": True,
             "selected_xml": {
                 "required": True,
@@ -1625,7 +1625,7 @@ class TestPdfFilePortMaterialization:
         assert envelope.inputs.selected_json.discovery_kinds == [
             "file_attachment_annotation"
         ]
-        assert envelope.inputs.profile == "static_text_package_v1"
+        assert envelope.inputs.policy == "static_text_package_v1"
         assert envelope.inputs.selected_step_p21.step_file_schema == ["AP242_FIXTURE"]
         assert envelope.inputs.emit_extracted_files_bundle is True
         assert (

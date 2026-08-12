@@ -353,7 +353,7 @@ class PdfStepConfig(ContainerExecutionStepConfig):
     """Semantic configuration for isolated PDF package inspection."""
 
     execution_timeout_seconds: int | None = Field(default=None, ge=1, le=300)
-    profile: Literal["static_text_package_v1"] = "static_text_package_v1"
+    policy: Literal["static_text_package_v1"] = "static_text_package_v1"
     emit_extracted_files_bundle: bool = False
     selected_xml: PdfPayloadSelectorStepConfig | None = None
     selected_json: PdfPayloadSelectorStepConfig | None = None

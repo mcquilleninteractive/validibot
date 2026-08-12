@@ -72,8 +72,10 @@ findings, output sizes, and execution time.
 ### Atomic publication
 
 `pdf_inventory` is always the evidence output when the file can be represented
-as a domain result. XMP, selected members, and the extracted-files ZIP are a
-single supplementary publication set:
+as a domain result. Its `policy_results` array contains at most one typed
+result, whose `policy` value can only be `static_text_package_v1`; the contract
+has no legacy `profile` or `profile_results` aliases. XMP, selected members,
+and the extracted-files ZIP are a single supplementary publication set:
 
 - if every policy and selector check succeeds, configured supplementary
   artifacts may be published;

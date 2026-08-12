@@ -40,11 +40,17 @@ def test_pdf_step_config_rejects_a_deadline_above_the_backend_ceiling() -> None:
         PdfStepConfig(execution_timeout_seconds=301)
 
 
-@pytest.mark.parametrize("legacy_profile", ["inventory_v1", "safe_static_package_v1"])
-def test_pdf_step_config_rejects_every_legacy_profile(legacy_profile: str) -> None:
+@pytest.mark.parametrize("legacy_policy", ["inventory_v1", "safe_static_package_v1"])
+def test_pdf_step_config_rejects_every_legacy_policy(legacy_policy: str) -> None:
     """Machine-authored workflows cannot bypass the fixed static-text policy."""
     with pytest.raises(ValidationError, match="static_text_package_v1"):
-        PdfStepConfig(profile=legacy_profile)
+        PdfStepConfig(policy=legacy_policy)
+
+
+def test_pdf_step_config_rejects_the_removed_profile_field() -> None:
+    """Saved workflow JSON must use policy terminology without a legacy alias."""
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        PdfStepConfig.model_validate({"profile": "static_text_package_v1"})
 
 
 def _file_port(
@@ -174,9 +180,11 @@ def test_pdf_form_builds_exact_typed_selectors_and_file_source() -> None:
     )
 
     assert form.is_valid(), form.errors
-    assert "profile" not in form.fields
+    assert "policy" not in form.fields
     assert form.build_file_port_binding_updates()[0]["source_data_path"] == "primary"
     built_config = build_pdf_config(form)
+    assert built_config["policy"] == "static_text_package_v1"
+    assert "profile" not in built_config
     assert built_config["selected_xml"] == {
         "required": True,
         "original_filename": "asset-handover.xml",

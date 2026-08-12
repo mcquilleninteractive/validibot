@@ -1809,7 +1809,7 @@ def build_pdf_config(form: PdfStepConfigForm) -> dict[str, Any]:
     """Build fixed static-text policy and exact-selector configuration."""
     cleaned = form.cleaned_data
     config = {
-        "profile": "static_text_package_v1",
+        "policy": "static_text_package_v1",
         "emit_extracted_files_bundle": bool(cleaned.get("emit_extracted_files_bundle")),
     }
     for suffix in ("xml", "json", "step_p21"):

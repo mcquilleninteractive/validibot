@@ -928,7 +928,7 @@ def _base_pdf(*, negative: bool) -> bytes:
 
 
 def _xmp_packet(*, negative: bool) -> bytes:
-    """Return deterministic document-level XMP and a test profile declaration."""
+    """Return deterministic document-level XMP and a test policy declaration."""
     package_id = "VB-AEC-ISSUE-NEGATIVE-001" if negative else "VB-AEC-ISSUE-CLEAN-001"
     status = "intentional-negative-test" if negative else "clean-test-package"
     return f"""<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?>
