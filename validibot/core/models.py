@@ -8,6 +8,8 @@ from django.utils.translation import gettext_lazy as _
 from model_utils.models import TimeStampedModel
 
 from validibot.core.constants import InviteStatus
+from validibot.core.metadata import MetadataPolicyError
+from validibot.core.metadata import canonical_metadata_bytes
 from validibot.users.models import User
 
 
@@ -27,10 +29,6 @@ class SupportMessage(TimeStampedModel):
 
     def __str__(self):
         return self.subject
-
-
-class MetadataPolicyError(Exception):
-    """Raised when submission metadata violates the configured policy."""
 
 
 class SiteSettings(TimeStampedModel):
@@ -63,6 +61,13 @@ class SiteSettings(TimeStampedModel):
         help_text=_(
             "Maximum size (in bytes) of stored metadata per submission. "
             "Set to 0 to disable the limit.",
+        ),
+    )
+    metadata_max_depth = models.PositiveIntegerField(
+        default=8,
+        help_text=_(
+            "Maximum nesting depth for submission metadata, counting the "
+            "top-level object as depth 1. Set to 0 to disable the limit.",
         ),
     )
 
@@ -106,24 +111,27 @@ class SiteSettings(TimeStampedModel):
     def __str__(self):
         return f"SiteSettings<{self.slug}>"
 
-    def enforce_metadata_policy(self, metadata: dict) -> None:
+    def enforce_metadata_policy(self, metadata: object) -> None:
         """Validate submission metadata against the configured policy.
 
-        Raises ``MetadataPolicyError`` if the metadata violates either
-        the key-value-only or the max-bytes constraint.
+        Raises ``MetadataPolicyError`` if metadata is not a finite JSON object
+        or violates the scalar-only, maximum-depth, or canonical-byte limits.
         """
-        import json as _json
-
         if self.metadata_key_value_only:
+            if not isinstance(metadata, dict):
+                raise MetadataPolicyError("Submission metadata must be a JSON object.")
             for key, value in metadata.items():
                 if isinstance(value, (dict, list)):
                     raise MetadataPolicyError(
                         f"Metadata value for '{key}' must be a scalar when "
                         "key/value enforcement is enabled.",
                     )
+        canonical_bytes = canonical_metadata_bytes(
+            metadata,
+            max_depth=self.metadata_max_depth,
+        )
         if self.metadata_max_bytes > 0:
-            size = len(_json.dumps(metadata).encode("utf-8"))
-            if size > self.metadata_max_bytes:
+            if len(canonical_bytes) > self.metadata_max_bytes:
                 raise MetadataPolicyError(
                     "Metadata is too large for this workflow start request.",
                 )

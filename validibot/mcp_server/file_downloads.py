@@ -7,8 +7,10 @@ import socket
 from dataclasses import dataclass
 from http import HTTPStatus
 from typing import TYPE_CHECKING
+from urllib.parse import SplitResult
 from urllib.parse import urljoin
 from urllib.parse import urlsplit
+from urllib.parse import urlunsplit
 
 import httpx
 from django.conf import settings
@@ -50,6 +52,10 @@ def download_openai_file(
             timeout=MCP_FILE_DOWNLOAD_TIMEOUT_SECONDS,
             transport=transport,
             trust_env=False,
+            # Redirects may change the TLS hostname while resolving to the same
+            # address. Do not let the IP-address origin key cause a connection
+            # authenticated for one hostname to be reused for another.
+            limits=httpx.Limits(max_keepalive_connections=0),
         ) as client:
             response = _request_with_safe_redirects(client=client, url=url)
             try:
@@ -85,10 +91,11 @@ def _request_with_safe_redirects(*, client: httpx.Client, url: str) -> httpx.Res
         HTTPStatus.PERMANENT_REDIRECT,
     }
     for redirect_count in range(MCP_FILE_DOWNLOAD_MAX_REDIRECTS + 1):
-        _validate_public_https_url(current_url)
-        response = client.send(
-            client.build_request("GET", current_url, headers={"Accept": "*/*"}),
-            stream=True,
+        parsed, addresses = _validated_public_https_destination(current_url)
+        response = _send_to_validated_address(
+            client=client,
+            parsed=parsed,
+            addresses=addresses,
         )
         if response.status_code == HTTPStatus.OK:
             return response
@@ -114,8 +121,13 @@ def _request_with_safe_redirects(*, client: httpx.Client, url: str) -> httpx.Res
     raise AssertionError("The bounded redirect loop must return or raise")
 
 
-def _validate_public_https_url(url: str) -> None:
-    """Allow only credential-free HTTPS URLs resolving entirely to public IPs."""
+def _validated_public_https_destination(
+    url: str,
+) -> tuple[
+    SplitResult,
+    tuple[ipaddress.IPv4Address | ipaddress.IPv6Address, ...],
+]:
+    """Resolve one safe HTTPS destination exactly once for a pinned request."""
 
     try:
         parsed = urlsplit(url)
@@ -143,6 +155,56 @@ def _validate_public_https_url(url: str) -> None:
             MCPErrorCode.INVALID_INPUT,
             "The attached file URL must resolve to a public address.",
         )
+    ordered = tuple(sorted(addresses, key=lambda item: (item.version, int(item))))
+    return parsed, ordered
+
+
+def _send_to_validated_address(
+    *,
+    client: httpx.Client,
+    parsed: SplitResult,
+    addresses: tuple[ipaddress.IPv4Address | ipaddress.IPv6Address, ...],
+) -> httpx.Response:
+    """Connect only to validated addresses while authenticating the URL host.
+
+    Replacing the request URL's host prevents the HTTP transport from doing a
+    second, attacker-influenced DNS lookup. The original hostname remains the
+    HTTP Host header and TLS SNI name, so certificate verification still proves
+    the caller reached the server authorized for that URL.
+    """
+
+    hostname = parsed.hostname
+    if hostname is None:  # pragma: no cover - validated by the caller
+        raise AssertionError("A validated HTTPS URL always has a hostname")
+    tls_hostname = hostname.encode("idna").decode("ascii")
+    host_header = f"[{tls_hostname}]" if ":" in tls_hostname else tls_hostname
+    last_error: httpx.ConnectError | httpx.ConnectTimeout | OSError | None = None
+    for address in addresses:
+        authority = (
+            f"[{address.compressed}]"
+            if isinstance(address, ipaddress.IPv6Address)
+            else str(address)
+        )
+        pinned_url = urlunsplit(
+            ("https", authority, parsed.path, parsed.query, ""),
+        )
+        request = client.build_request(
+            "GET",
+            pinned_url,
+            headers={
+                "Accept": "*/*",
+                "Connection": "close",
+                "Host": host_header,
+            },
+            extensions={"sni_hostname": tls_hostname},
+        )
+        try:
+            return client.send(request, stream=True)
+        except (httpx.ConnectError, httpx.ConnectTimeout, OSError) as exc:
+            last_error = exc
+    if last_error is not None:
+        raise last_error
+    raise AssertionError("A validated destination always has an address")
 
 
 def _resolved_addresses(

@@ -11,7 +11,6 @@ the Django process.
 from __future__ import annotations
 
 import hashlib
-import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -24,6 +23,8 @@ if TYPE_CHECKING:
 
 from django.conf import settings
 
+from validibot.core.metadata import MetadataPolicyError
+from validibot.core.metadata import canonical_metadata_bytes
 from validibot.submissions.constants import SubmissionDataFormat
 from validibot.submissions.constants import SubmissionFileType
 from validibot.validations.constants import BindingSourceScope
@@ -367,16 +368,9 @@ def _resolve_submission_metadata(
 ) -> ResolvedFileInput:
     """Materialize the whole submission metadata object as canonical JSON."""
 
-    metadata = run.submission.metadata
     try:
-        content = json.dumps(
-            metadata,
-            sort_keys=True,
-            separators=(",", ":"),
-            ensure_ascii=False,
-            allow_nan=False,
-        ).encode("utf-8")
-    except (TypeError, ValueError) as exc:
+        content = canonical_metadata_bytes(run.submission.metadata)
+    except MetadataPolicyError as exc:
         raise ValueError("Submission metadata is not valid JSON.") from exc
     if len(content) > max_bytes:
         raise ValueError(

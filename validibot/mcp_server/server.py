@@ -26,6 +26,7 @@ from validibot import __version__
 from validibot.audit.constants import AuditAction
 from validibot.audit.services import ActorSpec
 from validibot.audit.services import AuditLogService
+from validibot.mcp_server.abuse_controls import MCPAbuseProtectionMiddleware
 from validibot.mcp_server.auth import ValidibotTokenVerifier
 from validibot.mcp_server.auth import get_mcp_resource_url
 from validibot.mcp_server.constants import MCP_DEFAULT_PAGE_SIZE
@@ -53,7 +54,7 @@ from validibot.mcp_server.services import start_validation as start_service
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from starlette.applications import Starlette
+    from asgiref.typing import ASGI3Application
 
     from validibot.users.models import User
 
@@ -274,19 +275,24 @@ def build_mcp_server() -> MCPServer:
     return server
 
 
-def build_mcp_asgi_application() -> Starlette:
+def build_mcp_asgi_application() -> ASGI3Application:
     """Return the official SDK's bounded stateless Streamable HTTP app."""
 
     server = build_mcp_server()
-    return server.streamable_http_app(
-        streamable_http_path="/mcp",
-        json_response=True,
-        stateless_http=True,
-        max_request_body_size=int(
-            getattr(settings, "MCP_MAX_REQUEST_BODY_BYTES", 4_194_304),
+    return MCPAbuseProtectionMiddleware(
+        cast(
+            "ASGI3Application",
+            server.streamable_http_app(
+                streamable_http_path="/mcp",
+                json_response=True,
+                stateless_http=True,
+                max_request_body_size=int(
+                    getattr(settings, "MCP_MAX_REQUEST_BODY_BYTES", 4_194_304),
+                ),
+                transport_security=_transport_security_settings(),
+                host=urlparse(get_mcp_resource_url()).hostname or "localhost",
+            ),
         ),
-        transport_security=_transport_security_settings(),
-        host=urlparse(get_mcp_resource_url()).hostname or "localhost",
     )
 
 

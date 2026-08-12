@@ -63,6 +63,9 @@ def test_download_returns_openai_metadata_without_forwarding_credentials() -> No
         assert request.headers.get("Authorization") is None
         assert request.headers.get("Cookie") is None
         assert request.headers["Accept"] == "*/*"
+        assert request.headers["Host"] == "files.openai.example"
+        assert request.url.host == "93.184.216.34"
+        assert request.extensions["sni_hostname"] == "files.openai.example"
         return httpx.Response(
             200,
             headers={"Content-Type": "text/plain; charset=utf-8"},
@@ -160,6 +163,100 @@ def test_download_rechecks_redirect_targets(
         download_openai_file(_file(), transport=transport)
 
     assert rejected.value.code == MCPErrorCode.INVALID_INPUT
+
+
+def test_download_pins_the_single_validated_dns_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """DNS rebinding must not create a second lookup at connection time."""
+
+    lookups = 0
+
+    def rebinding_dns(
+        *args: object,
+        **kwargs: object,
+    ) -> list[tuple[object, ...]]:
+        """Return public DNS once and a forbidden address on any later lookup."""
+
+        nonlocal lookups
+        del args, kwargs
+        lookups += 1
+        address = "93.184.216.34" if lookups == 1 else "169.254.169.254"
+        return [
+            (
+                socket.AF_INET,
+                socket.SOCK_STREAM,
+                socket.IPPROTO_TCP,
+                "",
+                (address, 443),
+            ),
+        ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        """Prove the transport received the validated IP, not the DNS hostname."""
+
+        assert request.url.host == "93.184.216.34"
+        assert request.headers["Host"] == "files.openai.example"
+        assert request.extensions["sni_hostname"] == "files.openai.example"
+        return httpx.Response(200, content=b"{}", request=request)
+
+    monkeypatch.setattr(socket, "getaddrinfo", rebinding_dns)
+
+    downloaded = download_openai_file(
+        _file(),
+        transport=httpx.MockTransport(handler),
+    )
+
+    assert downloaded.content == b"{}"
+    assert lookups == 1
+
+
+def test_download_retries_only_other_prevalidated_public_addresses(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A connection failure may fail over without re-resolving the hostname."""
+
+    lookups = 0
+    attempted_hosts: list[str] = []
+
+    def two_public_addresses(
+        *args: object,
+        **kwargs: object,
+    ) -> list[tuple[object, ...]]:
+        """Return two fixed public candidates in deliberately reversed order."""
+
+        nonlocal lookups
+        del args, kwargs
+        lookups += 1
+        return [
+            (
+                socket.AF_INET,
+                socket.SOCK_STREAM,
+                socket.IPPROTO_TCP,
+                "",
+                (address, 443),
+            )
+            for address in ("93.184.216.35", "93.184.216.34")
+        ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        """Fail the first pinned address and accept the second one."""
+
+        attempted_hosts.append(request.url.host)
+        if request.url.host == "93.184.216.34":
+            raise httpx.ConnectError("first candidate unavailable", request=request)
+        return httpx.Response(200, content=b"{}", request=request)
+
+    monkeypatch.setattr(socket, "getaddrinfo", two_public_addresses)
+
+    downloaded = download_openai_file(
+        _file(),
+        transport=httpx.MockTransport(handler),
+    )
+
+    assert downloaded.content == b"{}"
+    assert attempted_hosts == ["93.184.216.34", "93.184.216.35"]
+    assert lookups == 1
 
 
 def test_download_rejects_declared_and_streamed_oversize_content(settings) -> None:

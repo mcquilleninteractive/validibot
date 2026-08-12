@@ -1,4 +1,4 @@
-"""Runtime tests for schema validators with step-level assertions.
+"""Runtime tests for schema validators and their source-aware input contracts.
 
 JSON Schema and XML Schema validators perform their schema check first and then
 run workflow-authored assertions against the parsed payload. These tests prove
@@ -6,21 +6,33 @@ that the authoring UI capability is backed by validator execution, not just a
 catalog flag.
 """
 
+import pytest
+
 from validibot.actions.protocols import RunContext
+from validibot.submissions.constants import SubmissionDataFormat
 from validibot.submissions.constants import SubmissionFileType
 from validibot.submissions.tests.factories import SubmissionFactory
+from validibot.validations.constants import ArtifactKind
 from validibot.validations.constants import AssertionOperator
+from validibot.validations.constants import BindingSourceScope
+from validibot.validations.constants import CatalogValueType
 from validibot.validations.constants import RulesetType
+from validibot.validations.constants import StepIODirection
+from validibot.validations.constants import StepIOMedium
 from validibot.validations.constants import ValidationType
 from validibot.validations.constants import XMLSchemaType
+from validibot.validations.services.artifact_bindings import set_artifact_input_binding
+from validibot.validations.services.resolved_files import resolve_file_inputs
 from validibot.validations.tests.factories import RulesetAssertionFactory
 from validibot.validations.tests.factories import RulesetFactory
+from validibot.validations.tests.factories import StepIODefinitionFactory
 from validibot.validations.tests.factories import ValidationRunFactory
 from validibot.validations.tests.factories import ValidatorFactory
 from validibot.validations.tests.resolved_file_inputs import resolved_file_input
 from validibot.validations.tests.resolved_file_inputs import run_context_with_file
 from validibot.validations.validators.json_schema.validator import JsonSchemaValidator
 from validibot.validations.validators.xml_schema.validator import XmlSchemaValidator
+from validibot.workflows.tests.factories import WorkflowFactory
 from validibot.workflows.tests.factories import WorkflowStepFactory
 
 
@@ -186,6 +198,80 @@ def test_json_schema_validator_prefers_resolved_artifact_bytes(db):
 
     assert result.passed is True
     assert result.stats["schema_error_count"] == 0
+
+
+@pytest.mark.parametrize(
+    ("metadata", "expected_pass"),
+    [({"asset_id": "A-42"}, True), ({}, False)],
+)
+def test_pdf_primary_json_schema_validates_virtual_metadata_document(
+    db,
+    metadata,
+    expected_pass,
+):
+    """A first JSON Schema step reads selected metadata, never the primary PDF."""
+
+    workflow = WorkflowFactory(allowed_file_types=[SubmissionFileType.PDF])
+    validator = ValidatorFactory(
+        validation_type=ValidationType.JSON_SCHEMA,
+        supports_assertions=False,
+    )
+    step = WorkflowStepFactory(workflow=workflow, validator=validator)
+    port = StepIODefinitionFactory(
+        validator=validator,
+        workflow_step=None,
+        contract_key="json_document",
+        direction=StepIODirection.INPUT,
+        data_type=CatalogValueType.ARTIFACT_REF,
+        io_medium=StepIOMedium.ARTIFACT,
+        artifact_kind=ArtifactKind.FILE,
+        data_format=SubmissionDataFormat.JSON,
+        accepted_data_formats=[SubmissionDataFormat.JSON],
+        media_type="application/json",
+        accepted_media_types=["application/json"],
+        accepted_file_types=[SubmissionFileType.JSON],
+        accepted_extensions=["json"],
+        allowed_source_scopes=[BindingSourceScope.SUBMISSION_METADATA],
+        min_items=1,
+        max_items=1,
+        is_path_editable=False,
+    )
+    set_artifact_input_binding(
+        consumer_step=step,
+        consumer_port=port,
+        source_scope=BindingSourceScope.SUBMISSION_METADATA,
+        source_data_path="",
+    )
+    submission = SubmissionFactory(
+        workflow=workflow,
+        file_type=SubmissionFileType.PDF,
+        content="%PDF-1.7 definitely not JSON",
+        original_filename="carrier.pdf",
+        metadata=metadata,
+    )
+    run = ValidationRunFactory(workflow=workflow, submission=submission)
+    ruleset = RulesetFactory(
+        ruleset_type=RulesetType.JSON_SCHEMA,
+        rules_text=(
+            '{"$schema":"https://json-schema.org/draft/2020-12/schema",'
+            '"type":"object","required":["asset_id"]}'
+        ),
+    )
+    resolved_inputs = resolve_file_inputs(run=run, step=step)
+
+    result = JsonSchemaValidator().validate(
+        validator,
+        submission,
+        ruleset,
+        run_context=RunContext(
+            validation_run=run,
+            step=step,
+            resolved_file_inputs=resolved_inputs,
+        ),
+    )
+
+    assert result.passed is expected_pass
+    assert result.stats["schema_error_count"] == (0 if expected_pass else 1)
 
 
 def test_xml_schema_validator_prefers_resolved_artifact_bytes(db):

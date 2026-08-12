@@ -190,7 +190,6 @@ LOCAL_APPS = [
     "validibot.idp.apps.ValidibotIDPConfig",
     # Legacy helper routes retained temporarily for the independent Cloud x402
     # adapter. The embedded MCP server does not call these HTTP endpoints.
-    "validibot.mcp_api.apps.MCPAPIConfig",
     # Audit log — append-only Pillar-3 observability store. Community-
     # hosted so self-hosted Pro deployments get audit logs too; the
     # Pro-gated UI is added in a later phase.
@@ -704,10 +703,9 @@ SPECTACULAR_SETTINGS = {
     "ENUM_NAME_OVERRIDES": {
         "OutputRetentionEnum": "validibot.submissions.constants.OutputRetention",
     },
-    # Keep service-to-service routes (the /api/v1/mcp/* helper surface) out
-    # of the user-facing reference — they reject user API keys by design.
-    # See config/schema.py for the rationale.
-    "PREPROCESSING_HOOKS": ["config.schema.exclude_internal_paths"],
+    # Import the local schema module so its custom bearer-auth extension is
+    # registered while leaving the public endpoint list unchanged.
+    "PREPROCESSING_HOOKS": ["config.schema.register_schema_extensions"],
     # Serve Swagger UI and ReDoc assets locally via sidecar (fixes encoding issues,
     # works offline, avoids CDN dependencies)
     "SWAGGER_UI_DIST": "SIDECAR",
@@ -1405,6 +1403,21 @@ MCP_MAX_REQUEST_BODY_BYTES = env.int(
 )
 MCP_READS_PER_MINUTE = env.int("MCP_READS_PER_MINUTE", default=120)
 MCP_STARTS_PER_MINUTE = env.int("MCP_STARTS_PER_MINUTE", default=20)
+# Shared-cache transport ceilings protect the unauthenticated boundary before
+# JWT verification or tool execution. Zero explicitly disables one dimension;
+# production-like staging must justify any override with recorded load evidence.
+MCP_REQUESTS_PER_IP_PER_MINUTE = env.int(
+    "MCP_REQUESTS_PER_IP_PER_MINUTE",
+    default=240,
+)
+MCP_FAILED_AUTH_PER_IP_PER_MINUTE = env.int(
+    "MCP_FAILED_AUTH_PER_IP_PER_MINUTE",
+    default=20,
+)
+MCP_GLOBAL_REQUESTS_PER_MINUTE = env.int(
+    "MCP_GLOBAL_REQUESTS_PER_MINUTE",
+    default=3_000,
+)
 MCP_ALLOWED_ORIGINS = env.list("MCP_ALLOWED_ORIGINS", default=[])
 
 # ── Claude Desktop public client ─────────────────────────────────────────
@@ -1507,36 +1520,6 @@ AUDIT_ARCHIVE_GCS_KMS_KEY = env.str("AUDIT_ARCHIVE_GCS_KMS_KEY", default="")
 # GCP project id for the storage client. Empty → ADC / env-based
 # resolution. Rarely needed in production.
 AUDIT_ARCHIVE_GCS_PROJECT_ID = env.str("AUDIT_ARCHIVE_GCS_PROJECT_ID", default="")
-
-# ── Legacy agent compatibility route authentication ──────────────────
-# Read only by ``validibot.mcp_api.authentication`` for the compatibility
-# `/api/v1/mcp/*` HTTP adapter still exercised by Cloud x402 code. Embedded MCP
-# does not use these settings. The shared-key mode is local-test compatibility;
-# hosted compatibility callers use Cloud Run OIDC.
-MCP_SERVICE_KEY = env("VALIDIBOT_MCP_SERVICE_KEY", default="")
-
-# Expected audience on Cloud Run OIDC identity tokens. Defaults empty
-# so the OIDC verification path is off by default — the shared-secret
-# path covers local compatibility tests. Cloud settings can supply the legacy
-# adapter's Django API URL.
-MCP_OIDC_AUDIENCE = env.str("MCP_OIDC_AUDIENCE", default="")
-
-# Service-account allowlist for Cloud Run OIDC identity tokens. A
-# valid Google-signed token with the right audience is necessary but
-# not sufficient — any Google SA that can mint a token with our
-# audience would pass ``verify_oauth2_token``. The allowlist narrows
-# that to explicitly retained compatibility callers.
-#
-# Accepts a comma-separated env var OR a Python list (e.g. from a
-# cloud settings module): both flow through the same set-of-strings
-# normaliser in the auth class. Community leaves this empty; a
-# production GCP deployment may populate it during the compatibility period.
-# An empty allowlist with the OIDC path active is a
-# deployment error — the auth class logs and fails closed.
-MCP_OIDC_ALLOWED_SERVICE_ACCOUNTS = env.list(
-    "MCP_OIDC_ALLOWED_SERVICE_ACCOUNTS",
-    default=[],
-)
 
 # CELERY TASK QUEUE
 # ------------------------------------------------------------------------------

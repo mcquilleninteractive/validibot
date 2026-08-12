@@ -573,26 +573,6 @@ if DEPLOYMENT_TARGET == "gcp":
                 "dispatch."
             )
 
-    # The legacy ``/api/v1/mcp/*`` compatibility adapter retains optional
-    # service-to-service OIDC while Cloud x402 dependencies are unwound. This
-    # is unrelated to the embedded `/mcp` endpoint. If the compatibility
-    # audience is configured, its allowlist must fail closed.
-    if MCP_OIDC_AUDIENCE:  # noqa: F405
-        _mcp_allowlist = [
-            sa.strip().lower()
-            for sa in (MCP_OIDC_ALLOWED_SERVICE_ACCOUNTS or [])  # noqa: F405
-            if sa.strip()
-        ]
-        if not _mcp_allowlist:
-            raise ImproperlyConfigured(
-                "DEPLOYMENT_TARGET=gcp with MCP_OIDC_AUDIENCE set "
-                "requires MCP_OIDC_ALLOWED_SERVICE_ACCOUNTS (comma-"
-                "separated Cloud Run service-account emails). Without "
-                "an allowlist, any Google SA that can mint a token "
-                "with our audience would be authorised — effectively "
-                "broken service-to-service auth."
-            )
-
 # Fail-fast boot check for non-GCP targets. On DEPLOYMENT_TARGET in
 # {self_hosted, aws} the worker-only endpoints (execute-validation-run,
 # validation-callbacks, scheduled-task triggers — see

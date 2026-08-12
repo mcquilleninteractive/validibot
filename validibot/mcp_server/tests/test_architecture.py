@@ -103,6 +103,28 @@ def test_retired_proxy_license_endpoint_is_removed() -> None:
     assert not license_view.exists()
 
 
+def test_retired_helper_transport_and_credentials_are_removed() -> None:
+    """Direct services must not leave a second private HTTP/authentication path."""
+
+    api_router = (PROJECT_ROOT / "config" / "api_router.py").read_text(
+        encoding="utf-8",
+    )
+    base_settings = (PROJECT_ROOT / "config" / "settings" / "base.py").read_text(
+        encoding="utf-8",
+    )
+    production_settings = (
+        PROJECT_ROOT / "config" / "settings" / "production.py"
+    ).read_text(encoding="utf-8")
+
+    assert not any((PROJECT_ROOT / "validibot" / "mcp_api").rglob("*.py"))
+    assert "/api/v1/mcp" not in api_router
+    assert "validibot.mcp_api" not in api_router
+    for source in (base_settings, production_settings):
+        assert "MCP_SERVICE_KEY" not in source
+        assert "MCP_OIDC_AUDIENCE" not in source
+        assert "MCP_OIDC_ALLOWED_SERVICE_ACCOUNTS" not in source
+
+
 def test_production_disables_persistent_connections_for_asgi() -> None:
     """ASGI deployment must follow Django's connection-lifetime guidance."""
 

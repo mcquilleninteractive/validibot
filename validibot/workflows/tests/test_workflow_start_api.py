@@ -7,12 +7,12 @@ stub ``ValidationRunService`` so we verify request parsing, authentication,
 error codes, and response shaping without running actual validators.
 
 Also covers run-source attribution: each launch route derives
-``ValidationRun.source`` from its own auth channel.  The standard REST
-API route (``/api/v1/workflows/<uuid>/start/``) records ``API``; the
-MCP helper route (``/api/v1/mcp/...``) records ``MCP``.  The previous
-``X-Validibot-Source`` header was caller-controlled and was removed
-because the source must come from the trusted route, not an
-attacker-controllable header.
+``ValidationRun.source`` from its own trusted service boundary. The standard
+REST API route (``/api/v1/workflows/<uuid>/start/``) records ``API``. The
+embedded MCP application service and Cloud x402 service have their own tests
+for ``MCP`` and ``X402_AGENT`` respectively. The previous
+``X-Validibot-Source`` header was caller-controlled and was removed because
+source attribution must never come from an attacker-controllable header.
 """
 
 import contextlib
@@ -139,6 +139,7 @@ def reset_site_settings(db):
         defaults={
             "metadata_key_value_only": False,
             "metadata_max_bytes": 4096,
+            "metadata_max_depth": 8,
             "data": {},
         },
     )
@@ -148,6 +149,7 @@ def reset_site_settings(db):
         defaults={
             "metadata_key_value_only": False,
             "metadata_max_bytes": 4096,
+            "metadata_max_depth": 8,
             "data": {},
         },
     )
@@ -490,6 +492,64 @@ class TestWorkflowStartAPI:
         assert resp.status_code == status.HTTP_400_BAD_REQUEST
         assert resp.data["code"] == WorkflowStartErrorCode.INVALID_PAYLOAD
         assert "Metadata is too large" in resp.data["errors"][0]["message"]
+
+    def test_metadata_depth_limit_enforced(
+        self,
+        api_client: APIClient,
+        org,
+        user,
+        workflow,
+        mock_validation_service_success,
+    ):
+        """API admission must bound nested metadata before creating a run."""
+        SiteSettings.objects.update_or_create(
+            slug=SiteSettings.DEFAULT_SLUG,
+            defaults={"metadata_max_depth": 2},
+        )
+        api_client.force_authenticate(user=user)
+        grant_role(user, org, RoleCode.EXECUTOR)
+        envelope = {
+            "content": "{}",
+            "content_type": "application/json",
+            "metadata": {"asset": {"properties": {"height": 3}}},
+        }
+
+        resp = api_client.post(
+            start_url(workflow),
+            data=json.dumps(envelope),
+            content_type="application/json",
+        )
+
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+        assert resp.data["code"] == WorkflowStartErrorCode.INVALID_PAYLOAD
+        assert "maximum depth of 2" in resp.data["errors"][0]["message"]
+
+    def test_non_finite_metadata_number_is_rejected(
+        self,
+        api_client: APIClient,
+        org,
+        user,
+        workflow,
+        mock_validation_service_success,
+    ):
+        """API metadata cannot introduce non-standard NaN JSON tokens."""
+        api_client.force_authenticate(user=user)
+        grant_role(user, org, RoleCode.EXECUTOR)
+        envelope = {
+            "content": "{}",
+            "content_type": "application/json",
+            "metadata": {"measurement": float("nan")},
+        }
+
+        resp = api_client.post(
+            start_url(workflow),
+            data=json.dumps(envelope),
+            content_type="application/json",
+        )
+
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST
+        assert list(resp.data) == ["metadata"]
+        assert str(resp.data["metadata"][0]) == "Value must be valid JSON."
 
     def test_start_logs_tracking_event_with_user(
         self,
@@ -1086,9 +1146,10 @@ class TestWorkflowStartAPI:
 # These tests pin the new contract:
 #
 #   • REST API route ``/api/v1/workflows/<uuid>/start/`` → ``API``
-#   • MCP helper route ``/api/v1/mcp/...``               → ``MCP``
-#   • x402 anonymous route (cloud)                       → ``X402_AGENT``
-#     (covered in validibot-cloud's run_creation tests, not here)
+#   • embedded MCP application service                   → ``MCP``
+#   • x402 anonymous service (cloud)                     → ``X402_AGENT``
+#
+# The latter two are covered by their service-level suites.
 #
 # The check is on the ``source`` argument the view passes into
 # ``launch_api_validation_run`` — tampering with a request header must

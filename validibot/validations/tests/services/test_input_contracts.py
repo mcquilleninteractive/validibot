@@ -8,6 +8,7 @@ object so it remains a real binding scope rather than an ad-hoc JSONPath token.
 
 from __future__ import annotations
 
+import hashlib
 import json
 
 import pytest
@@ -22,6 +23,7 @@ from validibot.validations.constants import CatalogValueType
 from validibot.validations.constants import StepIODirection
 from validibot.validations.constants import StepIOMedium
 from validibot.validations.constants import ValidationType
+from validibot.validations.models import Artifact
 from validibot.validations.models import StepInputBinding
 from validibot.validations.services.artifact_bindings import set_artifact_input_binding
 from validibot.validations.services.input_contracts import InputCompatibilityLevel
@@ -165,6 +167,50 @@ def test_json_schema_resolves_whole_submission_metadata_without_jsonpath():
     assert resolved.identity.uri == f"submission-metadata:{submission.pk}"
     assert resolved.content == b'{"a":{"name":"example"},"z":2}'
     assert json.loads(resolved.content) == submission.metadata
+    assert Artifact.objects.filter(validation_run=run).count() == 0
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        {},
+        {"nested": {"items": [1, None, True]}},
+        {"name": "Café 東京"},
+        {"integer": 12, "decimal": 3.5, "enabled": False, "missing": None},
+    ],
+)
+def test_submission_metadata_materialization_covers_json_value_classes(metadata):
+    """Runtime materialization preserves every supported metadata value class."""
+
+    workflow = WorkflowFactory(allowed_file_types=[SubmissionFileType.PDF])
+    validator = ValidatorFactory(validation_type=ValidationType.JSON_SCHEMA)
+    step = WorkflowStepFactory(workflow=workflow, validator=validator)
+    port = _input_port(
+        validator=validator,
+        contract_key="json_document",
+        data_format=SubmissionDataFormat.JSON,
+        file_type=SubmissionFileType.JSON,
+        extension="json",
+        scopes=[BindingSourceScope.SUBMISSION_METADATA],
+    )
+    set_artifact_input_binding(
+        consumer_step=step,
+        consumer_port=port,
+        source_scope=BindingSourceScope.SUBMISSION_METADATA,
+        source_data_path="",
+    )
+    submission = SubmissionFactory(
+        workflow=workflow,
+        file_type=SubmissionFileType.PDF,
+        metadata=metadata,
+    )
+    run = ValidationRunFactory(submission=submission)
+
+    resolved = resolve_file_inputs(run=run, step=step)["json_document"]
+
+    assert json.loads(resolved.content) == metadata
+    assert resolved.identity.sha256 == hashlib.sha256(resolved.content).hexdigest()
+    assert Artifact.objects.filter(validation_run=run).count() == 0
 
 
 def test_submission_metadata_model_invariant_rejects_json_arrays():

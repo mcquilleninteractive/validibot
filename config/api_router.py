@@ -49,9 +49,6 @@ app_name = "api"
 urlpatterns = [
     # Auth endpoint for token verification and user identification
     path("auth/me/", AuthMeView.as_view(), name="auth-me"),
-    # Legacy compatibility surface retained for Cloud x402 agent adapters.
-    # Embedded MCP does not call these routes; it uses application services.
-    path("mcp/", include("validibot.mcp_api.urls", namespace="mcp")),
     # Root-level routes (users)
     *root_router.urls,
     # Org-scoped routes

@@ -29,9 +29,9 @@ acceptance checklist in the adjacent `validibot-project` repository:
 | OAuth provider and public-client registration | `validibot/idp/` |
 | Pro feature registration | `validibot-pro/validibot_pro/license.py` |
 
-`validibot/mcp_api/` is not used by the embedded endpoint. It remains only as
-legacy compatibility code for the Cloud x402 agent channel and should not be
-used for new MCP work.
+The retired `/api/v1/mcp/*` helper API has been removed. Cloud x402 owns its
+separate `/api/v1/agent/*` endpoints and external references; neither channel
+imports the other's transport code.
 
 ## Request path
 

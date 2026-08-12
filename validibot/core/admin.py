@@ -36,6 +36,7 @@ class SiteSettingsAdmin(admin.ModelAdmin):
                 "fields": (
                     "metadata_key_value_only",
                     "metadata_max_bytes",
+                    "metadata_max_depth",
                 ),
                 "description": (
                     "Controls how submission metadata is validated when "

@@ -38,7 +38,7 @@ from __future__ import annotations
 
 import pytest
 
-from validibot.mcp_api.views import _latest_accessible_workflow_queryset
+from validibot.mcp_server.services import _accessible_workflows
 from validibot.users.constants import RoleCode
 from validibot.users.models import Membership
 from validibot.users.tests.factories import OrganizationFactory
@@ -54,7 +54,7 @@ pytestmark = pytest.mark.django_db
 
 def _visible_pks(user):
     return set(
-        _latest_accessible_workflow_queryset(user=user).values_list(
+        _accessible_workflows(user=user).values_list(
             "pk",
             flat=True,
         ),
@@ -367,27 +367,3 @@ class TestMCPCatalogVisibilityTiers:
 
         visible = _visible_pks(unrelated)
         assert x402_wf.pk not in visible
-
-
-class TestMCPCatalogAccessMode:
-    """Every catalog workflow advertises only ``member_access``.
-
-    The MCP surface is always authenticated (acting on behalf of a user).
-    The old ``public_x402`` access mode is gone from this surface because
-    x402 lives on the separate anonymous cloud endpoint.
-    """
-
-    def test_access_modes_is_member_access_only(self):
-        from validibot.mcp_api.views import MCPWorkflowCatalogView
-
-        org = OrganizationFactory(mcp_allowed=True)
-        member = UserFactory(orgs=[org])
-        grant_role(member, org, RoleCode.AUTHOR)
-        wf = WorkflowFactory(org=org, mcp_enabled=True)
-
-        serializer = MCPWorkflowCatalogView.WorkflowSerializer(
-            wf,
-            context={"member_org_ids": {org.pk}},
-        )
-        assert serializer.data["access_modes"] == ["member_access"]
-        assert serializer.data["preferred_access_mode"] == "member_access"
