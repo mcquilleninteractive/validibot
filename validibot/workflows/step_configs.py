@@ -332,12 +332,17 @@ class PdfPayloadSelectorStepConfig(BaseModel):
     """Exact author-controlled selector for one typed PDF output."""
 
     required: bool = False
-    discovery_kinds: list[str] = Field(default_factory=list)
+    discovery_kinds: list[
+        Literal[
+            "embedded_files_name_tree",
+            "associated_file",
+            "file_attachment_annotation",
+        ]
+    ] = Field(default_factory=list)
     original_filename: str = ""
     declared_media_type: str = ""
     detected_media_type: str = ""
     af_relationship: str = ""
-    rich_media_asset_name: str = ""
     xml_root_qname: str = ""
     step_file_schema: list[str] = Field(default_factory=list)
 
@@ -348,7 +353,7 @@ class PdfStepConfig(ContainerExecutionStepConfig):
     """Semantic configuration for isolated PDF package inspection."""
 
     execution_timeout_seconds: int | None = Field(default=None, ge=1, le=300)
-    profile: Literal["inventory_v1", "safe_static_package_v1"] = "inventory_v1"
+    profile: Literal["static_text_package_v1"] = "static_text_package_v1"
     emit_extracted_files_bundle: bool = False
     selected_xml: PdfPayloadSelectorStepConfig | None = None
     selected_json: PdfPayloadSelectorStepConfig | None = None

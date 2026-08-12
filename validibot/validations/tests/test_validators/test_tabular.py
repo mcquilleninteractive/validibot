@@ -27,6 +27,7 @@ from validibot.validations.constants import ValidationType
 from validibot.validations.tests.factories import RulesetAssertionFactory
 from validibot.validations.tests.factories import RulesetFactory
 from validibot.validations.tests.factories import ValidatorFactory
+from validibot.validations.tests.resolved_file_inputs import run_context_with_file
 from validibot.validations.validators.tabular.metadata import TABULAR_DATASET_INPUTS
 from validibot.validations.validators.tabular.validator import CODE_INVALID_SCHEMA
 from validibot.validations.validators.tabular.validator import TabularValidator
@@ -51,7 +52,22 @@ def _validate(*, rules_text, content, metadata=None):
         ruleset.metadata = metadata
         ruleset.save(update_fields=["metadata"])
     submission = SubmissionFactory(content=content, file_type=SubmissionFileType.TEXT)
-    return TabularValidator().validate(validator, submission, ruleset)
+    return _validate_submission(validator, submission, ruleset)
+
+
+def _validate_submission(validator, submission, ruleset):
+    """Run the validator with its table input supplied through the declared port."""
+    return TabularValidator().validate(
+        validator,
+        submission,
+        ruleset,
+        run_context=run_context_with_file(
+            contract_key="table_document",
+            content=submission.content,
+            file_type=SubmissionFileType.TEXT,
+            name="submission.csv",
+        ),
+    )
 
 
 def _codes(result):
@@ -184,7 +200,7 @@ class TabularValidatorRuntimeTests(TestCase):
             file_type=SubmissionFileType.TEXT,
         )
 
-        result = TabularValidator().validate(validator, submission, ruleset)
+        result = _validate_submission(validator, submission, ruleset)
 
         self.assertFalse(result.passed)
         issue = next(
@@ -235,7 +251,7 @@ class TabularValidatorRuntimeTests(TestCase):
             file_type=SubmissionFileType.TEXT,
         )
 
-        result = TabularValidator().validate(validator, submission, ruleset)
+        result = _validate_submission(validator, submission, ruleset)
 
         self.assertFalse(result.passed)
         codes = {issue.code for issue in result.issues}
@@ -273,7 +289,7 @@ class TabularValidatorRuntimeTests(TestCase):
             file_type=SubmissionFileType.TEXT,
         )
 
-        result = TabularValidator().validate(validator, submission, ruleset)
+        result = _validate_submission(validator, submission, ruleset)
 
         self.assertFalse(result.passed)
         issue = next(

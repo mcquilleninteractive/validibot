@@ -24,6 +24,8 @@ from validibot.validations.constants import StepIOMedium
 from validibot.validations.services.artifact_ports import validate_source_scope
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from validibot.validations.models import StepInputBinding
     from validibot.validations.models import StepIODefinition
     from validibot.workflows.models import Workflow
@@ -96,8 +98,24 @@ def effective_artifact_ports(
             io_medium=StepIOMedium.ARTIFACT,
         ).order_by("order", "pk")
     )
+    return _validated_effective_artifact_ports(
+        step=step,
+        direction=direction,
+        ports=ports,
+    )
+
+
+def _validated_effective_artifact_ports(
+    *,
+    step: WorkflowStep,
+    direction: str,
+    ports: Iterable[StepIODefinition],
+) -> list[StepIODefinition]:
+    """Order loaded ports and reject ambiguous effective contract keys."""
+
+    ordered_ports = sorted(ports, key=lambda port: (port.order, port.pk))
     seen: dict[str, StepIODefinition] = {}
-    for port in ports:
+    for port in ordered_ports:
         previous = seen.get(port.contract_key)
         if previous is not None:
             raise ValidationError(
@@ -106,7 +124,7 @@ def effective_artifact_ports(
                 f"{direction} named '{port.contract_key}'."
             )
         seen[port.contract_key] = port
-    return ports
+    return ordered_ports
 
 
 def artifact_ports_compatible(
@@ -180,26 +198,58 @@ def compatible_artifact_choices(
     workflow: Workflow,
     proposed_order: int | None = None,
 ) -> list[ArtifactBindingChoice]:
-    """Return compatible artifact outputs from every earlier workflow step."""
+    """Return compatible artifact outputs from every earlier workflow step.
+
+    Step-owned and validator-owned ports are bulk-loaded in one bounded query.
+    Keeping the merge in memory prevents the source selector from issuing one
+    port query per earlier step in a long workflow.
+    """
+    from validibot.validations.models import StepIODefinition
     from validibot.workflows.models import WorkflowStep
 
     consumer_order = proposed_order
     if consumer_order is None and consumer_step is not None:
         consumer_order = consumer_step.order
 
-    steps = WorkflowStep.objects.filter(workflow=workflow).select_related("validator")
+    steps = WorkflowStep.objects.filter(workflow=workflow)
     if consumer_order is not None:
         steps = steps.filter(order__lt=consumer_order)
     if consumer_step is not None and consumer_step.pk:
         steps = steps.exclude(pk=consumer_step.pk)
 
+    producer_steps = [step for step in steps.order_by("order", "pk") if step.step_key]
+    if not producer_steps:
+        return []
+
+    step_ids = [step.pk for step in producer_steps]
+    validator_ids = [
+        step.validator_id for step in producer_steps if step.validator_id is not None
+    ]
+    artifact_outputs = StepIODefinition.objects.filter(
+        Q(workflow_step_id__in=step_ids) | Q(validator_id__in=validator_ids),
+        direction=StepIODirection.OUTPUT,
+        io_medium=StepIOMedium.ARTIFACT,
+    ).order_by("order", "pk")
+    ports_by_step: dict[int, list[StepIODefinition]] = {}
+    ports_by_validator: dict[int, list[StepIODefinition]] = {}
+    for port in artifact_outputs:
+        if port.workflow_step_id is not None:
+            ports_by_step.setdefault(port.workflow_step_id, []).append(port)
+        elif port.validator_id is not None:
+            ports_by_validator.setdefault(port.validator_id, []).append(port)
+
     choices: list[ArtifactBindingChoice] = []
-    for producer_step in steps.order_by("order", "pk"):
-        if not producer_step.step_key:
-            continue
-        for producer_port in effective_artifact_ports(
-            producer_step,
+    for producer_step in producer_steps:
+        step_ports = ports_by_step.get(producer_step.pk, [])
+        validator_ports = (
+            ports_by_validator.get(producer_step.validator_id, [])
+            if producer_step.validator_id is not None
+            else []
+        )
+        for producer_port in _validated_effective_artifact_ports(
+            step=producer_step,
             direction=StepIODirection.OUTPUT,
+            ports=[*step_ports, *validator_ports],
         ):
             compatible, _reason = artifact_ports_compatible(
                 producer=producer_port,

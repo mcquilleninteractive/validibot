@@ -39,6 +39,10 @@ from validibot.validations.models import Ruleset
 from validibot.validations.models import RulesetAssertion
 from validibot.validations.models import StepIODefinition
 from validibot.validations.models import ValidationRun
+from validibot.validations.services.custom_validator_contracts import (
+    sync_configured_io_contract,
+)
+from validibot.validations.services.input_bindings import ensure_step_input_bindings
 from validibot.validations.services.validation_run import ValidationRunService
 from validibot.validations.tests.factories import ValidatorFactory
 from validibot.validations.validators.base import AssertionStats
@@ -266,6 +270,7 @@ class TestFailFastOnMissingError(TestCase):
             validation_type=ValidationType.BASIC,
             is_system=False,
         )
+        sync_configured_io_contract(validator=validator)
         ruleset = Ruleset.objects.create(
             org=self.org,
             user=self.user,
@@ -273,12 +278,13 @@ class TestFailFastOnMissingError(TestCase):
             ruleset_type=RulesetType.BASIC,
             version="1.0",
         )
-        WorkflowStepFactory(
+        step = WorkflowStepFactory(
             workflow=workflow,
             validator=validator,
             ruleset=ruleset,
             order=10,
         )
+        ensure_step_input_bindings(step)
         RulesetAssertion.objects.create(
             ruleset=ruleset,
             order=10,
@@ -346,6 +352,7 @@ class TestFailFastOnMissingError(TestCase):
             validation_type=ValidationType.BASIC,
             is_system=False,
         )
+        sync_configured_io_contract(validator=validator)
         ruleset = Ruleset.objects.create(
             org=self.org,
             user=self.user,
@@ -353,12 +360,13 @@ class TestFailFastOnMissingError(TestCase):
             ruleset_type=RulesetType.BASIC,
             version="1.0",
         )
-        WorkflowStepFactory(
+        step = WorkflowStepFactory(
             workflow=workflow,
             validator=validator,
             ruleset=ruleset,
             order=10,
         )
+        ensure_step_input_bindings(step)
         RulesetAssertion.objects.create(
             ruleset=ruleset,
             order=10,

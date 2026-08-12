@@ -141,7 +141,7 @@ def _declare_output_file_port(
         data_format=data_format,
         accepted_data_formats=[data_format],
         accepted_media_types=accepted_media_types or [media_type],
-        metadata={"accepted_extensions": extensions or []},
+        accepted_extensions=extensions or [],
         envelope_channel=EnvelopeChannel.OUTPUT_ARTIFACTS,
         role=role,
         min_items=0,
@@ -286,7 +286,7 @@ def _make_fmu_model_port(validator):
         data_format=SubmissionDataFormat.FMU,
         accepted_data_formats=[SubmissionDataFormat.FMU],
         accepted_media_types=["application/vnd.fmi.fmu"],
-        metadata={"accepted_extensions": ["fmu"]},
+        accepted_extensions=["fmu"],
         envelope_channel=EnvelopeChannel.INPUT_FILES,
         resource_type=FMU_MODEL_RESOURCE,
         role="fmu",
@@ -327,7 +327,7 @@ def _make_shacl_data_graph_port(validator):
             "application/n-triples",
             "application/n-quads",
         ],
-        metadata={"accepted_extensions": ["ttl", "rdf", "jsonld", "nt", "nq"]},
+        accepted_extensions=["ttl", "rdf", "jsonld", "nt", "nq"],
         envelope_channel=EnvelopeChannel.INPUT_FILES,
         role="data-graph",
         min_items=1,
@@ -402,7 +402,7 @@ def _make_schematron_xml_document_port(validator):
         data_format=SubmissionDataFormat.XML,
         accepted_data_formats=[SubmissionDataFormat.XML],
         accepted_media_types=["application/xml", "text/xml"],
-        metadata={"accepted_extensions": ["xml"]},
+        accepted_extensions=["xml"],
         envelope_channel=EnvelopeChannel.INPUT_FILES,
         role="xml-document",
         min_items=1,
@@ -509,7 +509,7 @@ def _build_energyplus_file_port_run():
             "application/vnd.energyplus.idf",
             "application/vnd.energyplus.epjson",
         ],
-        metadata={"accepted_extensions": ["idf", "epjson", "json"]},
+        accepted_extensions=["idf", "epjson", "json"],
         envelope_channel=EnvelopeChannel.INPUT_FILES,
         role="primary-model",
         min_items=1,
@@ -534,7 +534,7 @@ def _build_energyplus_file_port_run():
         data_format=ResourceFileType.ENERGYPLUS_WEATHER,
         accepted_data_formats=[ResourceFileType.ENERGYPLUS_WEATHER],
         accepted_media_types=["application/vnd.energyplus.epw"],
-        metadata={"accepted_extensions": ["epw"]},
+        accepted_extensions=["epw"],
         envelope_channel=EnvelopeChannel.RESOURCE_FILES,
         resource_type=ResourceFileType.ENERGYPLUS_WEATHER,
         role="weather",
@@ -565,7 +565,7 @@ def _build_pdf_file_port_run():
         name="Inspect PDF package",
         order=10,
         config={
-            "profile": "safe_static_package_v1",
+            "profile": "static_text_package_v1",
             "emit_extracted_files_bundle": True,
             "selected_xml": {
                 "required": True,
@@ -573,7 +573,7 @@ def _build_pdf_file_port_run():
             },
             "selected_json": {
                 "required": False,
-                "rich_media_asset_name": "asset-index",
+                "discovery_kinds": ["file_attachment_annotation"],
             },
             "selected_step_p21": {
                 "required": True,
@@ -614,7 +614,7 @@ def _build_pdf_file_port_run():
         data_format=SubmissionDataFormat.PDF,
         accepted_data_formats=[SubmissionDataFormat.PDF],
         accepted_media_types=["application/pdf"],
-        metadata={"accepted_extensions": ["pdf"]},
+        accepted_extensions=["pdf"],
         envelope_channel=EnvelopeChannel.INPUT_FILES,
         role="pdf-document",
         min_items=1,
@@ -950,7 +950,7 @@ class TestEnergyPlusFilePortMaterialization:
             name="Build Model",
             order=step.order - 5,
         )
-        _declare_output_file_port(
+        producer_output = _declare_output_file_port(
             upstream_step,
             contract_key="generated_model",
             role="generated-model",
@@ -984,6 +984,8 @@ class TestEnergyPlusFilePortMaterialization:
             io_definition=primary_port,
             source_scope=BindingSourceScope.UPSTREAM_ARTIFACT,
             source_data_path=f"{upstream_step.step_key}.generated_model",
+            source_step=upstream_step,
+            source_output_io_definition=producer_output,
         )
         StepInputBindingFactory(
             workflow_step=step,
@@ -1023,7 +1025,7 @@ class TestEnergyPlusFilePortMaterialization:
             name="Build Model",
             order=step.order - 5,
         )
-        _declare_output_file_port(
+        producer_output = _declare_output_file_port(
             upstream_step,
             contract_key="generated_model",
             role="generated-model",
@@ -1059,6 +1061,8 @@ class TestEnergyPlusFilePortMaterialization:
             io_definition=primary_port,
             source_scope=BindingSourceScope.UPSTREAM_ARTIFACT,
             source_data_path=f"{upstream_step.step_key}.generated_model",
+            source_step=upstream_step,
+            source_output_io_definition=producer_output,
         )
         StepInputBindingFactory(
             workflow_step=step,
@@ -1097,7 +1101,7 @@ class TestEnergyPlusFilePortMaterialization:
             name="Build Model",
             order=step.order - 5,
         )
-        _declare_output_file_port(
+        producer_output = _declare_output_file_port(
             upstream_step,
             contract_key="generated_model",
             role="generated-model",
@@ -1133,6 +1137,8 @@ class TestEnergyPlusFilePortMaterialization:
             io_definition=primary_port,
             source_scope=BindingSourceScope.UPSTREAM_ARTIFACT,
             source_data_path=f"{upstream_step.step_key}.generated_model",
+            source_step=upstream_step,
+            source_output_io_definition=producer_output,
         )
         StepInputBindingFactory(
             workflow_step=step,
@@ -1616,7 +1622,10 @@ class TestPdfFilePortMaterialization:
         assert isinstance(envelope, PdfInputEnvelope)
         assert envelope.input_files[0].port_key == "pdf_document"
         assert envelope.inputs.selected_xml.original_filename == "handover.xml"
-        assert envelope.inputs.selected_json.rich_media_asset_name == "asset-index"
+        assert envelope.inputs.selected_json.discovery_kinds == [
+            "file_attachment_annotation"
+        ]
+        assert envelope.inputs.profile == "static_text_package_v1"
         assert envelope.inputs.selected_step_p21.step_file_schema == ["AP242_FIXTURE"]
         assert envelope.inputs.emit_extracted_files_bundle is True
         assert (
@@ -1701,7 +1710,7 @@ class TestSHACLDataGraphFilePortMaterialization:
             name="Build RDF",
             order=step.order - 5,
         )
-        _declare_output_file_port(
+        producer_output = _declare_output_file_port(
             upstream_step,
             contract_key="data_graph",
             role="data_graph",
@@ -1736,6 +1745,8 @@ class TestSHACLDataGraphFilePortMaterialization:
             io_definition=data_graph_port,
             source_scope=BindingSourceScope.UPSTREAM_ARTIFACT,
             source_data_path=f"{upstream_step.step_key}.data_graph",
+            source_step=upstream_step,
+            source_output_io_definition=producer_output,
         )
 
         envelope = _build_test_input_envelope(
@@ -1849,7 +1860,7 @@ class TestSchematronXmlDocumentFilePortMaterialization:
             name="Normalize XML",
             order=step.order - 5,
         )
-        _declare_output_file_port(
+        producer_output = _declare_output_file_port(
             upstream_step,
             contract_key="xml_document",
             role="xml_document",
@@ -1883,6 +1894,8 @@ class TestSchematronXmlDocumentFilePortMaterialization:
             io_definition=xml_document_port,
             source_scope=BindingSourceScope.UPSTREAM_ARTIFACT,
             source_data_path=f"{upstream_step.step_key}.xml_document",
+            source_step=upstream_step,
+            source_output_io_definition=producer_output,
         )
 
         envelope = _build_test_input_envelope(

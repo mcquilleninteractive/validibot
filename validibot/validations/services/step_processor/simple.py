@@ -112,13 +112,27 @@ class SimpleValidationProcessor(ValidationStepProcessor):
 
     def _handle_error(self, error: Exception) -> StepProcessingResult:
         """Handle validation errors gracefully."""
-        issues = [
-            ValidationIssue(
-                path="",
-                message=str(error),
-                severity=Severity.ERROR,
-            ),
-        ]
+        from validibot.validations.services.input_contracts import InputResolutionError
+
+        if isinstance(error, InputResolutionError):
+            issues = [
+                ValidationIssue(
+                    path=diagnostic.contract_key,
+                    message=diagnostic.message,
+                    severity=Severity.ERROR,
+                    code=diagnostic.code,
+                    meta=diagnostic.as_meta(),
+                )
+                for diagnostic in error.diagnostics
+            ]
+        else:
+            issues = [
+                ValidationIssue(
+                    path="",
+                    message=str(error),
+                    severity=Severity.ERROR,
+                ),
+            ]
         severity_counts, _ = self.persist_findings(issues)
         self.finalize_step(StepStatus.FAILED, {}, error=str(error))
 
@@ -126,7 +140,7 @@ class SimpleValidationProcessor(ValidationStepProcessor):
             passed=False,
             step_run=self.step_run,
             severity_counts=severity_counts,
-            total_findings=1,
+            total_findings=len(issues),
             assertion_failures=0,
             assertion_total=0,
         )

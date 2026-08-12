@@ -497,6 +497,8 @@ class ArtifactDownloadView(ValidationRunArtifactMixin, DetailView):
             content_type=source.content_type,
         )
         response["Cache-Control"] = "no-store"
+        response["X-Content-Type-Options"] = "nosniff"
+        response["Cross-Origin-Resource-Policy"] = "same-origin"
         if source.sha256:
             response["X-Validibot-Artifact-Sha256"] = source.sha256
         return response

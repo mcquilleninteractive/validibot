@@ -11,7 +11,6 @@ import logging
 from typing import TYPE_CHECKING
 from typing import Any
 
-from validibot.submissions.constants import SubmissionFileType
 from validibot.validations.constants import Severity
 from validibot.validations.validators.base.base import ValidationIssue
 from validibot.validations.validators.base.simple import SimpleValidator
@@ -56,40 +55,23 @@ class ThermValidator(SimpleValidator):
         submission: Submission,
     ) -> ValidationIssue | None:
         """Accept XML (THMX) and BINARY (THMZ) submissions."""
-        if self._resolved_therm_file() is not None:
-            return None
-        if submission.file_type not in (
-            SubmissionFileType.XML,
-            SubmissionFileType.BINARY,
-        ):
+        if self._resolved_therm_file() is None:
             return ValidationIssue(
-                path="",
-                message=(
-                    "THERM validator requires .thmx (XML) or .thmz (binary archive) "
-                    f"files, but received file type '{submission.file_type}'."
-                ),
+                path="therm_model",
+                message="The THERM model input was not resolved.",
                 severity=Severity.ERROR,
+                code="required_input_missing",
             )
         return None
 
     def parse_content(self, submission: Submission) -> ThermModel:
         """Parse the resolved THMX/THMZ bytes into a ``ThermModel``."""
         resolved_file = self._resolved_therm_file()
-        if resolved_file is not None:
-            content = resolved_file.content
-            if not content:
-                msg = "Resolved THERM model is empty."
-                raise ValueError(msg)
-            filename = resolved_file.name
-        elif submission.file_type == SubmissionFileType.BINARY:
-            content = self._read_binary_content(submission)
-            filename = getattr(submission, "original_filename", None)
-        else:
-            content = submission.get_content()
-            if not content:
-                msg = "Empty submission content."
-                raise ValueError(msg)
-            filename = getattr(submission, "original_filename", None)
+        if resolved_file is None or not resolved_file.content:
+            msg = "Resolved THERM model is empty."
+            raise ValueError(msg)
+        content = resolved_file.content
+        filename = resolved_file.name
 
         return parse_therm_file(content, filename=filename)
 
@@ -120,16 +102,3 @@ class ThermValidator(SimpleValidator):
         if run_context is None:
             return None
         return (run_context.resolved_file_inputs or {}).get("therm_model")
-
-    @staticmethod
-    def _read_binary_content(submission: Submission) -> bytes:
-        """Read raw bytes from a binary submission's file field."""
-        if not submission.input_file:
-            msg = "Binary submission has no input file."
-            raise ValueError(msg)
-        try:
-            with submission.input_file.open("rb") as fh:
-                return fh.read()
-        except Exception as exc:
-            msg = f"Could not read submission file: {exc}"
-            raise ValueError(msg) from exc

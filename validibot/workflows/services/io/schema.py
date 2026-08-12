@@ -87,6 +87,8 @@ STEP_IO_DEFINITION_JSON_DICT_FIELDS: tuple[str, ...] = (
 )
 STEP_IO_DEFINITION_JSON_LIST_FIELDS: tuple[str, ...] = (
     "accepted_data_formats",
+    "accepted_extensions",
+    "accepted_file_types",
     "accepted_media_types",
     "allowed_source_scopes",
 )

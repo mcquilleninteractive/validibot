@@ -16,13 +16,18 @@ from django.db import DatabaseError
 from validibot_shared.energyplus.models import EnergyPlusSimulationMetrics
 
 from validibot.actions.protocols import RunContext
+from validibot.submissions.constants import SubmissionFileType
 from validibot.submissions.tests.factories import SubmissionFactory
 from validibot.validations.constants import AssertionOperator
 from validibot.validations.constants import AssertionType
 from validibot.validations.constants import RulesetType
 from validibot.validations.constants import Severity
 from validibot.validations.constants import ValidationType
+from validibot.validations.services.custom_validator_contracts import (
+    sync_configured_io_contract,
+)
 from validibot.validations.services.execution.registry import clear_backend_cache
+from validibot.validations.services.input_bindings import ensure_step_input_bindings
 from validibot.validations.tests.factories import RulesetAssertionFactory
 from validibot.validations.tests.factories import RulesetFactory
 from validibot.validations.tests.factories import ValidationStepRunFactory
@@ -154,22 +159,13 @@ class TestInputStageAssertionGating:
         failure that surfaced when I first wrote these tests with
         MagicMocks.
         """
-        from validibot.validations.constants import StepIODirection
-        from validibot.validations.models import StepIODefinition
         from validibot.validations.tests.factories import ValidationRunFactory
         from validibot.workflows.tests.factories import WorkflowStepFactory
 
         validator = ValidatorFactory(
             validation_type=ValidationType.ENERGYPLUS,
         )
-        StepIODefinition.objects.create(
-            validator=validator,
-            contract_key="zone_count",
-            native_name="zone_count",
-            direction=StepIODirection.INPUT,
-            data_type="number",
-            label="Zone Count",
-        )
+        sync_configured_io_contract(validator=validator)
         ruleset = _energyplus_ruleset()
         # CEL assertion with the expression in rhs["expr"] (this is the
         # storage convention CEL assertions follow per the evaluator at
@@ -188,9 +184,12 @@ class TestInputStageAssertionGating:
         # extracts idf_version="25.1", north_axis_deg=0.0, zone_count=0.
         idf_text = "Version, 25.1;\nBuilding, EmptyBuilding, 0;"
         step = WorkflowStepFactory(validator=validator)
+        ensure_step_input_bindings(step)
         submission = SubmissionFactory(
             content=idf_text,
             workflow=step.workflow,
+            file_type=SubmissionFileType.TEXT,
+            original_filename="model.idf",
         )
         run = ValidationRunFactory(workflow=step.workflow, submission=submission)
         ValidationStepRunFactory(

@@ -45,6 +45,7 @@ from unittest.mock import MagicMock
 from django.test import SimpleTestCase
 from django.test import TestCase
 
+from validibot.actions.protocols import RunContext
 from validibot.submissions.constants import SubmissionFileType
 from validibot.submissions.tests.factories import SubmissionFactory
 from validibot.validations.assertions.evaluators.basic import BasicAssertionEvaluator
@@ -57,8 +58,35 @@ from validibot.validations.tests.factories import RulesetAssertionFactory
 from validibot.validations.tests.factories import RulesetFactory
 from validibot.validations.tests.factories import StepIODefinitionFactory
 from validibot.validations.tests.factories import ValidatorFactory
+from validibot.validations.tests.resolved_file_inputs import resolved_file_input
 from validibot.validations.validators.base.base import _is_valid_cel_identifier
-from validibot.validations.validators.basic import BasicValidator
+from validibot.validations.validators.basic import BasicValidator as _BasicValidator
+
+
+class BasicValidator(_BasicValidator):
+    """Bind engine-level tests to the Basic validator's typed document port."""
+
+    def validate(
+        self,
+        validator,
+        submission,
+        ruleset,
+        run_context=None,
+    ):
+        """Supply the selected submission bytes as a resolved port value."""
+        context = run_context or RunContext()
+        context.resolved_file_inputs["document"] = resolved_file_input(
+            contract_key="document",
+            content=submission.get_content(),
+            file_type=submission.file_type,
+        )
+        return super().validate(
+            validator,
+            submission,
+            ruleset,
+            run_context=context,
+        )
+
 
 # ==============================================================================
 # File type gating — BasicValidator only accepts JSON and XML

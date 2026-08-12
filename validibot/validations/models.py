@@ -5,7 +5,6 @@ import re
 import uuid
 
 from django.conf import settings
-from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import ValidationError
 from django.core.validators import MaxLengthValidator
 from django.core.validators import MinValueValidator
@@ -23,7 +22,6 @@ from validibot.projects.models import Project
 from validibot.submissions.constants import OutputRetention
 from validibot.submissions.constants import SubmissionDataFormat
 from validibot.submissions.constants import SubmissionFileType
-from validibot.submissions.constants import data_format_allowed_file_types
 from validibot.submissions.models import Submission
 from validibot.users.models import Organization
 from validibot.users.models import User
@@ -156,70 +154,14 @@ def _expr_references_constants_namespace(expr: str) -> bool:
 
 
 def get_allowed_extensions_for_workflow(workflow) -> set[str]:
-    """Collect allowed file extensions for all validators in a workflow.
+    """Return extensions admitted by the workflow's primary file contract.
 
-    Returns a set of lowercase extensions (without leading dots) that are
-    allowed for file uploads to this workflow. Reads from the config
-    registry, falling back to empty for unknown validator types.
+    Step input ports validate their own files later. They must never broaden or
+    narrow which primary submission filenames may enter the workflow.
     """
-    from validibot.validations.validators.base.config import get_config
-    from validibot.workflows.models import WorkflowStep
+    from validibot.submissions.constants import submission_file_type_extensions
 
-    extensions: set[str] = set()
-    steps = WorkflowStep.objects.filter(workflow=workflow).select_related("validator")
-    for step in steps:
-        validator = step.validator
-        if not validator:
-            continue
-        cfg = get_config(validator.validation_type)
-        if cfg:
-            extensions.update(ext.lower() for ext in cfg.allowed_extensions)
-    return extensions
-
-
-def default_supported_file_types_for_validation(
-    validation_type: str,
-) -> list[str]:
-    """Return the default supported file types for a validation type.
-
-    Reads from the config registry. Falls back to deriving from data
-    formats, or ``[JSON]`` if no config is registered.
-    """
-    from validibot.validations.validators.base.config import get_config
-
-    cfg = get_config(validation_type)
-    if cfg and cfg.supported_file_types:
-        return list(cfg.supported_file_types)
-    # Fallback: derive from data formats
-    derived_formats = default_supported_data_formats_for_validation(validation_type)
-    derived = supported_file_types_for_data_formats(derived_formats)
-    return derived or [SubmissionFileType.JSON]
-
-
-def default_supported_data_formats_for_validation(validation_type: str) -> list[str]:
-    """Return the default supported data formats for a validation type.
-
-    Reads from the config registry. Falls back to ``[JSON]`` if no config
-    is registered.
-    """
-    from validibot.validations.validators.base.config import get_config
-
-    cfg = get_config(validation_type)
-    if cfg and cfg.supported_data_formats:
-        return list(cfg.supported_data_formats)
-    return [SubmissionDataFormat.JSON]
-
-
-def supported_file_types_for_data_formats(data_formats: list[str]) -> list[str]:
-    """
-    Expand data formats to the submission file types that can carry them.
-    """
-    collected: list[str] = []
-    for fmt in data_formats or []:
-        for ft in data_format_allowed_file_types(fmt):
-            if ft not in collected:
-                collected.append(ft)
-    return collected
+    return submission_file_type_extensions(list(workflow.allowed_file_types or []))
 
 
 class Ruleset(TimeStampedModel):
@@ -1475,34 +1417,6 @@ class Validator(TimeStampedModel):
         ),
     )
 
-    # Custom validators should only select a single data format from the allowed set
-    CUSTOM_VALIDATOR_ALLOWED_DATA_FORMATS = {
-        SubmissionDataFormat.JSON,
-        SubmissionDataFormat.YAML,
-    }
-
-    supported_data_formats = ArrayField(
-        base_field=models.CharField(
-            max_length=32,
-            choices=SubmissionDataFormat.choices,
-        ),
-        default=_default_validator_data_formats,
-        help_text=_(
-            "Data formats this validator can parse (e.g., JSON, EnergyPlus IDF).",
-        ),
-    )
-
-    supported_file_types = ArrayField(
-        base_field=models.CharField(
-            max_length=32,
-            choices=SubmissionFileType.choices,
-        ),
-        default=_default_validator_file_types,
-        help_text=_(
-            "Logical file types this validator can process (JSON, XML, text, etc.).",
-        ),
-    )
-
     # Compute metering fields — used by the cloud billing system to classify
     # validators and calculate credit consumption. In the community edition
     # these are informational only.
@@ -1695,86 +1609,6 @@ class Validator(TimeStampedModel):
                     ),
                 }
             )
-        data_formats = [value for value in (self.supported_data_formats or []) if value]
-        file_types_hint = [
-            value for value in (self.supported_file_types or []) if value
-        ]
-        placeholder_formats = _default_validator_data_formats()
-        placeholder_file_types = _default_validator_file_types()
-        expected_formats = default_supported_data_formats_for_validation(
-            self.validation_type,
-        )
-        # If formats/file types are still on the placeholder defaults, apply the
-        # validation-type defaults so compatibility checks stay accurate.
-        if not data_formats or (
-            data_formats == placeholder_formats
-            and expected_formats != placeholder_formats
-            and (not file_types_hint or file_types_hint == placeholder_file_types)
-        ):
-            data_formats = expected_formats
-        normalized_formats: list[str] = []
-        for value in data_formats:
-            if value not in SubmissionDataFormat.values:
-                raise ValidationError(
-                    {
-                        "supported_data_formats": _(
-                            "'%(value)s' is not a supported submission data format.",
-                        )
-                        % {"value": value},
-                    },
-                )
-            if value not in normalized_formats:
-                normalized_formats.append(value)
-        if self.validation_type == ValidationType.CUSTOM_VALIDATOR:
-            invalid = [
-                value
-                for value in normalized_formats
-                if value not in self.CUSTOM_VALIDATOR_ALLOWED_DATA_FORMATS
-            ]
-            if invalid:
-                raise ValidationError(
-                    {
-                        "supported_data_formats": _(
-                            "Custom validators support only JSON or YAML."
-                        ),
-                    },
-                )
-            if len(normalized_formats) != 1:
-                raise ValidationError(
-                    {
-                        "supported_data_formats": _(
-                            "Select exactly one data format for a custom validator."
-                        ),
-                    },
-                )
-        self.supported_data_formats = normalized_formats
-
-        derived_file_types = supported_file_types_for_data_formats(
-            self.supported_data_formats,
-        )
-        file_types = [value for value in (self.supported_file_types or []) if value]
-        if not file_types or file_types == _default_validator_file_types():
-            file_types = default_supported_file_types_for_validation(
-                self.validation_type,
-            )
-        normalized_files: list[str] = []
-        for value in file_types:
-            if value not in SubmissionFileType.values:
-                raise ValidationError(
-                    {
-                        "supported_file_types": _(
-                            "'%(value)s' is not a supported submission file type.",
-                        )
-                        % {"value": value},
-                    },
-                )
-            if value not in normalized_files:
-                normalized_files.append(value)
-        for derived in derived_file_types:
-            if derived not in normalized_files:
-                normalized_files.append(derived)
-        self.supported_file_types = normalized_files
-
         if self.validation_type == ValidationType.FMU:
             if not self.fmu_model_id:
                 if not self.is_system:
@@ -1839,39 +1673,6 @@ class Validator(TimeStampedModel):
     @property
     def is_custom(self) -> bool:
         return bool(self.org_id and not self.is_system)
-
-    def supports_file_type(self, file_type: str) -> bool:
-        normalized = (file_type or "").lower()
-        allowed = {value.lower() for value in (self.supported_file_types or [])}
-        return normalized in allowed
-
-    def supports_data_format(self, data_format: str) -> bool:
-        normalized = (data_format or "").lower()
-        allowed = {value.lower() for value in (self.supported_data_formats or [])}
-        return normalized in allowed
-
-    def supports_any_file_type(self, file_types: list[str]) -> bool:
-        allowed = {value.lower() for value in (self.supported_file_types or [])}
-        incoming = {value.lower() for value in file_types}
-        return bool(allowed & incoming)
-
-    def supported_file_type_labels(self) -> list[str]:
-        labels: list[str] = []
-        for value in self.supported_file_types or []:
-            try:
-                labels.append(str(SubmissionFileType(value).label))
-            except Exception:
-                labels.append(str(value))
-        return labels
-
-    def supported_data_format_labels(self) -> list[str]:
-        labels: list[str] = []
-        for value in self.supported_data_formats or []:
-            try:
-                labels.append(str(SubmissionDataFormat(value).label))
-            except Exception:
-                labels.append(str(value))
-        return labels
 
 
 class ValidatorExecutionDeployment(TimeStampedModel):
@@ -2517,6 +2318,18 @@ class StepIODefinition(TimeStampedModel):
         blank=True,
         help_text="Accepted media/MIME types for artifact ports.",
     )
+    accepted_file_types = models.JSONField(
+        default=list,
+        blank=True,
+        help_text=(
+            "Accepted primary-submission carrier types for artifact input ports."
+        ),
+    )
+    accepted_extensions = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="Accepted lowercase filename extensions without leading dots.",
+    )
     allowed_source_scopes = models.JSONField(
         default=list,
         blank=True,
@@ -2711,6 +2524,8 @@ class StepIODefinition(TimeStampedModel):
 
     SEMANTIC_DEFINITION_FIELDS = (
         "accepted_data_formats",
+        "accepted_extensions",
+        "accepted_file_types",
         "accepted_media_types",
         "allowed_source_scopes",
         "contract_key",
@@ -2984,6 +2799,39 @@ class StepInputBinding(TimeStampedModel):
         imports, admin code, and tests that call ``full_clean()`` directly.
         """
         super().clean()
+        if self.io_definition_id and self.workflow_step_id:
+            io_definition = self.io_definition
+            if io_definition.direction != StepIODirection.INPUT:
+                raise ValidationError(
+                    {"io_definition": _("Bindings may target input definitions only.")}
+                )
+            if (
+                io_definition.validator_id
+                not in {
+                    None,
+                    self.workflow_step.validator_id,
+                }
+                and io_definition.workflow_step_id != self.workflow_step_id
+            ):
+                raise ValidationError(
+                    {
+                        "io_definition": _(
+                            "The input definition does not belong to this step."
+                        )
+                    }
+                )
+            if (
+                io_definition.io_medium == StepIOMedium.ARTIFACT
+                and self.source_scope not in (io_definition.allowed_source_scopes or [])
+            ):
+                raise ValidationError(
+                    {
+                        "source_scope": _(
+                            "This source is not allowed by the validator input "
+                            "contract."
+                        )
+                    }
+                )
         is_upstream_artifact = self.source_scope == BindingSourceScope.UPSTREAM_ARTIFACT
         if not is_upstream_artifact:
             if self.source_step_id or self.source_output_io_definition_id:
@@ -3072,23 +2920,6 @@ class StepInputBinding(TimeStampedModel):
         """Normalize artifact relations and fence workflow-definition changes."""
 
         if self.source_scope == BindingSourceScope.UPSTREAM_ARTIFACT:
-            if (
-                (not self.source_step_id or not self.source_output_io_definition_id)
-                and self.workflow_step_id
-                and self.source_data_path
-            ):
-                from validibot.validations.services.artifact_bindings import (
-                    resolve_artifact_reference,
-                )
-
-                resolved_source_step, resolved_source_output = (
-                    resolve_artifact_reference(
-                        workflow=self.workflow_step.workflow,
-                        reference=self.source_data_path,
-                    )
-                )
-                self.source_step = resolved_source_step
-                self.source_output_io_definition = resolved_source_output
             source_step = self.source_step
             source_output = self.source_output_io_definition
             if source_step is not None and source_output is not None:

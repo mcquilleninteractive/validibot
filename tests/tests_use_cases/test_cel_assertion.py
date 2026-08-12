@@ -1,8 +1,7 @@
-"""Use-case coverage for custom BASIC validators and namespaced CEL payloads.
+"""Use-case coverage for organization-owned BASIC validator input contracts.
 
-The validator is intentionally organization-owned and has no file ports. The
-workflow helper still enforces the production binding postcondition so future
-inputs added to this scenario cannot be silently omitted.
+The workflow helper gives the validator the registered BASIC document port and
+an explicit primary binding before exercising namespaced CEL payloads.
 """
 
 from __future__ import annotations

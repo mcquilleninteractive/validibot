@@ -28,6 +28,9 @@ from django.core.management.base import BaseCommand
 from django.core.management.base import CommandError
 from django.db import transaction
 
+from validibot.validations.constants import CatalogEntryType
+from validibot.validations.constants import CatalogRunStage
+from validibot.validations.constants import StepIOMedium
 from validibot.validations.constants import StepIOOriginKind
 from validibot.validations.constants import ValidatorAvailabilityState
 from validibot.validations.models import Derivation
@@ -84,6 +87,20 @@ class Command(BaseCommand):
         for cfg in configs:
             self.stdout.write(f"Processing {cfg.slug}...")
 
+            artifact_inputs = [
+                entry
+                for entry in cfg.catalog_entries
+                if entry.entry_type == CatalogEntryType.IO_DEFINITION
+                and entry.run_stage == CatalogRunStage.INPUT
+                and entry.io_medium == StepIOMedium.ARTIFACT
+            ]
+            if not artifact_inputs:
+                raise CommandError(
+                    f"Validator {cfg.slug} v{cfg.version} has no declared "
+                    "artifact input port. Every validator must publish its "
+                    "input contract before it can be synchronized."
+                )
+
             with transaction.atomic():
                 # Build validator field dict from the Pydantic model,
                 # excluding fields that aren't Validator model columns.
@@ -92,7 +109,6 @@ class Command(BaseCommand):
                 # is added, add it here too.
                 validator_data = cfg.model_dump(
                     exclude={
-                        "allowed_extensions",
                         "card_image",
                         "catalog_entries",
                         "icon",
@@ -101,7 +117,6 @@ class Command(BaseCommand):
                         "provider",
                         "resolved_class",
                         "resolved_envelope_class",
-                        "resource_types",
                         "step_editor_cards",
                         "step_serializer_class",
                         "validator_class",
@@ -231,6 +246,8 @@ class Command(BaseCommand):
                                 "media_type": entry.media_type,
                                 "data_format": entry.data_format,
                                 "accepted_data_formats": entry.accepted_data_formats,
+                                "accepted_extensions": entry.accepted_extensions,
+                                "accepted_file_types": entry.accepted_file_types,
                                 "accepted_media_types": entry.accepted_media_types,
                                 "allowed_source_scopes": entry.allowed_source_scopes,
                                 "default_source_strategy": (

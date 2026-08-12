@@ -1,4 +1,4 @@
-"""Prove the real PDF-to-selected-XML-to-XSD workflow composition path.
+"""Prove real PDF package outcomes and PDF-to-XML workflow composition.
 
 This acceptance test is deliberately broader than a mocked envelope-builder
 test. It runs the release PDF container against a digest-pinned synthetic PDF,
@@ -6,7 +6,9 @@ parses the real output envelope, registers its integrity-bound artifacts, and
 then executes the ordinary inline XML Schema processor through a relational
 workflow binding. The assertions preserve exact bytes and producer identity
 at every boundary so the immutable PDF submission can never be mistaken for
-the selected downstream XML payload.
+the selected downstream XML payload. The same release image also processes the
+two human-readable AEC fixtures so their printed clean/negative expectations
+cannot drift from backend behavior.
 """
 
 from __future__ import annotations
@@ -37,6 +39,7 @@ from validibot.submissions.tests.factories import SubmissionFactory
 from validibot.validations.constants import BindingSourceScope
 from validibot.validations.constants import RulesetType
 from validibot.validations.constants import StepStatus
+from validibot.validations.constants import ValidationType
 from validibot.validations.constants import XMLSchemaType
 from validibot.validations.models import Artifact
 from validibot.validations.models import Validator
@@ -48,6 +51,7 @@ from validibot.validations.services.step_processor.simple import (
 from validibot.validations.tests.factories import RulesetFactory
 from validibot.validations.tests.factories import ValidationRunFactory
 from validibot.validations.tests.factories import ValidationStepRunFactory
+from validibot.validations.validators.base.config import get_config
 from validibot.validations.validators.xml_schema.validator import XmlSchemaValidator
 from validibot.workflows.tests.factories import WorkflowFactory
 from validibot.workflows.tests.factories import WorkflowStepFactory
@@ -61,10 +65,44 @@ PDF_IMAGE = "validibot-validator-backend-pdf:latest"
 PDF_FIXTURE = (
     Path(__file__).parents[4] / "tests" / "assets" / "pdf" / "composed-package.pdf"
 )
-PDF_SHA256 = "7f75249cf0108b7238891d4c3ff4e95a8855eae6933710795a4ce9727f595638"
-PDF_SIZE_BYTES = 3457
+PDF_SHA256 = "661418435c058cb35f5b1166242087a62287b8b76d8b9c7e6b5cdc09609b6a1e"
+PDF_SIZE_BYTES = 2489
 EXPECTED_XML = b'<handover xmlns="urn:validibot:fixture"><id>A-1</id></handover>'
 EXPECTED_XML_SHA256 = "b56d9195ef81805e1c1fd9a4096b9da11effe44eee717c6ba9c2ae7790d7c948"
+AEC_FIXTURE_ROOT = Path(__file__).parents[4] / "tests" / "assets" / "pdf"
+AEC_CASES = [
+    pytest.param(
+        "aec-issue-package-clean.pdf",
+        "6ce4918b16dcb5a57b65b764273695c7f65e005cccee14e5fd37ea043cfcb1b4",
+        15_050,
+        ValidationStatus.SUCCESS,
+        {
+            "pdf_inventory",
+            "extracted_files_bundle",
+            "xmp_metadata",
+            "selected_xml",
+            "selected_json",
+            "selected_step_p21",
+        },
+        set(),
+        id="clean-static-text-package",
+    ),
+    pytest.param(
+        "aec-issue-package-negative.pdf",
+        "7b3c58473a028f125e2c97be1168932893eaff004229c4179e9271a2fc07d0d2",
+        18_928,
+        ValidationStatus.FAILED_VALIDATION,
+        {"pdf_inventory"},
+        {
+            "pdf.policy.static_text.declared_type_mismatch",
+            "pdf.policy.static_text.duplicate_name",
+            "pdf.policy.static_text.javascript_actions",
+            "pdf.policy.static_text.open_actions",
+            "pdf.policy.static_text.unsafe_filename",
+        },
+        id="negative-static-text-package",
+    ),
+]
 
 
 def _docker_client_with_pdf_image():
@@ -175,6 +213,135 @@ def _run_pdf_container(*, client, workspace: Path, input_path: Path, output_path
     )
 
 
+def _write_aec_attempt_contract(
+    *,
+    attempt_dir: Path,
+    fixture_path: Path,
+    fixture_sha256: str,
+) -> tuple[PdfInputEnvelope, Path, Path]:
+    """Write a standalone exact-selector contract for one AEC fixture."""
+    fixture_bytes = fixture_path.read_bytes()
+    input_dir = attempt_dir / "input"
+    input_dir.mkdir(parents=True)
+    attempt_dir.chmod(0o777)
+    input_dir.chmod(0o777)
+    pdf_path = input_dir / fixture_path.name
+    pdf_path.write_bytes(fixture_bytes)
+    pdf_path.chmod(0o644)
+    input_path = attempt_dir / "input.json"
+    output_path = attempt_dir / "output.json"
+    run_id = str(uuid4())
+    step_run_id = str(uuid4())
+    envelope = PdfInputEnvelope(
+        run_id=run_id,
+        validator={"id": str(uuid4()), "type": ValidatorType.PDF, "version": "2"},
+        org={"id": str(uuid4()), "name": "Validibot fixture organization"},
+        workflow={
+            "id": str(uuid4()),
+            "step_id": str(uuid4()),
+            "step_name": "Inspect AEC PDF package",
+        },
+        input_files=[
+            InputFileItem(
+                name=fixture_path.name,
+                mime_type=SupportedMimeType.APPLICATION_PDF,
+                role="pdf-document",
+                port_key="pdf_document",
+                uri=pdf_path.as_uri(),
+                size_bytes=len(fixture_bytes),
+                sha256=fixture_sha256,
+                storage_version=f"sha256:{fixture_sha256}",
+            )
+        ],
+        inputs=PdfInputs(
+            emit_extracted_files_bundle=True,
+            selected_xml=PdfPayloadSelector(
+                required=True,
+                original_filename="requirements.ids",
+                detected_media_type="application/xml",
+                xml_root_qname="{http://standards.buildingsmart.org/IDS}ids",
+            ),
+            selected_json=PdfPayloadSelector(
+                required=True,
+                original_filename="transmittal.json",
+                detected_media_type="application/json",
+            ),
+            selected_step_p21=PdfPayloadSelector(
+                required=True,
+                original_filename="coordination-model.ifc",
+                detected_media_type="model/step",
+                step_file_schema=["IFC4"],
+            ),
+        ),
+        context=ExecutionContext(
+            execution_attempt_id=str(uuid4()),
+            step_run_id=step_run_id,
+            attempt_contract_version=ATTEMPT_CONTRACT_VERSION,
+            expected_output_uri=output_path.as_uri(),
+            execution_bundle_uri=attempt_dir.as_uri(),
+            skip_callback=True,
+        ),
+    )
+    input_path.write_text(envelope.model_dump_json(indent=2), encoding="utf-8")
+    input_path.chmod(0o644)
+    return envelope, input_path, output_path
+
+
+@pytest.mark.parametrize(
+    (
+        "fixture_name",
+        "fixture_sha256",
+        "fixture_size",
+        "expected_status",
+        "expected_artifact_types",
+        "expected_codes",
+    ),
+    AEC_CASES,
+)
+def test_aec_fixture_matches_its_printed_static_text_policy_outcome(
+    tmp_path: Path,
+    fixture_name: str,
+    fixture_sha256: str,
+    fixture_size: int,
+    expected_status: ValidationStatus,
+    expected_artifact_types: set[str],
+    expected_codes: set[str],
+) -> None:
+    """The clean and negative AEC harness PDFs must exercise the real image."""
+    client, _image = _docker_client_with_pdf_image()
+    fixture_path = AEC_FIXTURE_ROOT / fixture_name
+    fixture_bytes = fixture_path.read_bytes()
+    assert len(fixture_bytes) == fixture_size
+    assert hashlib.sha256(fixture_bytes).hexdigest() == fixture_sha256
+
+    tmp_path.chmod(0o777)
+    attempt_dir = tmp_path / fixture_path.stem
+    attempt_dir.mkdir()
+    _envelope, input_path, output_path = _write_aec_attempt_contract(
+        attempt_dir=attempt_dir,
+        fixture_path=fixture_path,
+        fixture_sha256=fixture_sha256,
+    )
+    try:
+        _run_pdf_container(
+            client=client,
+            workspace=tmp_path,
+            input_path=input_path,
+            output_path=output_path,
+        )
+    finally:
+        client.close()
+
+    output = PdfOutputEnvelope.model_validate_json(output_path.read_bytes())
+    assert output.status == expected_status
+    assert {artifact.type for artifact in output.artifacts} == expected_artifact_types
+    observed_codes = {message.code for message in output.messages}
+    assert expected_codes <= observed_codes
+    if expected_status == ValidationStatus.FAILED_VALIDATION:
+        assert output.outputs is not None
+        assert output.outputs.selected_output_keys == []
+
+
 def test_real_pdf_output_is_the_exact_xml_validated_by_the_next_step(
     tmp_path: Path,
     settings,
@@ -194,8 +361,16 @@ def test_real_pdf_output_is_the_exact_xml_validated_by_the_next_step(
         stdout=StringIO(),
         stderr=StringIO(),
     )
-    pdf_validator = Validator.objects.get(slug="pdf-validator", version=1)
-    xml_validator = Validator.objects.get(slug="xml-validator", version=2)
+    pdf_config = get_config(ValidationType.PDF)
+    pdf_validator = Validator.objects.get(
+        slug=pdf_config.slug,
+        version=pdf_config.version,
+    )
+    xml_config = get_config(ValidationType.XML_SCHEMA)
+    xml_validator = Validator.objects.get(
+        slug=xml_config.slug,
+        version=xml_config.version,
+    )
     workflow = WorkflowFactory(allowed_file_types=[SubmissionFileType.PDF])
     ruleset = RulesetFactory(
         org=workflow.org,
@@ -343,6 +518,7 @@ def test_real_pdf_output_is_the_exact_xml_validated_by_the_next_step(
     assert trace.value_snapshot == {
         "name": "selected.xml",
         "source": BindingSourceScope.UPSTREAM_ARTIFACT,
+        "file_type": SubmissionFileType.XML,
         "size_bytes": len(EXPECTED_XML),
         "sha256": EXPECTED_XML_SHA256,
         "storage_version": f"sha256:{EXPECTED_XML_SHA256}",

@@ -11,9 +11,8 @@ What we care about
 1. **Determinism** — same input produces the same digest, today,
    tomorrow, and across machines. Without this the audit story
    collapses.
-2. **Order-insensitivity for set-like fields** —
-   ``supported_file_types=["json", "xml"]`` and ``["xml", "json"]``
-   describe the same validator and must hash to the same digest.
+2. **Order-insensitivity for set-like port fields** — accepted carrier types
+   on one catalog entry describe the same contract in either order.
 3. **Order-sensitivity for list-of-dict fields** — ``catalog_entries``
    keep order because their position is semantic.
 4. **Cosmetic-field exclusion** — changing ``name`` /
@@ -50,8 +49,6 @@ class TestSemanticFieldsConstant:
             "supports_assertions",
             "validator_class",
             "image_name",
-            "supported_file_types",
-            "supported_data_formats",
             "catalog_entries",
         }
         assert expected.issubset(SEMANTIC_FIELDS)
@@ -110,9 +107,13 @@ class TestComputeSemanticDigestDeterminism:
             "has_processor": False,
             "supports_assertions": True,
             "validator_class": "validibot.validations.foo.Validator",
-            "supported_file_types": ["json"],
-            "supported_data_formats": ["json"],
-            "catalog_entries": [],
+            "catalog_entries": [
+                {
+                    "slug": "json_document",
+                    "accepted_file_types": ["json"],
+                    "accepted_data_formats": ["json"],
+                }
+            ],
             "compute_tier": "LOW",
         }
         d1 = compute_semantic_digest(data)
@@ -141,8 +142,12 @@ class TestComputeSemanticDigestIgnoresNonSemanticFields:
             "processor_name": "EnergyPlus",
             "has_processor": True,
             "validator_class": "validibot.validations.eplus.Validator",
-            "supported_file_types": ["energyplus_idf"],
-            "catalog_entries": [],
+            "catalog_entries": [
+                {
+                    "slug": "primary_model",
+                    "accepted_file_types": ["text"],
+                }
+            ],
         }
 
     def test_name_change_does_not_affect_digest(self):
@@ -190,7 +195,9 @@ class TestComputeSemanticDigestRespondsToSemanticChanges:
             "processor_name": "JSON Schema",
             "has_processor": False,
             "validator_class": "validibot.validations.json_schema.Validator",
-            "supported_file_types": ["json"],
+            "catalog_entries": [
+                {"slug": "json_document", "accepted_file_types": ["json"]}
+            ],
         }
 
     def test_processor_name_change_changes_digest(self):
@@ -205,10 +212,18 @@ class TestComputeSemanticDigestRespondsToSemanticChanges:
         b = {**a, "validator_class": "validibot.validations.evil.Backdoor"}
         assert compute_semantic_digest(a) != compute_semantic_digest(b)
 
-    def test_supported_file_types_addition_changes_digest(self):
-        """Accepting a new file type is a contract widening."""
+    def test_port_file_type_addition_changes_digest(self):
+        """Widening one port's accepted carrier types changes the contract."""
         a = self._baseline()
-        b = {**a, "supported_file_types": ["json", "yaml"]}
+        b = {
+            **a,
+            "catalog_entries": [
+                {
+                    "slug": "json_document",
+                    "accepted_file_types": ["json", "yaml"],
+                }
+            ],
+        }
         assert compute_semantic_digest(a) != compute_semantic_digest(b)
 
     def test_has_processor_flip_changes_digest(self):
@@ -226,10 +241,24 @@ class TestComputeSemanticDigestRespondsToSemanticChanges:
 class TestComputeSemanticDigestOrdering:
     """List-of-strings is set-like; list-of-dicts keeps order."""
 
-    def test_supported_file_types_reorder_is_no_change(self):
-        """Reordering ``supported_file_types`` doesn't change behavior."""
-        a = {"supported_file_types": ["json", "xml", "yaml"]}
-        b = {"supported_file_types": ["yaml", "xml", "json"]}
+    def test_port_file_types_reorder_is_no_change(self):
+        """Reordering set-like accepted carrier types changes no behavior."""
+        a = {
+            "catalog_entries": [
+                {
+                    "slug": "document",
+                    "accepted_file_types": ["json", "xml", "yaml"],
+                }
+            ]
+        }
+        b = {
+            "catalog_entries": [
+                {
+                    "slug": "document",
+                    "accepted_file_types": ["yaml", "xml", "json"],
+                }
+            ]
+        }
         assert compute_semantic_digest(a) == compute_semantic_digest(b)
 
     def test_catalog_entries_reorder_changes_digest(self):

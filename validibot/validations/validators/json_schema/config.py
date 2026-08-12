@@ -32,11 +32,8 @@ config = ValidatorConfig(
     # v2 declares the JSON document as a generic singleton file input so the
     # validator can consume either the primary submission or an exact output
     # selected by PDFValidator or another earlier step.
-    version=2,
+    version=3,
     order=1,
-    supported_file_types=[SubmissionFileType.JSON],
-    supported_data_formats=[SubmissionDataFormat.JSON],
-    allowed_extensions=["json"],
     supports_assertions=True,
     icon="bi-filetype-json",
     card_image="JSON_SCHEMA_card_img_small.png",
@@ -48,7 +45,7 @@ config = ValidatorConfig(
             run_stage=CatalogRunStage.INPUT,
             data_type=CatalogValueType.ARTIFACT_REF,
             description="JSON document validated against this step's schema.",
-            metadata={"accepted_extensions": ["json"]},
+            accepted_extensions=["json"],
             is_required=True,
             on_missing="error",
             order=1,
@@ -60,8 +57,10 @@ config = ValidatorConfig(
             data_format=SubmissionDataFormat.JSON,
             accepted_data_formats=[SubmissionDataFormat.JSON],
             accepted_media_types=["application/json"],
+            accepted_file_types=[SubmissionFileType.JSON],
             allowed_source_scopes=[
                 BindingSourceScope.SUBMISSION_FILE,
+                BindingSourceScope.SUBMISSION_METADATA,
                 BindingSourceScope.UPSTREAM_ARTIFACT,
             ],
             default_source_strategy=DefaultSourceStrategy.SUBMITTED_FILE_FIRST,

@@ -16,10 +16,6 @@ def create_default_validators():
     we need to have by default.
     """
     from validibot.validations.models import Validator
-    from validibot.validations.models import (
-        default_supported_data_formats_for_validation,
-    )
-    from validibot.validations.models import default_supported_file_types_for_validation
     from validibot.validations.validators.base.config import get_all_configs
 
     default_validators = [
@@ -201,15 +197,7 @@ def create_default_validators():
                 "has_processor": config.has_processor,
                 "supports_assertions": config.supports_assertions,
             }
-        defaults = {
-            **resolved_data,
-            "supported_data_formats": default_supported_data_formats_for_validation(
-                resolved_data["validation_type"]
-            ),
-            "supported_file_types": default_supported_file_types_for_validation(
-                resolved_data["validation_type"]
-            ),
-        }
+        defaults = resolved_data
         validator, was_created = Validator.objects.get_or_create(
             slug=resolved_data["slug"],
             version=resolved_data["version"],
@@ -228,22 +216,6 @@ def create_default_validators():
         validator.org = None
         validator.short_description = resolved_data.get("short_description") or ""
         validator.description = resolved_data.get("description") or ""
-        if not validator.supported_file_types:
-            validator.supported_file_types = defaults["supported_file_types"]
-        if not validator.supported_data_formats:
-            validator.supported_data_formats = defaults["supported_data_formats"]
-        if validator.supported_data_formats is None:
-            validator.supported_data_formats = []
-        if validator.supported_file_types is None:
-            validator.supported_file_types = []
-        expected_formats = defaults["supported_data_formats"]
-        for fmt in expected_formats:
-            if fmt not in validator.supported_data_formats:
-                validator.supported_data_formats.append(fmt)
-        expected_file_types = defaults["supported_file_types"]
-        for ft in expected_file_types:
-            if ft not in validator.supported_file_types:
-                validator.supported_file_types.append(ft)
         validator.has_processor = validator_data.get(
             "has_processor",
             validator.has_processor,
@@ -286,27 +258,17 @@ def create_custom_validator(
     custom_type: str,
     notes: str = "",
     allow_custom_assertion_targets: bool = False,
-    supported_data_formats: list[str] | None = None,
+    input_data_format: str,
 ):
     """Create a custom validator and matching CustomValidator wrapper."""
     from validibot.validations.models import CustomValidator
     from validibot.validations.models import Validator
-    from validibot.validations.models import (
-        default_supported_data_formats_for_validation,
+    from validibot.validations.services.custom_validator_contracts import (
+        sync_custom_validator_input_port,
     )
-    from validibot.validations.models import default_supported_file_types_for_validation
-    from validibot.validations.models import supported_file_types_for_data_formats
 
     base_validation_type = _custom_type_to_validation_type(custom_type)
     slug = _unique_validator_slug(org, name)
-    data_formats = (
-        list(supported_data_formats)
-        if supported_data_formats
-        else default_supported_data_formats_for_validation(base_validation_type)
-    )
-    file_types = supported_file_types_for_data_formats(data_formats) or (
-        default_supported_file_types_for_validation(base_validation_type)
-    )
     validator = Validator.objects.create(
         name=name,
         short_description=short_description,
@@ -315,8 +277,6 @@ def create_custom_validator(
         org=org,
         is_system=False,
         slug=slug,
-        supported_data_formats=data_formats,
-        supported_file_types=file_types,
         allow_custom_assertion_targets=allow_custom_assertion_targets,
         supports_assertions=True,
     )
@@ -327,6 +287,10 @@ def create_custom_validator(
         custom_type=custom_type,
         base_validation_type=base_validation_type,
         notes=notes,
+    )
+    sync_custom_validator_input_port(
+        validator=validator,
+        data_format=input_data_format,
     )
     return custom_validator
 
@@ -339,10 +303,12 @@ def update_custom_validator(
     description: str,
     notes: str,
     allow_custom_assertion_targets: bool | None = None,
-    supported_data_formats: list[str] | None = None,
+    input_data_format: str,
 ):
     """Update validator + custom metadata."""
-    from validibot.validations.models import supported_file_types_for_data_formats
+    from validibot.validations.services.custom_validator_contracts import (
+        sync_custom_validator_input_port,
+    )
 
     validator = custom_validator.validator
     validator.name = name
@@ -350,24 +316,21 @@ def update_custom_validator(
     validator.description = description
     if allow_custom_assertion_targets is not None:
         validator.allow_custom_assertion_targets = allow_custom_assertion_targets
-    if supported_data_formats:
-        validator.supported_data_formats = list(supported_data_formats)
-        validator.supported_file_types = supported_file_types_for_data_formats(
-            validator.supported_data_formats,
-        )
     validator.save(
         update_fields=[
             "name",
             "short_description",
             "description",
             "allow_custom_assertion_targets",
-            "supported_data_formats",
-            "supported_file_types",
             "modified",
         ],
     )
     custom_validator.notes = notes
     custom_validator.save(update_fields=["notes", "modified"])
+    sync_custom_validator_input_port(
+        validator=validator,
+        data_format=input_data_format,
+    )
     return custom_validator
 
 
@@ -515,7 +478,6 @@ def create_shacl_library_validator(
     from validibot.validations.constants import RulesetType
     from validibot.validations.models import Ruleset
     from validibot.validations.models import Validator
-    from validibot.validations.models import default_supported_file_types_for_validation
 
     name = form.cleaned_data["name"]
     short_description = form.cleaned_data.get("short_description") or ""
@@ -525,7 +487,6 @@ def create_shacl_library_validator(
     )
 
     slug = _unique_validator_slug(org, name)
-    file_types = default_supported_file_types_for_validation(ValidationType.SHACL)
 
     # Build the default ruleset first so we can attach it on Validator creation.
     ruleset_name = _unique_shacl_default_ruleset_name(org, slug, "1")
@@ -547,10 +508,14 @@ def create_shacl_library_validator(
         org=org,
         is_system=False,
         slug=slug,
-        supported_file_types=file_types,
         supports_assertions=True,
         default_ruleset=ruleset,
     )
+    from validibot.validations.services.custom_validator_contracts import (
+        sync_configured_io_contract,
+    )
+
+    sync_configured_io_contract(validator=validator)
     # SHACL library validators do not currently have a separate
     # CustomValidator-style wrapper for notes. Store them in the ruleset
     # metadata so the create/edit surfaces round-trip the field.

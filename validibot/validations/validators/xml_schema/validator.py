@@ -6,7 +6,6 @@ from typing import Any
 
 from django.utils.translation import gettext as _
 
-from validibot.submissions.constants import SubmissionFileType
 from validibot.validations.constants import Severity
 from validibot.validations.constants import XMLSchemaType
 from validibot.validations.validators.base.base import AssertionStats
@@ -69,17 +68,17 @@ class XmlSchemaValidator(BaseValidator):
             if run_context is not None
             else None
         )
-        if resolved_file is None and submission.file_type != SubmissionFileType.XML:
+        if resolved_file is None or resolved_file.content is None:
             return ValidationResult(
                 passed=False,
                 issues=[
                     ValidationIssue(
-                        "",
-                        _("This validator only accepts XML submissions."),
-                        Severity.ERROR,
+                        path="xml_document",
+                        message=_("The XML document input was not resolved."),
+                        severity=Severity.ERROR,
+                        code="required_input_missing",
                     ),
                 ],
-                stats={"file_type": submission.file_type},
             )
         # lxml optional (import lazily)
         try:
@@ -112,17 +111,8 @@ class XmlSchemaValidator(BaseValidator):
                 stats={"schema_type": schema_type},
             )
 
-        # The declared file port is authoritative for composed workflows. Keep
-        # the direct Submission fallback for validator v1 and isolated unit
-        # tests that do not construct a full run context.
         try:
-            content = (
-                resolved_file.content
-                if resolved_file is not None
-                else submission.read_bytes()
-                if submission
-                else None
-            )
+            content = resolved_file.content
         except Exception as e:
             return ValidationResult(
                 passed=False,

@@ -20,7 +20,6 @@ fact only requires extending ``PARSER_FACT_SPECS``.
 """
 
 from validibot.submissions.constants import SubmissionDataFormat
-from validibot.submissions.constants import SubmissionFileType
 from validibot.validations.constants import FMU_MODEL_RESOURCE
 from validibot.validations.constants import ArtifactKind
 from validibot.validations.constants import BindingSourceScope
@@ -86,24 +85,13 @@ config = ValidatorConfig(
     # Earlier history: ADR-2026-05-22b Phase 6 added seven parser-fact
     # step inputs derived from modelDescription.xml at upload/probe
     # time (model_name, fmi_version, variable counts, has_simulation_defaults).
-    version=2,
+    version=3,
     order=20,
     has_processor=True,
     processor_name="FMU Simulation",
     is_system=True,
     supports_assertions=True,
     compute_tier=ComputeTier.HIGH,
-    supported_file_types=[
-        SubmissionFileType.BINARY,
-        SubmissionFileType.JSON,
-        SubmissionFileType.TEXT,
-    ],
-    supported_data_formats=[
-        SubmissionDataFormat.FMU,
-        SubmissionDataFormat.JSON,
-        SubmissionDataFormat.TEXT,
-    ],
-    allowed_extensions=["fmu", "json"],
     icon="bi-cpu",
     card_image="FMU_card_img_small.png",
     catalog_entries=[
@@ -121,7 +109,7 @@ config = ValidatorConfig(
                 "envelope_channel": EnvelopeChannel.INPUT_FILES,
                 "role": "fmu",
             },
-            metadata={"accepted_extensions": ["fmu"]},
+            accepted_extensions=["fmu"],
             is_required=True,
             on_missing="error",
             order=1,

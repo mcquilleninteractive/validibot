@@ -2,10 +2,10 @@
 """Generate deterministic AEC package PDFs for PDFValidator test harnesses.
 
 The visible sheets resemble a small architectural coordination issue, while the
-PDF object model carries synthetic IFC, IDS, and JSON payloads through standard
-EmbeddedFiles and Associated Files structures.  The negative package adds only
-inert declarations: the PDF validator must inventory them and must never execute
-the JavaScript action or follow the external URI.
+PDF object model carries synthetic IFC, IDS, and JSON payloads through the
+small attachment-route allowlist in ``static_text_package_v1``. The negative
+package adds inert declarations: the validator must reject the JavaScript
+action and must never execute it or follow the out-of-scope URI hyperlink.
 
 The payloads are intentionally small, repository-owned carrier fixtures.  They
 exercise PDF package inspection and exact typed selection; they do not claim
@@ -625,7 +625,7 @@ def _draw_plan_sheet(drawing: canvas.Canvas, *, negative: bool) -> None:
         else [
             "Inventory three unique members",
             "Emit XML, JSON and STEP selections",
-            "Pass safe static package profile",
+            "Pass static_text_package_v1",
         ]
     )
     for index, line_text in enumerate(intent_lines):
@@ -839,21 +839,21 @@ def _draw_manifest_sheet(drawing: canvas.Canvas, *, negative: bool) -> None:
     )
     outcome_lines = (
         [
-            "safe_static_package_v1: FAIL",
-            "Duplicate requirements.ids makes XML selection ambiguous.",
+            "static_text_package_v1: FAIL",
+            "Duplicate requirements.ids names fail before any selection.",
             "Declared text/plain conflicts with the detected STEP carrier.",
-            "OpenAction JavaScript and an external URI are inventoried only.",
-            "The ../unsafe-notes.xml name remains evidence, never a path.",
-            "No active content is executed and no external resource is fetched.",
+            "The OpenAction JavaScript is rejected without being executed.",
+            "The ../unsafe-notes.xml name remains inventory evidence only.",
+            "No XMP, selected member, or extraction bundle is published.",
         ]
         if negative
         else [
-            "safe_static_package_v1: PASS",
+            "static_text_package_v1: PASS",
             "Three unique embedded member byte sequences are inventoried.",
             "The deterministic extraction bundle contains all three members.",
             "XML, JSON and STEP selectors each emit exactly one payload.",
             "Selected bytes are unchanged and independently hashable.",
-            "No active content or external reference finding is expected.",
+            "URI hyperlinks and signatures are outside this validator's scope.",
         ]
     )
     for index, line_text in enumerate(outcome_lines):
@@ -943,6 +943,7 @@ def _xmp_packet(*, negative: bool) -> bytes:
       <vb:projectNumber>VB-AEC-001</vb:projectNumber>
       <vb:revision>P02</vb:revision>
       <vb:status>{status}</vb:status>
+      <vb:securityPolicy>static_text_package_v1</vb:securityPolicy>
       <pdfd:declarations>
         <rdf:Bag><rdf:li>urn:validibot:aec-issue-package-fixture:v1</rdf:li></rdf:Bag>
       </pdfd:declarations>
@@ -986,13 +987,6 @@ def _package_pdf(path: Path, *, negative: bool) -> None:
         specs_by_key[member.logical_key] = file_spec.indirect_reference
 
     writer.root_object[NameObject("/AF")] = ArrayObject(list(specs_by_key.values()))
-    writer.root_object[NameObject("/Collection")] = DictionaryObject(
-        {
-            NameObject("/Type"): NameObject("/Collection"),
-            NameObject("/View"): NameObject("/D"),
-        }
-    )
-
     xmp = DecodedStreamObject()
     xmp.set_data(_xmp_packet(negative=negative))
     xmp.update(
@@ -1036,9 +1030,7 @@ def _package_pdf(path: Path, *, negative: bool) -> None:
                 ),
             }
         )
-        writer.root_object[NameObject("/OpenAction")] = writer._add_object(
-            open_action
-        )
+        writer.root_object[NameObject("/OpenAction")] = writer._add_object(open_action)
         uri_action = DictionaryObject(
             {
                 NameObject("/S"): NameObject("/URI"),

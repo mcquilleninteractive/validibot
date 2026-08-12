@@ -29,8 +29,10 @@ class PortfolioManagerValidator(AdvancedValidator):
 
     def preprocess_submission(self, *, step, submission) -> dict[str, object]:
         """Reject a mode/extension mismatch before spending container compute."""
+        del submission
+        resolved = self.resolve_file_input("benchmark_report", load_content=False)
         structure = (step.config or {}).get("submission_structure", "single_report")
-        suffix = Path(submission.original_filename or "").suffix.casefold()
+        suffix = Path(resolved.name).suffix.casefold()
         expected = (
             {".zip"} if structure == "zip_collection" else {".xls", ".xlsx", ".xml"}
         )
@@ -42,7 +44,7 @@ class PortfolioManagerValidator(AdvancedValidator):
                     "Single-report mode requires a .xls, .xlsx, or .xml submission."
                 )
             raise ValidationError(message)
-        if submission.size_bytes > PORTFOLIO_MANAGER_MAX_SUBMISSION_BYTES:
+        if resolved.identity.size_bytes > PORTFOLIO_MANAGER_MAX_SUBMISSION_BYTES:
             raise ValidationError(
                 "Portfolio Manager submissions must be 500 MB or smaller."
             )

@@ -82,11 +82,8 @@ config = ValidatorConfig(
     # artifact input port, rather than an implicit ``primary_file_uri`` envelope
     # convention. Schematron rules remain inline in SchematronInputs for this
     # slice; only the submitted XML document becomes a file-port contract.
-    version=3,
+    version=4,
     order=3,
-    supported_file_types=[SubmissionFileType.XML],
-    supported_data_formats=[SubmissionDataFormat.XML],
-    allowed_extensions=["xml"],
     supports_assertions=True,
     # Routed to a container for isolation (Saxon/XSLT over untrusted XML),
     # not for heavy compute — metered by launch count (ADR-2026-07-01 D4).
@@ -106,7 +103,8 @@ config = ValidatorConfig(
                 "Resolved XML document passed to the Schematron backend as "
                 "the primary input file."
             ),
-            metadata={"accepted_extensions": ["xml"]},
+            accepted_file_types=[SubmissionFileType.XML],
+            accepted_extensions=["xml"],
             is_required=True,
             on_missing="error",
             order=1,
@@ -140,7 +138,7 @@ config = ValidatorConfig(
                 "references."
             ),
             binding_config={"source": "output_artifact", "role": "svrl-report"},
-            metadata={"accepted_extensions": ["svrl"]},
+            accepted_extensions=["svrl"],
             is_required=False,
             on_missing="null",
             order=5,

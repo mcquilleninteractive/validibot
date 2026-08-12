@@ -207,8 +207,11 @@ validator is declared in one place:
   subclass (e.g., `"validibot.validations.validators.energyplus.validator.EnergyPlusValidator"`).
   At startup, `register_validators()` resolves this path and stores the class in the runtime
   registry so the engine can instantiate validators without storing Python paths in the database.
-- **File handling** — `supported_file_types`, `supported_data_formats`, `allowed_extensions`,
-  and `resource_types` declare what files the validator accepts.
+- **Typed inputs and outputs** — `catalog_entries` declare value and artifact
+  ports. Artifact inputs specify their logical formats, media types, carrier
+  file types, filename extensions, cardinality, and allowed source scopes.
+  These port contracts are the authoritative description of what a validator
+  accepts.
 - **Compute** — `compute_tier` (LOW, MEDIUM, HIGH) tells the platform how much resource the
   validator needs when dispatching containers.
 - **Display** — `icon` (Bootstrap Icons class) and `card_image` for the validator library UI.
@@ -263,7 +266,7 @@ this field; use future tags/metadata for labels such as `EnergyPlus 25.1`, `FMI 
 
 **Drift detection:** Each validator row stores a `semantic_digest` — a SHA-256 of the
 behavior-defining fields (`validation_type`, `processor_name`, `validator_class`,
-`supported_file_types`, `catalog_entries`, etc.; see
+`catalog_entries`, execution contracts, etc.; see
 `validibot/validations/services/validator_digest.py` for the full allowlist). On every sync, the
 command re-computes the digest from the config and compares it against the stored value:
 

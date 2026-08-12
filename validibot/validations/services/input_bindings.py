@@ -18,6 +18,7 @@ from validibot.validations.constants import BindingSourceScope
 from validibot.validations.constants import StepIODirection
 from validibot.validations.constants import StepIOMedium
 from validibot.validations.constants import StepIOOriginKind
+from validibot.validations.constants import StepIOSourceKind
 from validibot.validations.models import StepInputBinding
 from validibot.validations.models import StepIODefinition
 from validibot.validations.services.catalog_entry_normalization import (
@@ -91,16 +92,10 @@ def _ensure_step_input_bindings(step: WorkflowStep) -> int:
             (io_definition.contract_key, io_definition.direction)
         )
 
-        # ── P1-1 fix: skip parser-sourced step inputs ──────────────
-        # Per ADR-2026-05-22, parser-extracted step inputs (catalog
-        # entries with binding_config={"source": "parser", ...}) are
-        # populated by the validator's extract_input_values() at
-        # runtime — no author-supplied payload path is involved. Creating
-        # a StepInputBinding row for these would either dispatch-fail
-        # (binding can't resolve a path that doesn't exist) or surface
-        # them in the UI as user-mappable required inputs (wrong — the
-        # validator owns these values). Skip them entirely.
-        if entry and (entry.binding_config or {}).get("source") == "parser":
+        # Parser-extracted inputs are owned and populated by the validator.
+        # Their first-class source kind is authoritative; exposing a binding
+        # would incorrectly invite authors to map an external payload path.
+        if io_definition.source_kind == StepIOSourceKind.INTERNAL:
             continue
 
         if io_definition.io_medium == StepIOMedium.ARTIFACT:

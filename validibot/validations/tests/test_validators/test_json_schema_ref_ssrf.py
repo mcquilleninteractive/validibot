@@ -33,12 +33,27 @@ from validibot.validations.constants import Severity
 from validibot.validations.constants import ValidationType
 from validibot.validations.tests.factories import RulesetFactory
 from validibot.validations.tests.factories import ValidatorFactory
+from validibot.validations.tests.resolved_file_inputs import run_context_with_file
 from validibot.validations.validators.json_schema.validator import JsonSchemaValidator
 
 # A remote $ref aimed at the cloud metadata service — the canonical SSRF target.
 # If the validator ever fetches it, credentials could be exfiltrated, so the
 # regression test asserts no socket is ever opened toward any host.
 _METADATA_SSRF_REF = "http://169.254.169.254/latest/meta-data/iam/security-credentials/"
+
+
+def _validate_json(validator, submission, ruleset):
+    """Validate exact JSON bytes through the declared JSON document port."""
+    return JsonSchemaValidator().validate(
+        validator,
+        submission,
+        ruleset,
+        run_context=run_context_with_file(
+            contract_key="json_document",
+            content=submission.content,
+            file_type=SubmissionFileType.JSON,
+        ),
+    )
 
 
 def test_remote_ref_opens_no_socket_and_yields_controlled_error(db, monkeypatch):
@@ -76,7 +91,7 @@ def test_remote_ref_opens_no_socket_and_yields_controlled_error(db, monkeypatch)
     )
 
     # Must return normally (no socket, no unhandled exception) ...
-    result = JsonSchemaValidator().validate(validator, submission, ruleset)
+    result = _validate_json(validator, submission, ruleset)
 
     # ... and the external ref must be reported as a controlled validation error.
     assert result.passed is False
@@ -115,7 +130,7 @@ def test_internal_ref_still_resolves_after_ssrf_hardening(db):
         content='{"height": -5}',
         file_type=SubmissionFileType.JSON,
     )
-    bad_result = JsonSchemaValidator().validate(validator, bad_submission, ruleset)
+    bad_result = _validate_json(validator, bad_submission, ruleset)
     assert bad_result.passed is False
 
     # A value satisfying the internal ref must pass cleanly.
@@ -123,7 +138,7 @@ def test_internal_ref_still_resolves_after_ssrf_hardening(db):
         content='{"height": 5}',
         file_type=SubmissionFileType.JSON,
     )
-    good_result = JsonSchemaValidator().validate(validator, good_submission, ruleset)
+    good_result = _validate_json(validator, good_submission, ruleset)
     assert good_result.passed is True
 
 

@@ -43,6 +43,7 @@ from validibot.validations.constants import CatalogRunStage
 from validibot.validations.constants import ValidationType
 from validibot.validations.models import RulesetAssertion
 from validibot.validations.tests.factories import ValidatorFactory
+from validibot.validations.tests.resolved_file_inputs import resolved_file_input
 from validibot.validations.validators.basic import BasicValidator
 from validibot.workflows.constants import WorkflowConstantType
 from validibot.workflows.constants import WorkflowHistoryPolicy
@@ -487,6 +488,13 @@ class ConstantsRuntimeWiringTests(TestCase):
             validation_run=MagicMock(id=1),
             step=MagicMock(id=1),
             workflow_constants={"energy_price": 0.4},
+            resolved_file_inputs={
+                "document": resolved_file_input(
+                    contract_key="document",
+                    content=submission.content,
+                    file_type=SubmissionFileType.JSON,
+                )
+            },
         )
         engine = BasicValidator()
         result = engine.validate(self.validator, submission, ruleset, run_context)

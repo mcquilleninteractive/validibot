@@ -142,15 +142,22 @@ class Command(BaseCommand):
                 "name": f"Example Custom Validator {index}",
                 "description": "Demonstration validator used by the example command.",
                 "validation_type": ValidationType.CUSTOM_VALIDATOR,
-                "version": "1.0.0",
-                "supported_file_types": [SubmissionFileType.JSON],
+                "version": 1,
                 "is_system": False,
             },
         )
         validator.validation_type = ValidationType.CUSTOM_VALIDATOR
-        validator.supported_file_types = [SubmissionFileType.JSON]
         validator.is_system = False
         validator.save()
+        from validibot.submissions.constants import SubmissionDataFormat
+        from validibot.validations.services.custom_validator_contracts import (
+            sync_custom_validator_input_port,
+        )
+
+        sync_custom_validator_input_port(
+            validator=validator,
+            data_format=SubmissionDataFormat.JSON,
+        )
 
         ruleset_name = f"{self.ruleset_name} {index}"
         ruleset, _ = Ruleset.objects.get_or_create(

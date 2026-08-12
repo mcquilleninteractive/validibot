@@ -418,6 +418,12 @@ class WorkflowVersioningService:
                 old_io_definition.accepted_data_formats = deepcopy(
                     old_io_definition.accepted_data_formats
                 )
+                old_io_definition.accepted_extensions = deepcopy(
+                    old_io_definition.accepted_extensions
+                )
+                old_io_definition.accepted_file_types = deepcopy(
+                    old_io_definition.accepted_file_types
+                )
                 old_io_definition.accepted_media_types = deepcopy(
                     old_io_definition.accepted_media_types
                 )

@@ -11,7 +11,13 @@ import pytest
 from validibot.actions.handlers import ValidatorStepHandler
 from validibot.actions.protocols import RunContext
 from validibot.actions.protocols import StepResult
+from validibot.submissions.constants import SubmissionFileType
 from validibot.validations.constants import StepStatus
+from validibot.validations.constants import ValidationType
+from validibot.validations.services.custom_validator_contracts import (
+    sync_configured_io_contract,
+)
+from validibot.validations.services.input_bindings import ensure_step_input_bindings
 from validibot.validations.services.validation_run import ValidationRunService
 from validibot.validations.tests.factories import ValidationRunFactory
 from validibot.validations.tests.factories import ValidationStepRunFactory
@@ -40,14 +46,16 @@ class TestValidatorStepHandler:
 
     @pytest.mark.django_db
     def test_returns_error_for_unsupported_file_type(self):
-        """Handler should fail when submission file type is not supported."""
-        validator = ValidatorFactory()
-        validator.supports_file_type = MagicMock(return_value=False)
-
-        run = MagicMock()
-        run.submission = MagicMock(file_type="unsupported")
-
-        step = MagicMock(validator=validator)
+        """Handler should return the typed port diagnostic for a PDF/JSON mismatch."""
+        run = ValidationRunFactory(
+            submission__file_type=SubmissionFileType.PDF,
+            submission__original_filename="document.pdf",
+            submission__content="%PDF-1.7",
+        )
+        validator = ValidatorFactory(validation_type=ValidationType.JSON_SCHEMA)
+        sync_configured_io_contract(validator=validator)
+        step = WorkflowStepFactory(workflow=run.workflow, validator=validator)
+        ensure_step_input_bindings(step)
 
         handler = ValidatorStepHandler()
         context = RunContext(
@@ -60,8 +68,8 @@ class TestValidatorStepHandler:
 
         assert result.passed is False
         assert len(result.issues) == 1
-        assert "unsupported" in result.issues[0].message.lower()
-        assert result.issues[0].code == "unsupported_file_type"
+        assert "primary file is PDF" in result.issues[0].message
+        assert result.issues[0].code == "input_file_type_incompatible"
 
     def test_returns_error_when_validator_not_found(self):
         """Handler should fail gracefully when validator class cannot be loaded."""

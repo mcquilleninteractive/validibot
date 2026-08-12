@@ -18,6 +18,7 @@ from django.views.generic import View
 from django.views.generic.edit import FormView
 
 from validibot.core.utils import reverse_with_org
+from validibot.submissions.constants import SubmissionDataFormat
 from validibot.validations.constants import CustomValidatorType
 from validibot.validations.constants import FMUProbeStatus
 from validibot.validations.constants import ValidationType
@@ -27,7 +28,9 @@ from validibot.validations.forms import FMUValidatorCreateForm
 from validibot.validations.forms import ShaclLibraryValidatorCreateForm
 from validibot.validations.forms import ShaclLibraryValidatorUpdateForm
 from validibot.validations.models import Validator
-from validibot.validations.models import default_supported_data_formats_for_validation
+from validibot.validations.services.custom_validator_contracts import (
+    custom_validator_data_format,
+)
 from validibot.validations.services.fmu import FMUIntrospectionError
 from validibot.validations.services.fmu import create_fmu_validator
 from validibot.validations.services.fmu import run_fmu_probe
@@ -224,12 +227,9 @@ class CustomValidatorCreateView(CustomValidatorManageMixin, FormView):
                 "allow_custom_assertion_targets",
                 False,
             ),
-            supported_data_formats=[
-                form.cleaned_data.get("supported_data_formats")
-                or default_supported_data_formats_for_validation(
-                    ValidationType.CUSTOM_VALIDATOR,
-                )[0]
-            ],
+            input_data_format=(
+                form.cleaned_data.get("input_data_format") or SubmissionDataFormat.JSON
+            ),
         )
         messages.success(
             self.request,
@@ -272,11 +272,7 @@ class CustomValidatorUpdateView(CustomValidatorManageMixin, FormView):
             "short_description": validator.short_description,
             "description": validator.description,
             "allow_custom_assertion_targets": validator.allow_custom_assertion_targets,
-            "supported_data_formats": (
-                validator.supported_data_formats[0]
-                if validator.supported_data_formats
-                else ""
-            ),
+            "input_data_format": custom_validator_data_format(validator),
             "notes": self.custom_validator.notes,
         }
 
@@ -324,12 +320,9 @@ class CustomValidatorUpdateView(CustomValidatorManageMixin, FormView):
             allow_custom_assertion_targets=form.cleaned_data.get(
                 "allow_custom_assertion_targets",
             ),
-            supported_data_formats=[
-                form.cleaned_data.get("supported_data_formats")
-                or default_supported_data_formats_for_validation(
-                    ValidationType.CUSTOM_VALIDATOR,
-                )[0]
-            ],
+            input_data_format=(
+                form.cleaned_data.get("input_data_format") or SubmissionDataFormat.JSON
+            ),
         )
         messages.success(
             self.request,

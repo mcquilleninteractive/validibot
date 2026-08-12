@@ -126,8 +126,13 @@ class SchematronValidator(AdvancedValidator):
         pre-dispatch failure — no compute is spent on a payload we would
         refuse anyway, and nothing dangerous ever reaches Saxon.
         """
+        del step, submission
         try:
-            assert_submission_is_safe_xml(submission.get_content())
+            resolved = self.resolve_file_input(
+                "xml_document",
+                load_content=True,
+            )
+            assert_submission_is_safe_xml(resolved.content or b"")
         except SchematronSecurityError as exc:
             raise ValidationError(str(exc)) from exc
         return {}

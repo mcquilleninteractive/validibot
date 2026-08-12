@@ -70,6 +70,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+PDF_PARSER_PIDS_LIMIT = 128
+
 
 def _apply_tier_2_hardening(container_config: dict) -> dict:
     """Apply Trust ADR Phase 5 Session C tier-2 sandbox overrides.
@@ -119,6 +121,59 @@ def _apply_tier_2_hardening(container_config: dict) -> dict:
     tier_2_runtime = getattr(settings, "VALIDATOR_TIER_2_CONTAINER_RUNTIME", "")
     if tier_2_runtime:
         hardened["runtime"] = str(tier_2_runtime)
+
+    return hardened
+
+
+def _apply_pdf_parser_hardening(container_config: dict) -> dict:
+    """Apply the Docker sandbox profile required for untrusted PDF parsing.
+
+    PDF parsing crosses a native-code trust boundary even though the backend
+    neither renders pages nor executes document actions. The profile therefore
+    refuses the globally configured validator network, makes scratch storage
+    non-executable, removes IPC, lowers the PID ceiling, and enables Docker's
+    init process so resource-limited decoder children are always reaped.
+
+    Operators can select a stronger installed runtime such as gVisor with
+    ``VALIDATOR_PDF_CONTAINER_RUNTIME=runsc``. Public hostile-upload services
+    can fail closed when that runtime is absent by also setting
+    ``VALIDATOR_PDF_REQUIRE_STRONG_SANDBOX=true``.
+    """
+    hardened = dict(container_config)
+    hardened.pop("network", None)
+    hardened["network_mode"] = "none"
+    hardened["read_only"] = True
+    hardened["cap_drop"] = sorted({*hardened.get("cap_drop", []), "ALL"})
+    security_options = list(hardened.get("security_opt", []))
+    if "no-new-privileges:true" not in security_options:
+        security_options.append("no-new-privileges:true")
+    hardened["security_opt"] = security_options
+    hardened["user"] = "1000:1000"
+    hardened["pids_limit"] = min(
+        int(hardened.get("pids_limit", PDF_PARSER_PIDS_LIMIT)),
+        PDF_PARSER_PIDS_LIMIT,
+    )
+    hardened["ipc_mode"] = "none"
+    hardened["init"] = True
+
+    tmpfs = dict(hardened.get("tmpfs", {}))
+    tmpfs["/tmp"] = "rw,noexec,nosuid,nodev,size=2g,mode=1777"  # noqa: S108
+    hardened["tmpfs"] = tmpfs
+
+    configured_runtime = str(
+        getattr(settings, "VALIDATOR_PDF_CONTAINER_RUNTIME", "") or ""
+    ).strip()
+    if configured_runtime:
+        hardened["runtime"] = configured_runtime
+    if getattr(settings, "VALIDATOR_PDF_REQUIRE_STRONG_SANDBOX", False) and not (
+        configured_runtime or hardened.get("runtime")
+    ):
+        msg = (
+            "PDF validator execution requires a configured stronger container "
+            "runtime; set VALIDATOR_PDF_CONTAINER_RUNTIME to an installed "
+            "runtime such as runsc."
+        )
+        raise RuntimeError(msg)
 
     return hardened
 
@@ -397,6 +452,19 @@ class DockerValidatorRunner(ValidatorRunner):
                 container_config.get("runtime", "default"),
                 container_config.get("mem_limit"),
                 container_config.get("nano_cpus"),
+            )
+
+        # The PDF backend handles attacker-controlled input with a native qpdf
+        # parser. Apply its parser-specific profile last so neither a global
+        # validator network nor a trust-tier setting can weaken it.
+        if validator_slug in {"pdf", "pdf-validator"}:
+            container_config = _apply_pdf_parser_hardening(container_config)
+            logger.info(
+                "Applied PDF parser hardening profile to %s "
+                "(network=none, runtime=%s, pids=%s)",
+                container_image,
+                container_config.get("runtime", "default"),
+                container_config.get("pids_limit"),
             )
 
         container = None

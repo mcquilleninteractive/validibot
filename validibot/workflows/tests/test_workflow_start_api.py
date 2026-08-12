@@ -77,9 +77,8 @@ def workflow(db, org, user):
     """
     Create a test workflow with JSON, XML, and TEXT file types.
 
-    Creates a validator with explicit supported_file_types to match the
-    workflow's allowed file types. This is needed for API tests that
-    submit different content types.
+    Step-level input compatibility is intentionally not part of admission;
+    these tests exercise only the workflow's allowed primary file types.
     """
     allowed_types = [
         SubmissionFileType.JSON,
@@ -99,11 +98,7 @@ def workflow(db, org, user):
             name=f"WF {uuid4().hex}",
             allowed_file_types=allowed_types,
         )
-    # Create validator with explicit file type support to match workflow
-    validator = ValidatorFactory(
-        validation_type=ValidationType.BASIC,
-        supported_file_types=allowed_types,
-    )
+    validator = ValidatorFactory(validation_type=ValidationType.BASIC)
     if WorkflowStepFactory:
         WorkflowStepFactory(workflow=wf, validator=validator)
     else:
@@ -382,7 +377,7 @@ class TestWorkflowStartAPI:
         assert resp.data["code"] == WorkflowStartErrorCode.FILE_TYPE_UNSUPPORTED
         assert "accepts" in resp.data["detail"]
 
-    def test_start_rejects_when_step_cannot_process_selected_file_type(
+    def test_start_admits_allowed_type_without_proving_every_step(
         self,
         api_client: APIClient,
         org,
@@ -390,6 +385,7 @@ class TestWorkflowStartAPI:
         workflow,
         mock_validation_service_success,
     ):
+        """A concrete step mismatch is a runtime finding, not admission failure."""
         workflow.allowed_file_types = [
             SubmissionFileType.JSON,
             SubmissionFileType.XML,
@@ -409,9 +405,7 @@ class TestWorkflowStartAPI:
             content_type="application/xml",
         )
 
-        assert resp.status_code == status.HTTP_400_BAD_REQUEST
-        assert resp.data["code"] == WorkflowStartErrorCode.FILE_TYPE_UNSUPPORTED
-        assert "does not support" in resp.data["detail"]
+        assert resp.status_code == status.HTTP_201_CREATED
 
     def test_start_with_missing_content_type_returns_error(
         self,
@@ -757,9 +751,6 @@ class TestWorkflowStartAPI:
         """A PDF-only workflow must persist PDF rather than generic binary."""
         workflow.allowed_file_types = [SubmissionFileType.PDF]
         workflow.save(update_fields=["allowed_file_types"])
-        validator = workflow.steps.get().validator
-        validator.supported_file_types = [SubmissionFileType.PDF]
-        validator.save(update_fields=["supported_file_types"])
         api_client.force_authenticate(user=user)
         grant_role(user, org, RoleCode.EXECUTOR)
 
@@ -793,9 +784,6 @@ class TestWorkflowStartAPI:
         """Raw PDF requests must never pass through lossy text decoding."""
         workflow.allowed_file_types = [SubmissionFileType.PDF]
         workflow.save(update_fields=["allowed_file_types"])
-        validator = workflow.steps.get().validator
-        validator.supported_file_types = [SubmissionFileType.PDF]
-        validator.save(update_fields=["supported_file_types"])
         api_client.force_authenticate(user=user)
         grant_role(user, org, RoleCode.EXECUTOR)
         pdf_bytes = b"%PDF-2.0\n%\xff\xfe binary marker\n%%EOF"

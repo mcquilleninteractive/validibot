@@ -77,32 +77,52 @@ class BasicValidator(BaseValidator):
         # Store run_context on instance for assertion evaluation
         self.run_context = run_context
 
-        # BasicValidator accepts JSON and XML. This check is a safety net —
-        # the handler also validates file type compatibility before calling.
-        if submission.file_type not in self._SUPPORTED_FILE_TYPES:
+        resolved_file = (
+            (run_context.resolved_file_inputs or {}).get("document")
+            if run_context is not None
+            else None
+        )
+        if resolved_file is None or resolved_file.content is None:
             return ValidationResult(
                 passed=False,
                 issues=[
                     ValidationIssue(
-                        path="",
+                        path="document",
                         message=_(
-                            "Basic validators require JSON or XML content. "
-                            "Received file type: %(file_type)s"
-                        )
-                        % {"file_type": submission.file_type},
+                            "The Basic validator document input was not resolved."
+                        ),
                         severity=Severity.ERROR,
+                        code="required_input_missing",
                     ),
                 ],
-                stats={"file_type": submission.file_type},
             )
 
-        raw_content = submission.get_content()
+        raw_content = resolved_file.content
+        resolved_file_type = resolved_file.file_type
+        if not resolved_file_type:
+            resolved_file_type = {
+                "json": SubmissionFileType.JSON,
+                "xml": SubmissionFileType.XML,
+            }.get(resolved_file.data_format, "")
+        if resolved_file_type not in self._SUPPORTED_FILE_TYPES:
+            return ValidationResult(
+                passed=False,
+                issues=[
+                    ValidationIssue(
+                        path="document",
+                        message=_("Basic validators require JSON or XML content."),
+                        severity=Severity.ERROR,
+                        code="input_file_type_incompatible",
+                    )
+                ],
+                stats={"file_type": resolved_file_type},
+            )
 
         # Parse submission content into a dict. The XML-to-dict conversion
         # happens once here; the resulting payload is reused for all
         # assertions (both BASIC and CEL) without re-parsing.
         payload: dict | list | None = None
-        if submission.file_type == SubmissionFileType.JSON:
+        if resolved_file_type == SubmissionFileType.JSON:
             try:
                 payload = json.loads(raw_content)
             except Exception as exc:
@@ -119,7 +139,7 @@ class BasicValidator(BaseValidator):
                     ],
                     stats={"exception": type(exc).__name__},
                 )
-        elif submission.file_type == SubmissionFileType.XML:
+        elif resolved_file_type == SubmissionFileType.XML:
             try:
                 payload = xml_to_dict(raw_content)
             except XmlParseError as exc:

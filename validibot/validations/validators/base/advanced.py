@@ -170,6 +170,34 @@ class AdvancedValidator(BaseValidator):
         """
         return {}
 
+    def resolve_file_input(
+        self,
+        contract_key: str,
+        *,
+        load_content: bool,
+        max_bytes: int | None = None,
+    ):
+        """Resolve one declared port for domain-specific pre-dispatch checks."""
+
+        if self.run_context is None:
+            raise ValidationError("Validator input resolution requires run context.")
+        from validibot.validations.services.resolved_files import resolve_file_inputs
+
+        resolved = resolve_file_inputs(
+            run=self.run_context.validation_run,
+            step=self.run_context.step,
+            load_content=load_content,
+            max_bytes=max_bytes,
+            contract_keys={contract_key},
+        )
+        self.run_context.resolved_file_inputs.update(resolved)
+        try:
+            return resolved[contract_key]
+        except KeyError as exc:
+            raise ValidationError(
+                f"Required input '{contract_key}' could not be resolved."
+            ) from exc
+
     def validate(
         self,
         validator: Validator,

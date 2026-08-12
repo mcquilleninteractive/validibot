@@ -33,6 +33,7 @@ from validibot.validations.constants import ValidationType
 from validibot.validations.constants import XMLSchemaType
 from validibot.validations.tests.factories import RulesetFactory
 from validibot.validations.tests.factories import ValidatorFactory
+from validibot.validations.tests.resolved_file_inputs import run_context_with_file
 from validibot.validations.validators.xml_schema.validator import XmlSchemaValidator
 
 # Fixtures resolve relative to the repo root (pytest's rootdir), mirroring the
@@ -64,6 +65,20 @@ def _xml_submission(filename: str):
     )
 
 
+def _validate_xml(validator, submission, ruleset):
+    """Validate the fixture through the XML validator's declared input port."""
+    return XmlSchemaValidator().validate(
+        validator,
+        submission,
+        ruleset,
+        run_context=run_context_with_file(
+            contract_key="xml_document",
+            content=submission.content,
+            file_type=SubmissionFileType.XML,
+        ),
+    )
+
+
 # ── The XSD accepts a well-formed calibration certificate ────────────────────
 # Baseline: the "good" document is genuinely well-shaped, so the structural
 # layer must pass it cleanly. Establishes that the XSD is not vacuously
@@ -78,9 +93,10 @@ def test_valid_certificate_passes_the_xsd(db):
     """
     validator = ValidatorFactory(validation_type=ValidationType.XML_SCHEMA)
 
-    result = XmlSchemaValidator().validate(
+    submission = _xml_submission("calibration-certificate-valid.xml")
+    result = _validate_xml(
         validator,
-        _xml_submission("calibration-certificate-valid.xml"),
+        submission,
         _xsd_ruleset(),
     )
 
@@ -107,9 +123,10 @@ def test_invalid_certificate_still_passes_the_xsd(db):
     """
     validator = ValidatorFactory(validation_type=ValidationType.XML_SCHEMA)
 
-    result = XmlSchemaValidator().validate(
+    submission = _xml_submission("calibration-certificate-invalid.xml")
+    result = _validate_xml(
         validator,
-        _xml_submission("calibration-certificate-invalid.xml"),
+        submission,
         _xsd_ruleset(),
     )
 

@@ -324,6 +324,9 @@ class ArtifactDownloadViewTests(TestCase):
             assert _streaming_body(response) == payload
             assert response["X-Validibot-Artifact-Sha256"] == digest
             assert "storage-backed.txt" in response["Content-Disposition"]
+            assert response["Content-Disposition"].startswith("attachment;")
+            assert response["X-Content-Type-Options"] == "nosniff"
+            assert response["Cross-Origin-Resource-Policy"] == "same-origin"
 
     def test_container_output_file_uri_maps_to_run_workspace(self):
         """Local Docker artifact URIs map back to the owning run workspace."""

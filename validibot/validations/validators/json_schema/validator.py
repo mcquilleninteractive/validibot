@@ -11,7 +11,6 @@ from referencing import Registry
 from referencing.exceptions import NoSuchResource
 from referencing.exceptions import Unresolvable
 
-from validibot.submissions.constants import SubmissionFileType
 from validibot.validations.constants import Severity
 from validibot.validations.validators.base.base import AssertionStats
 from validibot.validations.validators.base.base import BaseValidator
@@ -106,23 +105,17 @@ class JsonSchemaValidator(BaseValidator):
             else None
         )
 
-        # JSON Schema validators require JSON content. This check is a safety
-        # net - the handler also validates file type before calling validate().
-        if resolved_file is None and submission.file_type != SubmissionFileType.JSON:
+        if resolved_file is None or resolved_file.content is None:
             return ValidationResult(
                 passed=False,
                 issues=[
                     ValidationIssue(
-                        path="",
-                        message=_(
-                            "JSON Schema validators require JSON content. "
-                            "Received file type: %(file_type)s"
-                        )
-                        % {"file_type": submission.file_type},
+                        path="json_document",
+                        message=_("The JSON document input was not resolved."),
                         severity=Severity.ERROR,
+                        code="required_input_missing",
                     ),
                 ],
-                stats={"file_type": submission.file_type},
             )
         # Load the schema we'll be using...
         try:
@@ -135,11 +128,7 @@ class JsonSchemaValidator(BaseValidator):
             )
 
         # Now load incoming content...
-        payload = (
-            resolved_file.content
-            if resolved_file is not None
-            else submission.get_content()
-        )
+        payload = resolved_file.content
 
         try:
             data = json.loads(payload)

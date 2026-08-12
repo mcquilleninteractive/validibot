@@ -72,7 +72,7 @@ The entities that make up Validibot:
 - **[Runs](data-model/runs.md)** — Validation execution tracking
 - **[Steps](data-model/steps.md)** — Individual validation operations
 - **[Validators](data-model/validators.md)** — Validator catalogs, versions, providers, and resources
-- **[PDF Package Validator](data-model/pdf-validator.md)** — Exact file ports, typed shared contracts, selectors, artifacts, and backend limits
+- **[PDF Package Validator](data-model/pdf-validator.md)** — Fixed static-text policy, allowed package routes, exact selectors, typed artifacts, and backend limits
 - **[Workflow Data Architecture](overview/workflow_data_architecture.md)** — Scope, provenance, namespaces, signals, step I/O, and artifact boundaries
 - **[Workflow Signals and Step I/O Reference](data-model/signals.md)** — Detailed models, constraints, resolution, and runtime behavior
 - **[Step I/O Tutorial](data-model/signals-tutorial-example.md)** — End-to-end walkthrough of I/O contracts, bindings, promotions, derivations, and runtime traces

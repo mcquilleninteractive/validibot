@@ -43,13 +43,16 @@ class ArtifactPortLike(Protocol):
     def accepted_data_formats(self) -> list[str] | None: ...
 
     @property
+    def accepted_extensions(self) -> list[str] | None: ...
+
+    @property
+    def accepted_file_types(self) -> list[str] | None: ...
+
+    @property
     def accepted_media_types(self) -> list[str] | None: ...
 
     @property
     def allowed_source_scopes(self) -> list[str] | None: ...
-
-    @property
-    def metadata(self) -> dict | None: ...
 
     @property
     def min_items(self) -> int | None: ...
@@ -469,8 +472,7 @@ def _data_format_from_known_uri(uri: str) -> str:
 def _accepted_extensions_for_port(port: ArtifactPortLike) -> tuple[str, ...]:
     """Return accepted file extensions declared on the artifact port."""
 
-    metadata = port.metadata or {}
-    raw_extensions = metadata.get("accepted_extensions") or []
+    raw_extensions = port.accepted_extensions or []
     normalized: list[str] = []
     for ext in raw_extensions:
         value = str(ext or "").strip().lower().lstrip(".")
