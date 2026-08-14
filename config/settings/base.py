@@ -318,6 +318,9 @@ MIDDLEWARE = [
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.locale.LocaleMiddleware",
     "django.middleware.common.CommonMiddleware",
+    # Token/revocation requests are public and CSRF-exempt by protocol. Bound
+    # them before body parsing and OAuth cryptography, using the shared cache.
+    "validibot.idp.middleware.OIDCEndpointAbuseProtectionMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     # Must come AFTER AuthenticationMiddleware so ``request.user`` is
@@ -1383,7 +1386,11 @@ IDP_OIDC_AUTHORIZATION_CODE_EXPIRES_IN = env.int(
 )
 IDP_OIDC_ACCESS_TOKEN_EXPIRES_IN = env.int(
     "IDP_OIDC_ACCESS_TOKEN_EXPIRES_IN",
-    default=3600,
+    default=900,
+)
+IDP_OIDC_REFRESH_TOKEN_EXPIRES_IN = env.int(
+    "IDP_OIDC_REFRESH_TOKEN_EXPIRES_IN",
+    default=2_592_000,
 )
 IDP_OIDC_PRIVATE_KEY = _decode_idp_pem_from_env(
     env.str("IDP_OIDC_PRIVATE_KEY_B64", default=""),
@@ -1397,10 +1404,20 @@ IDP_OIDC_MCP_RESOURCE_AUDIENCE = env.str(
     default=f"{SITE_URL.rstrip('/')}/mcp",
 )
 MCP_FILE_MAX_BYTES = env.int("MCP_FILE_MAX_BYTES", default=2_500_000)
+MCP_FILE_ALLOWED_HOSTS = env.list("MCP_FILE_ALLOWED_HOSTS", default=[])
+MCP_FILE_DOWNLOAD_TOTAL_TIMEOUT_SECONDS = env.float(
+    "MCP_FILE_DOWNLOAD_TOTAL_TIMEOUT_SECONDS",
+    default=30.0,
+)
+MCP_FILE_DOWNLOAD_MAX_ADDRESSES = env.int(
+    "MCP_FILE_DOWNLOAD_MAX_ADDRESSES",
+    default=4,
+)
 MCP_MAX_REQUEST_BODY_BYTES = env.int(
     "MCP_MAX_REQUEST_BODY_BYTES",
     default=4_194_304,
 )
+MCP_MAX_RESPONSE_BYTES = env.int("MCP_MAX_RESPONSE_BYTES", default=524_288)
 MCP_READS_PER_MINUTE = env.int("MCP_READS_PER_MINUTE", default=120)
 MCP_STARTS_PER_MINUTE = env.int("MCP_STARTS_PER_MINUTE", default=20)
 # Shared-cache transport ceilings protect the unauthenticated boundary before
@@ -1417,6 +1434,20 @@ MCP_FAILED_AUTH_PER_IP_PER_MINUTE = env.int(
 MCP_GLOBAL_REQUESTS_PER_MINUTE = env.int(
     "MCP_GLOBAL_REQUESTS_PER_MINUTE",
     default=3_000,
+)
+# The OAuth token and revocation endpoints sit outside the MCP SDK transport,
+# so they receive their own shared-cache limits at the Django boundary.
+IDP_OIDC_TOKEN_REQUESTS_PER_IP_PER_MINUTE = env.int(
+    "IDP_OIDC_TOKEN_REQUESTS_PER_IP_PER_MINUTE",
+    default=60,
+)
+IDP_OIDC_REVOKE_REQUESTS_PER_IP_PER_MINUTE = env.int(
+    "IDP_OIDC_REVOKE_REQUESTS_PER_IP_PER_MINUTE",
+    default=30,
+)
+IDP_OIDC_ENDPOINT_GLOBAL_REQUESTS_PER_MINUTE = env.int(
+    "IDP_OIDC_ENDPOINT_GLOBAL_REQUESTS_PER_MINUTE",
+    default=1_000,
 )
 MCP_ALLOWED_ORIGINS = env.list("MCP_ALLOWED_ORIGINS", default=[])
 

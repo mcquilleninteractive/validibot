@@ -5,8 +5,8 @@ from __future__ import annotations
 import time
 
 from django.conf import settings
-from django.core.cache import cache
 
+from validibot.core.rate_limit_counters import increment_rate_limit_counter
 from validibot.mcp_server.constants import MCPErrorCode
 from validibot.mcp_server.exceptions import MCPApplicationError
 
@@ -27,13 +27,7 @@ def enforce_principal_rate_limit(*, user_id: int, operation: str) -> None:
         return
     window = int(time.time() // 60)
     key = f"mcp-rate:{user_id}:{bucket}:{window}"
-    if cache.add(key, 1, timeout=70):
-        return
-    try:
-        count = cache.incr(key)
-    except ValueError:
-        cache.set(key, 1, timeout=70)
-        count = 1
+    count = increment_rate_limit_counter(key=key, timeout=70)
     if count > configured:
         raise MCPApplicationError(
             MCPErrorCode.RATE_LIMITED,

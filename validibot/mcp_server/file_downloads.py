@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import socket
 from dataclasses import dataclass
@@ -14,10 +15,14 @@ from urllib.parse import urlunsplit
 
 import httpx
 from django.conf import settings
+from dns import asyncresolver
+from dns import exception as dns_exception
 
 from validibot.mcp_server.constants import MCP_DEFAULT_FILE_MAX_BYTES
+from validibot.mcp_server.constants import MCP_FILE_DOWNLOAD_MAX_ADDRESSES
 from validibot.mcp_server.constants import MCP_FILE_DOWNLOAD_MAX_REDIRECTS
 from validibot.mcp_server.constants import MCP_FILE_DOWNLOAD_TIMEOUT_SECONDS
+from validibot.mcp_server.constants import MCP_FILE_DOWNLOAD_TOTAL_TIMEOUT_SECONDS
 from validibot.mcp_server.constants import MCPErrorCode
 from validibot.mcp_server.exceptions import MCPApplicationError
 
@@ -39,35 +44,70 @@ class DownloadedFile:
 def download_openai_file(
     file: OpenAIFileInput,
     *,
-    transport: httpx.BaseTransport | None = None,
+    transport: httpx.AsyncBaseTransport | None = None,
 ) -> DownloadedFile:
-    """Download one temporary OpenAI file without forwarding user credentials."""
+    """Download one temporary OpenAI file within one end-to-end deadline."""
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(_download_openai_file(file=file, transport=transport))
+    raise RuntimeError(
+        "download_openai_file must run in a worker thread, not an event-loop thread",
+    )
+
+
+async def _download_openai_file(
+    *,
+    file: OpenAIFileInput,
+    transport: httpx.AsyncBaseTransport | None,
+) -> DownloadedFile:
+    """Perform DNS, redirects, connection, and body reads under one timeout."""
 
     file_name = _validated_file_name(file.file_name)
     url = file.download_url
     limit = int(getattr(settings, "MCP_FILE_MAX_BYTES", MCP_DEFAULT_FILE_MAX_BYTES))
+    total_timeout = float(
+        getattr(
+            settings,
+            "MCP_FILE_DOWNLOAD_TOTAL_TIMEOUT_SECONDS",
+            MCP_FILE_DOWNLOAD_TOTAL_TIMEOUT_SECONDS,
+        ),
+    )
+    if total_timeout <= 0:
+        raise MCPApplicationError(
+            MCPErrorCode.TEMPORARILY_UNAVAILABLE,
+            "Attachment downloads are not configured safely.",
+        )
     try:
-        with httpx.Client(
-            follow_redirects=False,
-            timeout=MCP_FILE_DOWNLOAD_TIMEOUT_SECONDS,
-            transport=transport,
-            trust_env=False,
-            # Redirects may change the TLS hostname while resolving to the same
-            # address. Do not let the IP-address origin key cause a connection
-            # authenticated for one hostname to be reused for another.
-            limits=httpx.Limits(max_keepalive_connections=0),
-        ) as client:
-            response = _request_with_safe_redirects(client=client, url=url)
-            try:
-                content = _read_bounded_content(response=response, limit=limit)
-                content_type = _validated_content_type(
-                    file.mime_type or response.headers.get("Content-Type"),
+        async with asyncio.timeout(total_timeout):
+            async with httpx.AsyncClient(
+                follow_redirects=False,
+                timeout=MCP_FILE_DOWNLOAD_TIMEOUT_SECONDS,
+                transport=transport,
+                trust_env=False,
+                # Redirects may change the TLS hostname while resolving to the
+                # same address. Do not let the IP-address origin key cause a
+                # connection authenticated for one hostname to be reused.
+                limits=httpx.Limits(max_keepalive_connections=0),
+            ) as client:
+                response = await _request_with_safe_redirects(
+                    client=client,
+                    url=url,
                 )
-            finally:
-                response.close()
+                try:
+                    content = await _read_bounded_content(
+                        response=response,
+                        limit=limit,
+                    )
+                    content_type = _validated_content_type(
+                        file.mime_type or response.headers.get("Content-Type"),
+                    )
+                finally:
+                    await response.aclose()
     except MCPApplicationError:
         raise
-    except (httpx.HTTPError, OSError) as exc:
+    except (TimeoutError, dns_exception.DNSException, httpx.HTTPError, OSError) as exc:
         raise MCPApplicationError(
             MCPErrorCode.TEMPORARILY_UNAVAILABLE,
             "The attached file could not be downloaded. Retry with a new attachment.",
@@ -79,7 +119,11 @@ def download_openai_file(
     )
 
 
-def _request_with_safe_redirects(*, client: httpx.Client, url: str) -> httpx.Response:
+async def _request_with_safe_redirects(
+    *,
+    client: httpx.AsyncClient,
+    url: str,
+) -> httpx.Response:
     """Fetch a URL while reapplying the SSRF policy at every redirect hop."""
 
     current_url = url
@@ -91,8 +135,8 @@ def _request_with_safe_redirects(*, client: httpx.Client, url: str) -> httpx.Res
         HTTPStatus.PERMANENT_REDIRECT,
     }
     for redirect_count in range(MCP_FILE_DOWNLOAD_MAX_REDIRECTS + 1):
-        parsed, addresses = _validated_public_https_destination(current_url)
-        response = _send_to_validated_address(
+        parsed, addresses = await _validated_public_https_destination(current_url)
+        response = await _send_to_validated_address(
             client=client,
             parsed=parsed,
             addresses=addresses,
@@ -100,7 +144,7 @@ def _request_with_safe_redirects(*, client: httpx.Client, url: str) -> httpx.Res
         if response.status_code == HTTPStatus.OK:
             return response
         if response.status_code not in redirect_statuses:
-            response.close()
+            await response.aclose()
             code = (
                 MCPErrorCode.TEMPORARILY_UNAVAILABLE
                 if response.status_code >= HTTPStatus.INTERNAL_SERVER_ERROR
@@ -111,7 +155,7 @@ def _request_with_safe_redirects(*, client: httpx.Client, url: str) -> httpx.Res
                 "The attached file download was rejected.",
             )
         location = response.headers.get("Location")
-        response.close()
+        await response.aclose()
         if not location or redirect_count == MCP_FILE_DOWNLOAD_MAX_REDIRECTS:
             raise MCPApplicationError(
                 MCPErrorCode.INVALID_INPUT,
@@ -121,7 +165,7 @@ def _request_with_safe_redirects(*, client: httpx.Client, url: str) -> httpx.Res
     raise AssertionError("The bounded redirect loop must return or raise")
 
 
-def _validated_public_https_destination(
+async def _validated_public_https_destination(
     url: str,
 ) -> tuple[
     SplitResult,
@@ -149,19 +193,49 @@ def _validated_public_https_destination(
             MCPErrorCode.INVALID_INPUT,
             "The attached file URL must be a public HTTPS URL.",
         )
-    addresses = _resolved_addresses(parsed.hostname)
+    hostname = _canonical_hostname(parsed.hostname)
+    allowed_hosts = {
+        _canonical_hostname(str(host))
+        for host in getattr(settings, "MCP_FILE_ALLOWED_HOSTS", [])
+        if str(host).strip()
+    }
+    if not allowed_hosts:
+        raise MCPApplicationError(
+            MCPErrorCode.TEMPORARILY_UNAVAILABLE,
+            "Attachment downloads are not configured for an approved host.",
+        )
+    if hostname not in allowed_hosts:
+        raise MCPApplicationError(
+            MCPErrorCode.INVALID_INPUT,
+            "The attached file URL host is not approved.",
+        )
+    addresses = await _resolved_addresses(hostname)
     if not addresses or any(not address.is_global for address in addresses):
         raise MCPApplicationError(
             MCPErrorCode.INVALID_INPUT,
             "The attached file URL must resolve to a public address.",
         )
-    ordered = tuple(sorted(addresses, key=lambda item: (item.version, int(item))))
+    max_addresses = int(
+        getattr(
+            settings,
+            "MCP_FILE_DOWNLOAD_MAX_ADDRESSES",
+            MCP_FILE_DOWNLOAD_MAX_ADDRESSES,
+        ),
+    )
+    if max_addresses <= 0:
+        raise MCPApplicationError(
+            MCPErrorCode.TEMPORARILY_UNAVAILABLE,
+            "Attachment downloads are not configured safely.",
+        )
+    ordered = tuple(
+        sorted(addresses, key=lambda item: (item.version, int(item)))[:max_addresses],
+    )
     return parsed, ordered
 
 
-def _send_to_validated_address(
+async def _send_to_validated_address(
     *,
-    client: httpx.Client,
+    client: httpx.AsyncClient,
     parsed: SplitResult,
     addresses: tuple[ipaddress.IPv4Address | ipaddress.IPv6Address, ...],
 ) -> httpx.Response:
@@ -199,7 +273,7 @@ def _send_to_validated_address(
             extensions={"sni_hostname": tls_hostname},
         )
         try:
-            return client.send(request, stream=True)
+            return await client.send(request, stream=True)
         except (httpx.ConnectError, httpx.ConnectTimeout, OSError) as exc:
             last_error = exc
     if last_error is not None:
@@ -207,26 +281,31 @@ def _send_to_validated_address(
     raise AssertionError("A validated destination always has an address")
 
 
-def _resolved_addresses(
+async def _resolved_addresses(
     hostname: str,
 ) -> set[ipaddress.IPv4Address | ipaddress.IPv6Address]:
-    """Resolve all candidate addresses used by the public-address policy."""
+    """Resolve candidates asynchronously without occupying a worker thread."""
 
     try:
         return {ipaddress.ip_address(hostname)}
     except ValueError:
         pass
     try:
-        results = socket.getaddrinfo(hostname, 443, type=socket.SOCK_STREAM)
-        return {ipaddress.ip_address(str(result[4][0])) for result in results}
-    except (OSError, ValueError) as exc:
+        answers = await asyncresolver.resolve_name(
+            hostname,
+            family=socket.AF_UNSPEC,
+            lifetime=MCP_FILE_DOWNLOAD_TIMEOUT_SECONDS,
+            search=False,
+        )
+        return {ipaddress.ip_address(address) for address in answers.addresses()}
+    except (dns_exception.DNSException, OSError, ValueError) as exc:
         raise MCPApplicationError(
             MCPErrorCode.TEMPORARILY_UNAVAILABLE,
             "The attached file host could not be resolved.",
         ) from exc
 
 
-def _read_bounded_content(*, response: httpx.Response, limit: int) -> bytes:
+async def _read_bounded_content(*, response: httpx.Response, limit: int) -> bytes:
     """Reject oversized content before or during the streamed response body."""
 
     content_length = response.headers.get("Content-Length")
@@ -239,7 +318,7 @@ def _read_bounded_content(*, response: httpx.Response, limit: int) -> bytes:
             raise _file_too_large(limit)
     chunks: list[bytes] = []
     total = 0
-    for chunk in response.iter_bytes():
+    async for chunk in response.aiter_bytes():
         total += len(chunk)
         if total > limit:
             raise _file_too_large(limit)
@@ -251,6 +330,27 @@ def _read_bounded_content(*, response: httpx.Response, limit: int) -> bytes:
             "The attached file is empty.",
         )
     return content
+
+
+def _canonical_hostname(value: str) -> str:
+    """Normalize an exact allowlisted host without accepting wildcard syntax."""
+
+    hostname = value.strip().rstrip(".").lower()
+    if not hostname or "*" in hostname or "/" in hostname or ":" in hostname:
+        try:
+            return ipaddress.ip_address(hostname.strip("[]")).compressed
+        except ValueError as exc:
+            raise MCPApplicationError(
+                MCPErrorCode.TEMPORARILY_UNAVAILABLE,
+                "The attachment host allowlist is invalid.",
+            ) from exc
+    try:
+        return hostname.encode("idna").decode("ascii")
+    except UnicodeError as exc:
+        raise MCPApplicationError(
+            MCPErrorCode.INVALID_INPUT,
+            "The attached file URL host is invalid.",
+        ) from exc
 
 
 def _validated_file_name(value: str | None) -> str:

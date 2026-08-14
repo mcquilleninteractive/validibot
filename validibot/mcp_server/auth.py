@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import time
+from functools import lru_cache
 from typing import Any
 
 import jwt
 from allauth.idp.oidc.models import Token as OIDCToken
 from asgiref.sync import sync_to_async
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey
+from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey
 from cryptography.hazmat.primitives.serialization import load_pem_private_key
 from django.conf import settings
 from mcp.server.auth.provider import AccessToken
@@ -69,13 +71,7 @@ class ValidibotTokenVerifier:
         if not private_key or not issuer:
             return None
         try:
-            signing_key = load_pem_private_key(
-                private_key.encode(),
-                password=None,
-            )
-            if not isinstance(signing_key, RSAPrivateKey):
-                return None
-            verification_key = signing_key.public_key()
+            verification_key = _verification_key(private_key)
             claims = jwt.decode(
                 token,
                 key=verification_key,
@@ -130,3 +126,13 @@ def get_mcp_resource_url() -> str:
     if configured:
         return configured
     return f"{str(settings.SITE_URL).rstrip('/')}/mcp"
+
+
+@lru_cache(maxsize=4)
+def _verification_key(private_key: str) -> RSAPublicKey:
+    """Parse each configured signing key once per process and key rotation."""
+
+    signing_key = load_pem_private_key(private_key.encode(), password=None)
+    if not isinstance(signing_key, RSAPrivateKey):
+        raise TypeError("The configured OIDC signing key is not RSA")
+    return signing_key.public_key()

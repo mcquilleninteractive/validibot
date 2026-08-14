@@ -173,6 +173,13 @@ SIGNING_ALGORITHM=ES256
 # ensure_oidc_clients skips only the ChatGPT registration.
 #IDP_OIDC_PRIVATE_KEY_B64=
 #IDP_OIDC_CHATGPT_REDIRECT_URIS=https://chatgpt.com/connector/oauth/{callback_id}
+# Attachment downloads are denied until at least one exact host is approved.
+#MCP_FILE_ALLOWED_HOSTS=files.oaiusercontent.com
+#IDP_OIDC_ACCESS_TOKEN_EXPIRES_IN=900
+#IDP_OIDC_REFRESH_TOKEN_EXPIRES_IN=2592000
+#MCP_FILE_DOWNLOAD_TOTAL_TIMEOUT_SECONDS=30
+#MCP_FILE_DOWNLOAD_MAX_ADDRESSES=4
+#MCP_MAX_RESPONSE_BYTES=524288
 
 # X402 AGENT PAYMENTS (cloud-only — local-cloud stack)
 # ==============================================================================

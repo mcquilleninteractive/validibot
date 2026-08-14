@@ -954,8 +954,10 @@ _deploy-web stage:
     if [ "{{stage}}" = "prod" ]; then NEG_NAME="${APP_NAME}-neg"; else NEG_NAME="${APP_NAME}-neg-{{stage}}"; fi
     if gcloud compute network-endpoint-groups describe "$NEG_NAME" --region={{gcp_region}} --project={{gcp_project}} &>/dev/null 2>&1; then
         INGRESS="internal-and-cloud-load-balancing"
+        DEFAULT_URL_FLAG="--no-default-url"
     else
         INGRESS="all"
+        DEFAULT_URL_FLAG="--default-url"
     fi
     if [ "${GCP_DEPLOY_MAINTENANCE:-0}" = "1" ]; then
         INGRESS="internal"
@@ -1043,6 +1045,7 @@ _deploy-web stage:
         --execution-environment gen2 \
         --allow-unauthenticated \
         --ingress "$INGRESS" \
+        $DEFAULT_URL_FLAG \
         --project {{gcp_project}} \
         $VPC_FLAGS
 
@@ -7076,6 +7079,10 @@ lb-setup stage domains: _require-gcp-config
             --project {{gcp_project}}
         echo "   Attached NEG to backend"
     fi
+    # Cloud Armor is part of the public boundary, not a later optional add-on.
+    # The idempotent recipe attaches bounded MCP/OAuth rules and preview WAF
+    # rules to this exact backend before the URL map can expose it.
+    just gcp armor-setup {{stage}}
     echo ""
 
     # 4. Create URL Map
@@ -7175,12 +7182,112 @@ lb-setup stage domains: _require-gcp-config
     echo "after DNS propagation. Until then, you may see SSL errors."
 
     echo ""
-    echo "Optional hardening (recommended after you verify the LB works):"
-    echo "  Restrict direct access to the *.run.app URL:"
+    echo "Required final hardening after you verify the LB works:"
+    echo "  Restrict direct access and disable the *.run.app URL:"
     echo "    gcloud run services update \"$SERVICE\" \\"
     echo "      --ingress internal-and-cloud-load-balancing \\"
+    echo "      --no-default-url \\"
     echo "      --region {{gcp_region}} \\"
     echo "      --project {{gcp_project}}"
+
+# Create and attach the required Cloud Armor policy for the web backend.
+# Rate limits are enforced at Google's edge, before Cloud Run capacity is
+# consumed. Preconfigured SQLi/XSS rules begin in preview so operators can
+# inspect real traffic before separately choosing to enforce them.
+# Usage: just gcp armor-setup prod
+[arg('stage', pattern='dev|staging|prod')]
+armor-setup stage: _require-gcp-config
+    #!/usr/bin/env bash
+    set -euo pipefail
+    APP_NAME="{{app_name}}"
+    if [ "{{stage}}" = "prod" ]; then SUFFIX=""; else SUFFIX="-{{stage}}"; fi
+    BACKEND_NAME="${APP_NAME}-backend${SUFFIX}"
+    POLICY_NAME="${APP_NAME}-web-policy${SUFFIX}"
+
+    if ! gcloud compute backend-services describe "$BACKEND_NAME" \
+        --global --project {{gcp_project}} &>/dev/null; then
+        echo "Error: backend service $BACKEND_NAME does not exist." >&2
+        echo "Run: just gcp lb-setup {{stage}} <domain>" >&2
+        exit 1
+    fi
+
+    if ! gcloud compute security-policies describe "$POLICY_NAME" \
+        --project {{gcp_project}} &>/dev/null; then
+        gcloud compute security-policies create "$POLICY_NAME" \
+            --type=CLOUD_ARMOR \
+            --description="Validibot {{stage}} web edge policy" \
+            --project {{gcp_project}}
+    fi
+
+    upsert_throttle_rule() {
+        local priority="$1" expression="$2" count="$3" description="$4"
+        local action
+        local -a preview_args
+        if gcloud compute security-policies rules describe "$priority" \
+            --security-policy="$POLICY_NAME" --project {{gcp_project}} &>/dev/null; then
+            action="update"
+            preview_args=(--no-preview)
+        else
+            action="create"
+            preview_args=()
+        fi
+        gcloud compute security-policies rules "$action" "$priority" \
+            --security-policy="$POLICY_NAME" \
+            --expression="$expression" \
+            --action=throttle \
+            --rate-limit-threshold-count="$count" \
+            --rate-limit-threshold-interval-sec=60 \
+            --conform-action=allow \
+            --exceed-action=deny-429 \
+            --enforce-on-key=IP \
+            "${preview_args[@]}" \
+            --description="$description" \
+            --project {{gcp_project}} \
+            --quiet
+    }
+
+    upsert_preview_waf_rule() {
+        local priority="$1" expression="$2" description="$3"
+        local action
+        if gcloud compute security-policies rules describe "$priority" \
+            --security-policy="$POLICY_NAME" --project {{gcp_project}} &>/dev/null; then
+            action="update"
+        else
+            action="create"
+        fi
+        gcloud compute security-policies rules "$action" "$priority" \
+            --security-policy="$POLICY_NAME" \
+            --expression="$expression" \
+            --action=deny-403 \
+            --preview \
+            --description="$description" \
+            --project {{gcp_project}} \
+            --quiet
+    }
+
+    upsert_throttle_rule 100 \
+        "request.path.startsWith('/mcp')" 300 \
+        "MCP requests per source IP"
+    upsert_throttle_rule 110 \
+        "request.path == '/identity/o/api/token' || request.path == '/identity/o/api/revoke'" 90 \
+        "OAuth token lifecycle requests per source IP"
+    upsert_throttle_rule 120 \
+        "true" 1200 \
+        "All web requests per source IP"
+    upsert_preview_waf_rule 10 \
+        "evaluatePreconfiguredWaf('sqli-v33-stable')" \
+        "SQL injection WAF preview"
+    upsert_preview_waf_rule 20 \
+        "evaluatePreconfiguredWaf('xss-v33-stable')" \
+        "Cross-site scripting WAF preview"
+
+    gcloud compute backend-services update "$BACKEND_NAME" \
+        --global \
+        --security-policy="$POLICY_NAME" \
+        --project {{gcp_project}} \
+        --quiet
+    echo "Cloud Armor policy $POLICY_NAME is attached to $BACKEND_NAME."
+    echo "SQLi/XSS WAF rules are in preview; review logs before enforcing them."
 
 # =============================================================================
 # Verification & Validation
@@ -7491,10 +7598,11 @@ verify-deployment-quick stage: _require-gcp-config
 # Checks:
 #   1. User-managed SA keys (should be zero)
 #   2. SA role sprawl (lists roles per SA for review)
-#   3. Worker ingress posture (should be internal)
-#   4. Public bucket access (should only be on public/ prefix)
-#   5. Validator Services remain private with only the dedicated invoker
-#   6. Optional MCP can read only its exact stage secret
+#   3. Worker and web ingress posture
+#   4. Load-balancer backend has the expected Cloud Armor policy
+#   5. Public bucket access (should only be on public/ prefix)
+#   6. Validator Services remain private with only the dedicated invoker
+#   7. Retired standalone MCP identity has no broad secret access
 #
 # Usage: just gcp security-audit prod
 [arg('stage', pattern='dev|staging|prod')]
@@ -7522,6 +7630,10 @@ security-audit stage: _require-gcp-config
         PROVIDER_INVOKER="${APP_NAME}-val-invoker-prod@{{gcp_project}}.iam.gserviceaccount.com"
         MCP_SA="${APP_NAME}-mcp-prod@{{gcp_project}}.iam.gserviceaccount.com"
         MCP_SECRET="mcp-env"
+        WEB_SERVICE="${APP_NAME}-web"
+        NEG_NAME="${APP_NAME}-neg"
+        BACKEND_NAME="${APP_NAME}-backend"
+        ARMOR_POLICY="${APP_NAME}-web-policy"
         WORKER_SERVICE="${APP_NAME}-worker"
         STORAGE_BUCKET="${APP_NAME}-storage"
     else
@@ -7530,6 +7642,10 @@ security-audit stage: _require-gcp-config
         PROVIDER_INVOKER="${APP_NAME}-val-invoker-{{stage}}@{{gcp_project}}.iam.gserviceaccount.com"
         MCP_SA="${APP_NAME}-mcp-{{stage}}@{{gcp_project}}.iam.gserviceaccount.com"
         MCP_SECRET="mcp-env-{{stage}}"
+        WEB_SERVICE="${APP_NAME}-web-{{stage}}"
+        NEG_NAME="${APP_NAME}-neg-{{stage}}"
+        BACKEND_NAME="${APP_NAME}-backend-{{stage}}"
+        ARMOR_POLICY="${APP_NAME}-web-policy-{{stage}}"
         WORKER_SERVICE="${APP_NAME}-worker-{{stage}}"
         STORAGE_BUCKET="${APP_NAME}-storage-{{stage}}"
     fi
@@ -7602,8 +7718,55 @@ security-audit stage: _require-gcp-config
     fi
     echo ""
 
-    # 4. Check bucket public access
-    echo "4. Checking bucket public access..."
+    # 4. Check web ingress, default URL, and edge security policy.
+    echo "4. Checking public web edge..."
+    WEB_JSON=$(gcloud run services describe "$WEB_SERVICE" \
+        --region={{gcp_region}} --project={{gcp_project}} --format=json 2>/dev/null || echo "")
+    if [ -z "$WEB_JSON" ]; then
+        echo "   WARN: Web service is not deployed"
+        ((WARN+=1))
+    else
+        WEB_INGRESS=$(jq -r '.metadata.annotations["run.googleapis.com/ingress"] // "unknown"' <<< "$WEB_JSON")
+        DEFAULT_URL_DISABLED=$(jq -r '.metadata.annotations["run.googleapis.com/default-url-disabled"] // "false"' <<< "$WEB_JSON")
+        if [ "$WEB_INGRESS" = "internal" ]; then
+            echo "   PASS: Web ingress is fully internal (maintenance/parked mode)"
+            ((PASS+=1))
+        elif [ "$WEB_INGRESS" = "internal-and-cloud-load-balancing" ]; then
+            echo "   PASS: Web ingress accepts only internal/load-balancer traffic"
+            ((PASS+=1))
+        else
+            echo "   WARN: Web ingress is '$WEB_INGRESS'; public releases require the load balancer"
+            ((WARN+=1))
+        fi
+        if gcloud compute network-endpoint-groups describe "$NEG_NAME" \
+            --region={{gcp_region}} --project={{gcp_project}} &>/dev/null; then
+            if [ "$DEFAULT_URL_DISABLED" = "true" ]; then
+                echo "   PASS: Default run.app URL is disabled"
+                ((PASS+=1))
+            else
+                echo "   WARN: Default run.app URL remains enabled despite an attached NEG"
+                ((WARN+=1))
+            fi
+            ATTACHED_POLICY=$(gcloud compute backend-services describe "$BACKEND_NAME" \
+                --global --project={{gcp_project}} --format='value(securityPolicy)' 2>/dev/null || echo "")
+            if [[ "$ATTACHED_POLICY" = */"$ARMOR_POLICY" ]]; then
+                echo "   PASS: Cloud Armor policy $ARMOR_POLICY is attached"
+                ((PASS+=1))
+            else
+                echo "   WARN: Backend $BACKEND_NAME lacks expected policy $ARMOR_POLICY"
+                ((WARN+=1))
+            fi
+        elif [ "{{stage}}" = "prod" ]; then
+            echo "   WARN: Production serverless NEG is missing"
+            ((WARN+=1))
+        else
+            echo "   SKIP: No load balancer NEG for this non-production stage"
+        fi
+    fi
+    echo ""
+
+    # 5. Check bucket public access
+    echo "5. Checking bucket public access..."
     # Find bindings where allUsers or allAuthenticatedUsers have access without conditions
     UNCONDITIONAL_PUBLIC=$(gcloud storage buckets get-iam-policy "gs://$STORAGE_BUCKET" \
         --project={{gcp_project}} \
@@ -7626,8 +7789,8 @@ security-audit stage: _require-gcp-config
     fi
     echo ""
 
-    # 5. Validator Service invocation policy
-    echo "5. Checking validator Service IAM..."
+    # 6. Validator Service invocation policy
+    echo "6. Checking validator Service IAM..."
     SERVICES=$(gcloud run services list \
         --region={{gcp_region}} \
         --project={{gcp_project}} \
@@ -7663,8 +7826,8 @@ security-audit stage: _require-gcp-config
     fi
     echo ""
 
-    # 6. Audit a retired standalone-MCP identity while it remains for rollback.
-    echo "6. Checking retired MCP resource scope..."
+    # 7. Audit a retired standalone-MCP identity while it remains for rollback.
+    echo "7. Checking retired MCP resource scope..."
     if [ "$MCP_PRESENT" -eq 0 ]; then
         echo "   SKIP: retired MCP service account is absent"
     elif ! gcloud secrets describe "$MCP_SECRET" \

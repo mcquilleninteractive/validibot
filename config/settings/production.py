@@ -67,6 +67,9 @@ if DEPLOYMENT_TARGET == "aws":
 # GENERAL
 # ------------------------------------------------------------------------------
 DEBUG = False
+# When the Pro MCP feature is activated, its ASGI application validates the
+# signing key, audience, host allowlist, and safety budgets before serving.
+MCP_STRICT_CONFIGURATION = True
 # https://docs.djangoproject.com/en/dev/ref/settings/#secret-key
 SECRET_KEY = env("DJANGO_SECRET_KEY")
 API_KEY_DIGEST_KEY = env("DJANGO_API_KEY_DIGEST_KEY", default="")

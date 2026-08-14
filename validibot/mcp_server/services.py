@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import unicodedata
 from http import HTTPStatus
 from typing import TYPE_CHECKING
 
@@ -23,7 +24,14 @@ from validibot.core.idempotency import claim_idempotency_key
 from validibot.core.idempotency import complete_idempotency_key
 from validibot.mcp_server.constants import MCP_DEFAULT_FILE_MAX_BYTES
 from validibot.mcp_server.constants import MCP_DEFAULT_PAGE_SIZE
+from validibot.mcp_server.constants import MCP_MAX_FINDING_MESSAGE_LENGTH
+from validibot.mcp_server.constants import MCP_MAX_FINDING_PATH_LENGTH
 from validibot.mcp_server.constants import MCP_MAX_PAGE_SIZE
+from validibot.mcp_server.constants import MCP_MAX_RESULT_CODE_LENGTH
+from validibot.mcp_server.constants import MCP_MAX_RESULT_NAME_LENGTH
+from validibot.mcp_server.constants import MCP_MAX_STEP_TEXT_LENGTH
+from validibot.mcp_server.constants import MCP_MAX_WORKFLOW_DESCRIPTION_LENGTH
+from validibot.mcp_server.constants import MCP_MAX_WORKFLOW_STEPS
 from validibot.mcp_server.constants import MCPErrorCode
 from validibot.mcp_server.exceptions import MCPApplicationError
 from validibot.mcp_server.references import build_run_reference
@@ -55,6 +63,7 @@ from validibot.workflows.views_launch_helpers import handle_raw_body_mode
 if TYPE_CHECKING:
     from django.db.models import QuerySet
 
+    from validibot.users.models import Organization
     from validibot.users.models import User
 
 _CURSOR_SALT = "validibot.mcp.cursor.v1"
@@ -97,8 +106,13 @@ def get_workflow(*, user: User, workflow_ref: str) -> WorkflowDetailResult:
 
     _ensure_mcp_feature()
     workflow = _resolve_workflow(user=user, workflow_ref=workflow_ref)
+    step_rows = list(
+        workflow.steps.select_related("validator", "action").order_by("order")[
+            : MCP_MAX_WORKFLOW_STEPS + 1
+        ],
+    )
     steps = []
-    for step in workflow.steps.select_related("validator", "action").order_by("order"):
+    for step in step_rows[:MCP_MAX_WORKFLOW_STEPS]:
         operation = ""
         if step.validator_id:
             validator = step.validator
@@ -109,16 +123,75 @@ def get_workflow(*, user: User, workflow_ref: str) -> WorkflowDetailResult:
         steps.append(
             WorkflowStepSummary(
                 order=step.order,
-                name=step.name or operation,
-                description=step.description,
-                operation=operation,
+                name=_bounded_untrusted_text(
+                    step.name or operation,
+                    MCP_MAX_RESULT_NAME_LENGTH,
+                ),
+                description=_bounded_untrusted_text(
+                    step.description,
+                    MCP_MAX_STEP_TEXT_LENGTH,
+                ),
+                operation=_bounded_untrusted_text(
+                    operation,
+                    MCP_MAX_RESULT_NAME_LENGTH,
+                ),
             ),
         )
     summary = _workflow_summary(workflow)
     return WorkflowDetailResult(
         **summary.model_dump(),
         steps=steps,
+        steps_truncated=len(step_rows) > MCP_MAX_WORKFLOW_STEPS,
     )
+
+
+def authorize_validation_start(*, user: User, workflow_ref: str) -> None:
+    """Prove launch permission and readiness before any attachment is fetched."""
+
+    _ensure_mcp_feature()
+    workflow = _resolve_workflow(user=user, workflow_ref=workflow_ref)
+    try:
+        ensure_launch_preconditions(workflow=workflow, user=user)
+    except (LaunchValidationError, OrgPolicyDeniedError, PermissionError) as exc:
+        raise MCPApplicationError(
+            MCPErrorCode.LAUNCH_DENIED,
+            "This workflow cannot be launched for the current user.",
+        ) from exc
+
+
+def resolve_audit_organization(
+    *,
+    user: User,
+    workflow_ref: str = "",
+    run_ref: str = "",
+) -> Organization | None:
+    """Resolve audit scope only through rows the principal may already view."""
+
+    if run_ref:
+        try:
+            run_id = parse_run_reference(run_ref)
+        except ValueError:
+            return None
+        validation_run = (
+            ValidationRun.objects.for_user(user)
+            .select_related("org")
+            .filter(pk=run_id)
+            .first()
+        )
+        return validation_run.org if validation_run is not None else None
+    if workflow_ref:
+        try:
+            org_slug, workflow_slug = parse_workflow_reference(workflow_ref)
+        except ValueError:
+            return None
+        workflow = (
+            Workflow.objects.for_user(user)
+            .select_related("org")
+            .filter(org__slug=org_slug, slug=workflow_slug)
+            .first()
+        )
+        return workflow.org if workflow is not None else None
+    return None
 
 
 def start_validation(
@@ -269,10 +342,22 @@ def list_validation_findings(
     findings = [
         ValidationFindingResult(
             severity=finding.severity,
-            code=finding.code,
-            message=finding.message,
-            path=finding.path,
-            step_name=finding.validation_step_run.workflow_step.name,
+            code=_bounded_untrusted_text(
+                finding.code,
+                MCP_MAX_RESULT_CODE_LENGTH,
+            ),
+            message=_bounded_untrusted_text(
+                finding.message,
+                MCP_MAX_FINDING_MESSAGE_LENGTH,
+            ),
+            path=_bounded_untrusted_text(
+                finding.path,
+                MCP_MAX_FINDING_PATH_LENGTH,
+            ),
+            step_name=_bounded_untrusted_text(
+                finding.validation_step_run.workflow_step.name,
+                MCP_MAX_RESULT_NAME_LENGTH,
+            ),
         )
         for finding in rows[:size]
     ]
@@ -340,7 +425,11 @@ def _resolve_run(*, user: User, run_ref: str) -> ValidationRun:
     validation_run = (
         ValidationRun.objects.for_user(user)
         .select_related("workflow", "workflow__org")
-        .filter(pk=run_id)
+        .filter(
+            pk=run_id,
+            workflow__mcp_enabled=True,
+            workflow__org__mcp_allowed=True,
+        )
         .first()
     )
     if validation_run is None:
@@ -353,11 +442,31 @@ def _workflow_summary(workflow: Workflow) -> WorkflowSummary:
 
     return WorkflowSummary(
         workflow_ref=build_workflow_reference(workflow),
-        name=workflow.name,
-        description=workflow.description,
+        name=_bounded_untrusted_text(workflow.name, MCP_MAX_RESULT_NAME_LENGTH),
+        description=_bounded_untrusted_text(
+            workflow.description,
+            MCP_MAX_WORKFLOW_DESCRIPTION_LENGTH,
+        ),
         version=workflow.version,
-        allowed_file_types=list(workflow.allowed_file_types or []),
+        allowed_file_types=[
+            _bounded_untrusted_text(value, MCP_MAX_RESULT_CODE_LENGTH)
+            for value in list(workflow.allowed_file_types or [])[:MCP_MAX_PAGE_SIZE]
+        ],
     )
+
+
+def _bounded_untrusted_text(value: object, max_length: int) -> str:
+    """Normalize control characters and cap user/validator-authored result text."""
+
+    cleaned = "".join(
+        character
+        for character in str(value or "")
+        if unicodedata.category(character) not in {"Cc", "Cf"}
+        or character in {"\n", "\t"}
+    )
+    if len(cleaned) <= max_length:
+        return cleaned
+    return f"{cleaned[: max_length - 1]}…"
 
 
 def _run_result(validation_run: ValidationRun) -> ValidationRunResult:

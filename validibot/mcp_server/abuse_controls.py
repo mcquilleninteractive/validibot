@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import ipaddress
 import json
 import logging
 import time
@@ -23,6 +22,9 @@ from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.core.cache import cache
 
+from validibot.core.client_ip import resolve_client_ip as resolve_trusted_client_ip
+from validibot.core.rate_limit_counters import increment_rate_limit_counter
+
 if TYPE_CHECKING:
     from asgiref.typing import ASGI3Application
     from asgiref.typing import ASGIReceiveCallable
@@ -35,8 +37,6 @@ logger = logging.getLogger(__name__)
 
 _WINDOW_SECONDS = 60
 _CACHE_TIMEOUT_SECONDS = 70
-_MAX_FORWARDED_HEADER_LENGTH = 2_048
-_MAX_FORWARDED_ADDRESSES = 32
 _RATE_LIMIT_BODY = json.dumps(
     {
         "jsonrpc": "2.0",
@@ -152,17 +152,15 @@ def resolve_client_ip(scope: Scope) -> str:
     ASGI peer address rather than trusting attacker-controlled input.
     """
 
-    peer = _validated_ip(_peer_host(scope)) or "unknown"
     proxy_depth = max(
         0,
         int(getattr(settings, "REST_FRAMEWORK", {}).get("NUM_PROXIES", 0)),
     )
-    if proxy_depth == 0:
-        return peer
-    forwarded = _forwarded_addresses(scope)
-    if len(forwarded) < proxy_depth:
-        return peer
-    return _validated_ip(forwarded[-proxy_depth]) or peer
+    return resolve_trusted_client_ip(
+        peer_host=_peer_host(scope),
+        forwarded_for=_forwarded_header(scope),
+        proxy_depth=proxy_depth,
+    )
 
 
 def _peer_host(scope: Scope) -> str:
@@ -174,33 +172,17 @@ def _peer_host(scope: Scope) -> str:
     return ""
 
 
-def _forwarded_addresses(scope: Scope) -> list[str]:
-    """Parse the final X-Forwarded-For header into bounded address strings."""
+def _forwarded_header(scope: Scope) -> str:
+    """Return the final forwarded-for header for strict shared parsing."""
 
     raw_value = ""
     headers = scope.get("headers")
     if not isinstance(headers, list):
-        return []
+        return ""
     for name, value in headers:
         if name.lower() == b"x-forwarded-for":
             raw_value = value.decode("latin-1")
-    if not raw_value or len(raw_value) > _MAX_FORWARDED_HEADER_LENGTH:
-        return []
-    addresses = [item.strip() for item in raw_value.split(",")]
-    return (
-        addresses
-        if all(addresses) and len(addresses) <= _MAX_FORWARDED_ADDRESSES
-        else []
-    )
-
-
-def _validated_ip(value: str) -> str | None:
-    """Normalize one IPv4 or IPv6 value, rejecting names and malformed input."""
-
-    try:
-        return ipaddress.ip_address(value).compressed
-    except ValueError:
-        return None
+    return raw_value
 
 
 async def _failed_auth_is_blocked(identity: str) -> bool:
@@ -239,15 +221,12 @@ async def _limit_exceeded(transport_limit: TransportLimit) -> bool:
 
 
 def _increment_counter(key: str) -> int:
-    """Increment one cache counter portably across Redis and local test caches."""
+    """Increment one counter atomically on every supported production cache."""
 
-    if cache.add(key, 1, timeout=_CACHE_TIMEOUT_SECONDS):
-        return 1
-    try:
-        return int(cache.incr(key))
-    except ValueError:
-        cache.set(key, 1, timeout=_CACHE_TIMEOUT_SECONDS)
-        return 1
+    return increment_rate_limit_counter(
+        key=key,
+        timeout=_CACHE_TIMEOUT_SECONDS,
+    )
 
 
 def _cache_key(dimension: str, identity: str) -> str:

@@ -373,6 +373,51 @@ class EnvTemplateShapeTests(SimpleTestCase):
         self.assertIn("VALIDATOR_BACKEND_IMAGE_POLICY=tag", local_env)
         self.assertIn("VALIDATOR_BACKEND_IMAGE_POLICY=tag", self_hosted_env)
         self.assertIn("VALIDATOR_BACKEND_IMAGE_POLICY=digest", gcp_env)
+        self.assertIn("DJANGO_API_KEY_DIGEST_KEY=", local_env)
+
+    def test_env_templates_use_the_embedded_mcp_configuration_contract(self):
+        """Copied templates must not recreate a separate MCP service contract.
+
+        MCP OAuth is Django runtime configuration. Keeping old service toggles,
+        credentials, or an MCP secret name in a template would send operators
+        toward infrastructure that the application does not consume.
+        """
+
+        template_text = "\n".join(
+            path.read_text(encoding="utf-8")
+            for path in (REPO_ROOT / ".envs.example").rglob("*")
+            if path.is_file()
+        )
+
+        for forbidden in (
+            "ENABLE_MCP_SERVER",
+            "IDP_OIDC_MCP_SERVER_CLIENT_SECRET",
+            "MCP_OIDC_ALLOWED_SERVICE_ACCOUNTS",
+            "VALIDIBOT_MCP_SERVICE_KEY",
+            "VALIDIBOT_MCP_BASE_URL",
+            "VALIDIBOT_PRIVATE_INDEX_URL",
+            "mcp-env",
+            "just mcp",
+        ):
+            self.assertNotIn(forbidden, template_text)
+
+        gcp_just = (
+            REPO_ROOT / ".envs.example" / ".production" / ".google-cloud" / ".just"
+        ).read_text(encoding="utf-8")
+        self.assertIn("Three files configure a GCP deployment", gcp_just)
+        self.assertIn("including embedded MCP OAuth, x402", gcp_just)
+
+    def test_self_hosted_template_includes_pdf_sandbox_controls(self):
+        """Hostile-PDF operators need the fail-closed controls in their template."""
+
+        django_env = (ENVS_EXAMPLE_ROOT / ".django").read_text(encoding="utf-8")
+
+        self.assertIn("VALIDATOR_PDF_CONTAINER_RUNTIME=", django_env)
+        self.assertIn(
+            "VALIDATOR_PDF_REQUIRE_STRONG_SANDBOX=false",
+            django_env,
+        )
+        self.assertIn("VALIDIBOT_COMMERCIAL_NETRC", django_env)
 
     def test_django_template_has_eight_adr_groups(self):
         """The .django template must include all eight comment groups.

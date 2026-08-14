@@ -184,10 +184,22 @@ The official-SDK MCP endpoint runs inside the Django ASGI process at
 | --- | --- | --- |
 | `IDP_OIDC_MCP_RESOURCE_AUDIENCE` | Exact OAuth resource and access-token audience. | `<SITE_URL>/mcp` |
 | `IDP_OIDC_CHATGPT_REDIRECT_URIS` | Complete app-specific URI generated in ChatGPT app management: `https://chatgpt.com/connector/oauth/{callback_id}`. Omit it to skip ChatGPT client provisioning. | empty |
+| `IDP_OIDC_ACCESS_TOKEN_EXPIRES_IN` | Short access-token lifetime in seconds. | `900` |
+| `IDP_OIDC_REFRESH_TOKEN_EXPIRES_IN` | Absolute rotating refresh-token lifetime in seconds. | `2592000` |
+| `MCP_FILE_ALLOWED_HOSTS` | Comma-separated exact attachment-delivery hosts. Empty denies downloads; wildcards are rejected. | empty |
 | `MCP_FILE_MAX_BYTES` | Maximum downloaded ChatGPT validation file. | `2500000` |
+| `MCP_FILE_DOWNLOAD_TOTAL_TIMEOUT_SECONDS` | One deadline covering DNS, redirects, connections, and streamed reads. | `30` |
+| `MCP_FILE_DOWNLOAD_MAX_ADDRESSES` | Maximum validated DNS addresses attempted per redirect hop. | `4` |
 | `MCP_MAX_REQUEST_BODY_BYTES` | Maximum Streamable HTTP body. | `4194304` |
+| `MCP_MAX_RESPONSE_BYTES` | Fail-closed maximum serialized tool result. | `524288` |
 | `MCP_READS_PER_MINUTE` | Shared per-principal budget across read tools. | `120` |
 | `MCP_STARTS_PER_MINUTE` | Per-principal validation-start budget. | `20` |
+| `MCP_REQUESTS_PER_IP_PER_MINUTE` | Shared-cache MCP transport budget per trusted client address. | `240` |
+| `MCP_FAILED_AUTH_PER_IP_PER_MINUTE` | Failed bearer attempts allowed per trusted client address. | `20` |
+| `MCP_GLOBAL_REQUESTS_PER_MINUTE` | Deployment-wide MCP transport ceiling. | `3000` |
+| `IDP_OIDC_TOKEN_REQUESTS_PER_IP_PER_MINUTE` | OAuth token requests per trusted client address. | `60` |
+| `IDP_OIDC_REVOKE_REQUESTS_PER_IP_PER_MINUTE` | OAuth revocation requests per trusted client address. | `30` |
+| `IDP_OIDC_ENDPOINT_GLOBAL_REQUESTS_PER_MINUTE` | Deployment-wide token/revocation ceiling. | `1000` |
 | `MCP_ALLOWED_ORIGINS` | Additional exact trusted browser origins. | empty |
 
 ### Django Variables (`.django`)

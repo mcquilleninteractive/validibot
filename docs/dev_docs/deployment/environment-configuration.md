@@ -169,8 +169,13 @@ The quick version of "where does each variable go":
 | `IDP_OIDC_PRIVATE_KEY_B64` | `.django` | Signs JWT access tokens |
 | `IDP_OIDC_MCP_RESOURCE_AUDIENCE` | `.django` | Exact embedded MCP resource and JWT audience; defaults to `<SITE_URL>/mcp`. |
 | `IDP_OIDC_CHATGPT_REDIRECT_URIS` | `.django` | Complete app-specific URI generated in ChatGPT app management: `https://chatgpt.com/connector/oauth/{callback_id}`. If empty, `ensure_oidc_clients` skips ChatGPT without affecting Claude. |
-| `MCP_FILE_MAX_BYTES`, `MCP_MAX_REQUEST_BODY_BYTES` | `.django` | Bound downloaded validation content and total Streamable HTTP request size. |
+| `IDP_OIDC_ACCESS_TOKEN_EXPIRES_IN`, `IDP_OIDC_REFRESH_TOKEN_EXPIRES_IN` | `.django` | Set the short-lived bearer-token window and the longer revocable refresh-token window. Defaults: 15 minutes and 30 days. |
+| `MCP_FILE_ALLOWED_HOSTS` | `.django` | Exact attachment hostname allowlist. Empty denies downloads and production rejects wildcards. |
+| `MCP_FILE_MAX_BYTES`, `MCP_FILE_DOWNLOAD_TOTAL_TIMEOUT_SECONDS`, `MCP_FILE_DOWNLOAD_MAX_ADDRESSES` | `.django` | Bound attachment bytes, total transfer time, and validated connection attempts. |
+| `MCP_MAX_REQUEST_BODY_BYTES`, `MCP_MAX_RESPONSE_BYTES` | `.django` | Bound total Streamable HTTP request bodies and serialized MCP tool results. |
 | `MCP_READS_PER_MINUTE`, `MCP_STARTS_PER_MINUTE` | `.django` | Separate per-principal read and validation-start budgets. |
+| `MCP_REQUESTS_PER_IP_PER_MINUTE`, `MCP_FAILED_AUTH_PER_IP_PER_MINUTE`, `MCP_GLOBAL_REQUESTS_PER_MINUTE` | `.django` | Protect the MCP transport with trusted-client and deployment-wide shared-cache ceilings. |
+| `IDP_OIDC_TOKEN_REQUESTS_PER_IP_PER_MINUTE`, `IDP_OIDC_REVOKE_REQUESTS_PER_IP_PER_MINUTE`, `IDP_OIDC_ENDPOINT_GLOBAL_REQUESTS_PER_MINUTE` | `.django` | Protect OAuth token and revocation POSTs with per-IP and global shared-cache limits. |
 | `MCP_ALLOWED_ORIGINS` | `.django` | Optional additional exact browser origins. |
 | `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_HOST` | `.postgres` | Database credentials, kept isolated |
 | `VALIDIBOT_COMMERCIAL_PACKAGE`, `VALIDIBOT_COMMERCIAL_NETRC` | `.build` | Exact package reference plus a BuildKit-mounted credential file (Docker Compose only) |

@@ -122,6 +122,8 @@ class TestMCPCatalogOrgGuestAccess:
     """
 
     def test_org_guest_access_makes_mcp_enabled_org_workflows_visible(self):
+        """Org-wide guest grants must feed the canonical MCP catalog query."""
+
         org = OrganizationFactory(mcp_allowed=True)
         guest = UserFactory(orgs=[])
         Membership.objects.filter(user=guest).delete()
@@ -165,6 +167,8 @@ class TestMCPCatalogOrgMcpGate:
     """
 
     def test_member_workflow_with_mcp_enabled_is_visible(self):
+        """An authorized member must see a workflow after both MCP gates opt in."""
+
         org = OrganizationFactory(mcp_allowed=True)
         member = UserFactory(orgs=[org])
         # ``for_user`` requires the membership to hold a role that

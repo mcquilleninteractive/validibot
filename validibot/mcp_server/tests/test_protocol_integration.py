@@ -30,7 +30,9 @@ from validibot.mcp_server.auth import ValidibotTokenVerifier
 from validibot.mcp_server.constants import MCPErrorCode
 from validibot.mcp_server.exceptions import MCPApplicationError
 from validibot.mcp_server.file_downloads import DownloadedFile
+from validibot.mcp_server.references import build_workflow_reference
 from validibot.mcp_server.schemas import OpenAIFileInput
+from validibot.mcp_server.server import _ensure_bounded_result
 from validibot.mcp_server.server import _start_validation_from_openai_file
 from validibot.mcp_server.server import build_mcp_asgi_application
 from validibot.users.constants import RoleCode
@@ -289,6 +291,11 @@ def test_official_client_exercises_all_five_tools(
         not any(value in str(entry.metadata) for value in sensitive_values)
         for entry in audit_entries
     )
+    assert audit_entries.filter(org=org).count() == EXPECTED_AUDIT_ENTRY_COUNT - 1
+    assert all(
+        entry.metadata["oauth_client_id"] == "validibot-chatgpt-test"
+        for entry in audit_entries
+    )
 
 
 def test_streamable_http_requires_bearer_authentication(settings) -> None:
@@ -351,6 +358,58 @@ def test_start_authorizes_workflow_before_downloading(
         )
 
     assert denied.value.code == MCPErrorCode.NOT_FOUND
+
+
+def test_start_checks_execute_permission_before_downloading(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Mere workflow visibility must not authorize a model-influenced fetch."""
+
+    org = OrganizationFactory(mcp_allowed=True)
+    author = UserFactory(orgs=[org])
+    viewer = UserFactory(orgs=[org])
+    grant_role(viewer, org, RoleCode.WORKFLOW_VIEWER)
+    workflow = WorkflowFactory(
+        org=org,
+        user=author,
+        mcp_enabled=True,
+    )
+    WorkflowStepFactory(workflow=workflow)
+
+    def must_not_download(file: OpenAIFileInput) -> DownloadedFile:
+        """Fail loudly if visibility is ever mistaken for launch permission."""
+
+        del file
+        pytest.fail("The downloader ran without workflow launch permission.")
+
+    monkeypatch.setattr(
+        "validibot.mcp_server.server.download_openai_file",
+        must_not_download,
+    )
+
+    with pytest.raises(MCPApplicationError) as denied:
+        _start_validation_from_openai_file(
+            user=viewer,
+            workflow_ref=build_workflow_reference(workflow),
+            file=OpenAIFileInput(
+                download_url="https://files.openai.example/temporary",
+                file_id="file-view-only-test",
+            ),
+            idempotency_key="view-only-download-test",
+        )
+
+    assert denied.value.code == MCPErrorCode.LAUNCH_DENIED
+
+
+def test_total_result_guard_rejects_an_oversized_future_projection(settings) -> None:
+    """A later schema expansion must not bypass the aggregate response ceiling."""
+
+    settings.MCP_MAX_RESPONSE_BYTES = 8
+
+    with pytest.raises(MCPApplicationError) as rejected:
+        _ensure_bounded_result({"untrusted": "long result"})
+
+    assert rejected.value.code == MCPErrorCode.INTERNAL_ERROR
 
 
 def test_protocol_hides_denied_reference_details(

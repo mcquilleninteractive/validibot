@@ -107,10 +107,22 @@ Empty for community deployments.
 | `JWKS_PUBLIC_PATH` | Path to the public JWKS. Pro only. Served at `/.well-known/jwks.json` for credentials issued by this instance. |
 | `IDP_OIDC_MCP_RESOURCE_AUDIENCE` | Exact MCP OAuth resource and JWT audience. Defaults to `<SITE_URL>/mcp`. |
 | `IDP_OIDC_CHATGPT_REDIRECT_URIS` | Complete app-specific callback generated in ChatGPT app management: `https://chatgpt.com/connector/oauth/{callback_id}`. The client is public, uses PKCE, and has no secret. Omit it to skip ChatGPT provisioning. |
+| `IDP_OIDC_ACCESS_TOKEN_EXPIRES_IN` | MCP access-token lifetime. Default: `900` (15 minutes). Keep access tokens short-lived because bearer tokens remain usable until expiry. |
+| `IDP_OIDC_REFRESH_TOKEN_EXPIRES_IN` | MCP refresh-token lifetime. Default: `2592000` (30 days). Refresh tokens are stored as revocable database records. |
+| `MCP_FILE_ALLOWED_HOSTS` | Exact comma-separated attachment hostnames. Empty denies every attachment download; production rejects wildcards. Add only hosts observed for the client you support. |
 | `MCP_FILE_MAX_BYTES` | Maximum downloaded ChatGPT validation file size. Default: `2500000`. |
+| `MCP_FILE_DOWNLOAD_TOTAL_TIMEOUT_SECONDS` | One deadline covering DNS, redirects, connections, and streamed reads. Default: `30`. |
+| `MCP_FILE_DOWNLOAD_MAX_ADDRESSES` | Maximum validated public DNS addresses attempted at each redirect hop. Default: `4`. |
 | `MCP_MAX_REQUEST_BODY_BYTES` | Maximum Streamable HTTP request body. Default: `4194304`. |
+| `MCP_MAX_RESPONSE_BYTES` | Maximum serialized result from any MCP tool. Default: `524288`. |
 | `MCP_READS_PER_MINUTE` | Shared per-principal quota across all read tools. Default: `120`. |
 | `MCP_STARTS_PER_MINUTE` | Per-principal validation-start quota. Default: `20`. |
+| `MCP_REQUESTS_PER_IP_PER_MINUTE` | Shared-cache MCP transport budget per trusted client address. Default: `240`. |
+| `MCP_FAILED_AUTH_PER_IP_PER_MINUTE` | Failed MCP bearer attempts per trusted client address. Default: `20`. |
+| `MCP_GLOBAL_REQUESTS_PER_MINUTE` | Deployment-wide MCP transport ceiling. Default: `3000`. |
+| `IDP_OIDC_TOKEN_REQUESTS_PER_IP_PER_MINUTE` | Per-client-IP limit for token endpoint POSTs. Default: `60`. |
+| `IDP_OIDC_REVOKE_REQUESTS_PER_IP_PER_MINUTE` | Per-client-IP limit for revocation endpoint POSTs. Default: `30`. |
+| `IDP_OIDC_ENDPOINT_GLOBAL_REQUESTS_PER_MINUTE` | Shared global limit across token and revocation POSTs. Default: `1000`. Use a shared cache on multi-instance deployments. |
 | `MCP_ALLOWED_ORIGINS` | Optional comma-separated additional exact browser origins. Leave empty unless required. |
 
 ### 8. Optional telemetry

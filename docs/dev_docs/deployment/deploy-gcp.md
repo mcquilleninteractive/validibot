@@ -254,10 +254,22 @@ IDP_OIDC_CHATGPT_REDIRECT_URIS=https://chatgpt.com/connector/oauth/{callback_id}
 DRF_NUM_PROXIES=2
 
 # Optional bounded defaults shown explicitly:
+IDP_OIDC_ACCESS_TOKEN_EXPIRES_IN=900
+IDP_OIDC_REFRESH_TOKEN_EXPIRES_IN=2592000
+MCP_FILE_ALLOWED_HOSTS=files.oaiusercontent.com
 MCP_FILE_MAX_BYTES=2500000
+MCP_FILE_DOWNLOAD_TOTAL_TIMEOUT_SECONDS=30
+MCP_FILE_DOWNLOAD_MAX_ADDRESSES=4
 MCP_MAX_REQUEST_BODY_BYTES=4194304
+MCP_MAX_RESPONSE_BYTES=524288
 MCP_READS_PER_MINUTE=120
 MCP_STARTS_PER_MINUTE=20
+MCP_REQUESTS_PER_IP_PER_MINUTE=240
+MCP_FAILED_AUTH_PER_IP_PER_MINUTE=20
+MCP_GLOBAL_REQUESTS_PER_MINUTE=3000
+IDP_OIDC_TOKEN_REQUESTS_PER_IP_PER_MINUTE=60
+IDP_OIDC_REVOKE_REQUESTS_PER_IP_PER_MINUTE=30
+IDP_OIDC_ENDPOINT_GLOBAL_REQUESTS_PER_MINUTE=1000
 ```
 
 The ChatGPT OAuth client is public and uses PKCE, so it has no client secret.
@@ -269,6 +281,19 @@ causes `ensure_oidc_clients` to stop with a configuration error.
 The existing IDP signing-key configuration remains required for JWT access
 tokens. Do not add the retired confidential proxy client, `mcp-env`, or MCP
 service-account settings.
+
+`MCP_FILE_ALLOWED_HOSTS` is an exact allowlist, not a suffix or wildcard
+pattern. Confirm the actual attachment and redirect hostnames during staging
+acceptance and list only those hosts. The downloader rejects private or
+special-purpose addresses, revalidates DNS and the allowlist after every
+redirect, pins each connection to a validated address, bounds address attempts
+and bytes, and applies one deadline to the complete transfer. Production startup
+fails if this allowlist is empty or contains a wildcard.
+
+The transport and OAuth endpoint limits rely on Django's shared cache. GCP
+production uses the database cache by default, so all web instances consume
+the same budgets. Keep `DRF_NUM_PROXIES=2` behind the global load balancer so
+the application derives client addresses from the expected proxy depth.
 
 Upload and deploy through the normal commands:
 

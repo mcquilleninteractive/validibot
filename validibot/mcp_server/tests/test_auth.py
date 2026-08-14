@@ -22,6 +22,7 @@ from cryptography.hazmat.primitives.serialization import PrivateFormat
 from django.utils import timezone
 
 from validibot.mcp_server.auth import ValidibotTokenVerifier
+from validibot.mcp_server.auth import _verification_key
 from validibot.users.tests.factories import UserFactory
 
 if TYPE_CHECKING:
@@ -239,6 +240,20 @@ async def test_verifier_rejects_expired_database_record(
     await record.asave(update_fields=["expires_at"])
 
     assert await ValidibotTokenVerifier().verify_token(raw_token) is None
+
+
+async def test_verification_key_is_parsed_once_per_configured_value(
+    signing_key: str,
+) -> None:
+    """Repeated bearer checks must not repeat expensive private-key parsing."""
+
+    _verification_key.cache_clear()
+
+    first = _verification_key(signing_key)
+    second = _verification_key(signing_key)
+
+    assert first is second
+    assert _verification_key.cache_info().hits == 1
 
 
 async def _sync_issue(

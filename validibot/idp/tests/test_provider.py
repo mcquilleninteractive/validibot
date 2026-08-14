@@ -22,6 +22,7 @@ from cryptography.hazmat.primitives.serialization import PrivateFormat
 from django.test import TestCase
 from django.test import override_settings
 from django.urls import reverse
+from django.utils import timezone
 
 from validibot.users.tests.factories import UserFactory
 
@@ -185,6 +186,18 @@ class ValidibotOIDCProviderTests(TestCase):
         self.assertEqual(decoded["scope"], TEST_SCOPE)
         self.assertEqual(decoded["token_use"], "access")
         self.assertIn("refresh_token", payload)
+        self.assertEqual(decoded["exp"] - decoded["iat"], 900)
+        refresh_record = OIDCToken.objects.lookup(
+            OIDCToken.Type.REFRESH_TOKEN,
+            payload["refresh_token"],
+        )
+        self.assertIsNotNone(refresh_record)
+        assert refresh_record is not None
+        self.assertIsNotNone(refresh_record.expires_at)
+        assert refresh_record.expires_at is not None
+        remaining_seconds = (refresh_record.expires_at - timezone.now()).total_seconds()
+        self.assertGreater(remaining_seconds, 2_591_900)
+        self.assertLessEqual(remaining_seconds, 2_592_000)
 
     def test_refresh_preserves_resource_scope_and_rotates_token(self) -> None:
         """Refresh must retain MCP binding and replace the reusable credential."""
