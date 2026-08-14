@@ -19,6 +19,14 @@ IPYTHONDIR=/app/.ipython
 # each have their own) and NEVER commit a real key to version control.
 DJANGO_SECRET_KEY=!!!SET DJANGO_SECRET_KEY!!!
 
+# API key digest key
+# ------------------------------------------------------------------------------
+# Keeps stored API/user bearer-token digests independent from Django's signing
+# key. Generate a separate value; never copy DJANGO_SECRET_KEY here.
+#
+#     python -c "import secrets; print(secrets.token_urlsafe(32))"
+DJANGO_API_KEY_DIGEST_KEY=!!!SET DJANGO_API_KEY_DIGEST_KEY!!!
+
 # Redis
 # ------------------------------------------------------------------------------
 # Redis URL for Celery task queue. In Docker Compose, "redis" is the container hostname.
@@ -170,9 +178,9 @@ SIGNING_ALGORITHM=ES256
 # ==============================================================================
 # x402 is a cloud-only feature — read ONLY under
 # DJANGO_SETTINGS_MODULE=validibot_cloud.settings.local (the community and
-# local_pro settings do not verify x402). The MCP server no longer touches
-# payments, so ALL x402 config lives here with its single consuming service —
-# not in .build, which is no longer mounted into any app container. Used only
+# local_pro settings do not verify x402). All x402 config lives here with the
+# Cloud Django process that quotes and verifies payments; embedded MCP is a
+# separate authenticated channel. These values do not belong in .build. Used only
 # when VALIDIBOT_X402_ENABLED=true, which in practice means `just local-cloud
 # up` (plain `local-pro` has no cloud agent endpoint to receive paid launches).
 #

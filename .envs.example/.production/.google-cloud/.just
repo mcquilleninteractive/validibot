@@ -5,32 +5,28 @@
 #
 # WHERE THIS FILE SITS AMONG THE .envs/.../google-cloud/ FILES
 # ------------------------------------------------------------
-# Four files configure a GCP deployment. They differ by WHO reads them and
+# Three files configure a GCP deployment. They differ by WHO reads them and
 # WHEN, and that is what decides where any given variable belongs:
 #
 #   .just    You `source` it into your shell before running `just`. It is the
-#            ONLY file in scope for EVERY deploy recipe — both `just gcp`
-#            (web + worker) and `just mcp`. Host-side, deploy-time, not a
-#            secret, never uploaded.
-#   .django  Uploaded to Secret Manager and mounted into the Django *web*
-#            service at runtime. Reaches that ONE service.
-#   .mcp     Uploaded as the `mcp-env` secret and mounted into the *MCP*
-#            service at runtime. Reaches that ONE service (holds MCP-only
-#            runtime config and credentials).
-#   .build   Sourced by deploy recipes to supply deploy-time app knobs
-#            (commercial build args, ENABLE_MCP_SERVER, MCP API URL, shared
-#            x402 values). Values that must reach both web and MCP are
-#            authored there once and stamped onto both Cloud Run services.
+#            host-side context for every `just gcp` recipe. It contains
+#            non-secret deployment coordinates and is never uploaded.
+#   .django  Uploaded as the stage's `django-env` Secret Manager secret and
+#            consumed by Django web, worker, scheduler, migration, and other
+#            application jobs. All runtime configuration belongs there,
+#            including embedded MCP OAuth, x402, billing, and audit settings.
+#   .build   Optional host-side deploy knobs read only by recipes that
+#            explicitly document them. It is not a runtime env file and must
+#            not contain application secrets.
 #
 # Rule of thumb:
 #   - host-side GCP command context -> here (.just)
-#   - Django runtime only          -> .django
-#   - MCP runtime only             -> .mcp
-#   - deploy/build knob or value shared across services -> .build
+#   - Django/application runtime   -> .django
+#   - explicitly documented local deploy knob -> .build
 #
 # (Mechanically: `just` recipes run on the host, not in containers; these are
-# deploy-time, not runtime, settings; and .django/.mcp are uploaded to Secret
-# Manager for runtime use — so host-sourced values like these stay out of them.)
+# deploy-time, not runtime, settings. Only .django is uploaded to Secret
+# Manager for runtime use, so host-sourced values like these stay out of it.)
 
 # GCP Project Configuration
 # ==============================================================================

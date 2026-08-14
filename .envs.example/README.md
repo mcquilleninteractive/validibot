@@ -67,11 +67,12 @@ mkdir -p .envs/.production/.google-cloud
 # Copy the template files
 cp .envs.example/.production/.google-cloud/.django .envs/.production/.google-cloud/.django
 cp .envs.example/.production/.google-cloud/.just .envs/.production/.google-cloud/.just
+# Optional; the current template is intentionally empty.
 cp .envs.example/.production/.google-cloud/.build .envs/.production/.google-cloud/.build
 
 # Edit .django with your GCP project values (uploaded to Secret Manager)
 # Edit .just with your GCP project ID and region (used locally by just commands)
-# Edit .build with local build/deploy knobs
+# Leave .build empty unless a current recipe explicitly documents a knob
 
 # Source the just config before running deployment commands
 source .envs/.production/.google-cloud/.just
@@ -86,7 +87,7 @@ just gcp deploy-all prod          # build + push + migrate + web/worker/schedule
 
 - `.django` - Django runtime settings, uploaded to Secret Manager
 - `.just` - Host-side GCP command context (project ID, region), sourced locally
-- `.build` - Build/deploy knobs read by just recipes
+- `.build` - Optional host-side deploy knobs; currently empty for GCP
 
 ### AWS (Future)
 
@@ -118,7 +119,7 @@ cp .envs.example/.production/.aws/.django .envs/.production/.aws/.django
     ├── .google-cloud/      # Validibot's hosted GCP deployment
 	    │   ├── .django         # Django runtime settings (uploaded to Secret Manager)
 	    │   ├── .just           # Just command runner settings (sourced locally)
-	    │   └── .build          # Deploy-time knobs
+	    │   └── .build          # Optional host-side deploy knobs (currently empty)
     └── .aws/               # Future AWS deployment (stub)
         └── .django
 
@@ -164,7 +165,7 @@ The `.build` file plays two roles — both loaded from the same file:
 	   `just local-cloud up` recipes (and the production `just gcp` recipes)
 	   source this file before Docker Compose or GCP deployment commands.
 
-`.build` is no longer mounted into any running container via `env_file`. Runtime
+`.build` is not mounted into any running container via `env_file`. Runtime
 payment config (x402) and embedded MCP config live in `.django`. All `.build`
 values are optional — if the file is absent the recipes
 no-op cleanly where the stack does not need it.

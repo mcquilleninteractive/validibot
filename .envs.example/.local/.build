@@ -9,10 +9,9 @@
 #      tags, etc.). Variables here flow to ``docker build``.
 #
 # This file holds only build-time and recipe-level knobs such as commercial
-# package coordinates. It is no longer mounted into any
-# running container via ``env_file``. Runtime payment config (x402) moved to
-# ``.django`` when the MCP server stopped handling payments — see the x402
-# section there.
+# package coordinates. It is not mounted into any
+# running container via ``env_file``. Runtime configuration, including x402,
+# belongs in ``.django`` — see the x402 section there.
 #
 # Keep this file private; it is gitignored.
 # =============================================================================
@@ -37,10 +36,9 @@ VALIDIBOT_COMMERCIAL_PACKAGE=
 VALIDIBOT_COMMERCIAL_NETRC=
 
 
-# -- 2. x402 payments — MOVED to .django -----------------------------------
+# -- 2. x402 payments are Django runtime configuration ---------------------
 #
 # x402 is a cloud-only runtime feature: only validibot-cloud's Django reads it
-# (the MCP server no longer handles payments). So ALL x402 config now lives in
-# ``.local/.django`` alongside its single consuming service. Nothing x402 is
-# authored here in ``.build`` anymore, and ``.build`` is no longer mounted into
-# the MCP (or web) container. See the x402 section of ``.local/.django``.
+# and embedded MCP is a separate authenticated channel. All x402 config lives
+# in ``.local/.django`` alongside its consuming process. Nothing x402 is
+# authored here in ``.build``. See the x402 section of ``.local/.django``.

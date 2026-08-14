@@ -202,6 +202,13 @@ VALIDATOR_CPU_LIMIT=2.0
 # digest or signed-digest for stronger supply-chain enforcement.
 VALIDATOR_BACKEND_IMAGE_POLICY=tag
 
+# PDFs always run without network access and with restricted container
+# capabilities. For public hostile-PDF ingress, install a stronger Docker
+# runtime such as gVisor or Kata, name it here, and enable the fail-closed
+# requirement. Leave both defaults unchanged if that runtime is unavailable.
+VALIDATOR_PDF_CONTAINER_RUNTIME=
+VALIDATOR_PDF_REQUIRE_STRONG_SANDBOX=false
+
 
 # -- 7. PRO / SIGNING -------------------------------------------------------
 #
@@ -212,9 +219,9 @@ VALIDATOR_BACKEND_IMAGE_POLICY=tag
 #
 # To enable Pro:
 #   1. Buy a license at https://validibot.com — receive a private
-#      package-index URL and an exact wheel reference.
-#   2. Set VALIDIBOT_COMMERCIAL_PACKAGE and VALIDIBOT_PRIVATE_INDEX_URL
-#      in the sibling .build file.
+#      package credential and an exact wheel reference.
+#   2. Set VALIDIBOT_COMMERCIAL_PACKAGE and VALIDIBOT_COMMERCIAL_NETRC
+#      in the sibling .build file. The netrc must have mode 0600.
 #   3. Switch DJANGO_SETTINGS_MODULE above to production_pro.
 #   4. Run ``just self-hosted deploy`` to rebuild the image and restart.
 #

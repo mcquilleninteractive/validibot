@@ -326,7 +326,7 @@ DJANGO_ADMIN_REQUIRE_MFA=True
 # an empty value means the add-on is off. This section covers:
 #
 #   * Credential signing / JWKS  (Google Cloud KMS)
-#   * MCP server                 (OAuth + service-to-service auth)
+#   * Embedded MCP endpoint      (public-client OAuth + PKCE)
 #
 # The hosted cloud layer adds a further block — see CLOUD-ONLY at the very
 # bottom of this file.
@@ -381,9 +381,10 @@ IDP_OIDC_PRIVATE_KEY_B64=<your-base64-encoded-pem>
 # ==============================================================================
 # x402 is a cloud-only feature — read ONLY under
 # DJANGO_SETTINGS_MODULE=validibot_cloud.settings.cloud (community
-# config.settings.production does not verify x402). The MCP server no longer
-# touches payments, so ALL x402 config now lives here with its single consuming
-# service, not in .build. Required only when VALIDIBOT_X402_ENABLED=true.
+# config.settings.production does not verify x402). All x402 configuration
+# belongs here with the Cloud Django process that quotes and verifies payments;
+# embedded MCP is a separate authenticated channel. Required only when
+# VALIDIBOT_X402_ENABLED=true.
 #
 # Enable + test/live switch.
 #   VALIDIBOT_X402_ENABLED=true → anonymous paid validation is live.

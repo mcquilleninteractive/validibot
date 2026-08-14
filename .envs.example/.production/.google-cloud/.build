@@ -2,30 +2,21 @@
 # Production GCP build + recipe configuration
 # =============================================================================
 #
-# Copy this file to ``.envs/.production/.google-cloud/.build`` before
-# your first ``just gcp deploy-all prod``. The ``just gcp`` module
-# sources this file at the top of recipes that need deploy-time knobs.
+# You may copy this file to ``.envs/.production/.google-cloud/.build`` before
+# your first ``just gcp deploy-all prod``. The ``just gcp`` module sources it
+# only in recipes that support optional deploy-time knobs.
 #
-# Unlike ``.django`` and ``.just``, this file is NOT uploaded to GCP Secret Manager — it
-# only affects local ``just`` behavior at deploy time. Values here
-# become ``--set-env-vars`` on the Cloud Run service, so they do
-# reach a running container, but as public env vars, not secrets.
+# This file is not uploaded to Secret Manager and is not an application runtime
+# env file. The current release defines no GCP ``.build`` variables, so the file
+# intentionally contains no assignments and may be omitted. Add a value only
+# when a current recipe explicitly documents it.
 #
 # Keep this file private; the whole .envs/ tree is gitignored.
-#
-# Every knob here is REQUIRED if the corresponding recipe is invoked —
-# there are no defaults that point at the hosted ``validibot.com``
-# deployment, so a misconfigured self-hoster cannot accidentally
-# proxy their users' traffic to someone else's API. Recipes fail
-# with a loud error listing the missing variable.
 # =============================================================================
 
 
-# -- x402 payments (moved to .django) -------------------------------------
+# -- Runtime configuration belongs in .django ------------------------------
 #
-# x402 is a cloud-only feature now: only validibot-cloud's Django reads it (the
-# MCP server no longer handles payments). So ALL x402 config — non-secret AND
-# the CDP secret — lives with its single consuming service in
-# .envs/.production/.google-cloud/.django, next to the Stripe and audit-archive
-# vars. Nothing x402 is authored here in .build or stamped via --set-env-vars
-# anymore.
+# The stage's ``.django`` file is the single authoring location for Django
+# runtime settings. This includes embedded MCP OAuth, all x402 values, Stripe,
+# audit archival, and their secrets. Do not duplicate any of them here.
