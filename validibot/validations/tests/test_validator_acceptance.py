@@ -51,6 +51,7 @@ EXPECTED_SCALE_TO_ZERO_START_MEDIAN = 30.0
 EXPECTED_ENERGYPLUS_U_FACTOR = 2.0
 EXPECTED_FMU_INPUT = 42.0
 EXPECTED_PORTFOLIO_MANAGER_PROPERTY_ID = "9876543"
+EXPECTED_MANAGED_BACKEND_COUNT = 6
 COMPATIBLE_SEMANTIC_VALIDATOR_COUNT = 2
 SHA256_HEX_LENGTH = 64
 ACCEPTANCE_BACKEND = "shacl"
@@ -711,6 +712,7 @@ def test_submission_fixtures_are_deterministic_and_domain_representative():
     shacl_text, _, _ = builder._submission_fixture(BACKENDS[2])
     schematron_text, _, _ = builder._submission_fixture(BACKENDS[3])
     portfolio_manager_text, _, _ = builder._submission_fixture(BACKENDS[4])
+    pdf_bytes, pdf_filename, pdf_file_type = builder._submission_fixture(BACKENDS[5])
 
     assert json.loads(energyplus_text)["U_FACTOR"] == EXPECTED_ENERGYPLUS_U_FACTOR
     assert json.loads(fmu_text)["real_continuous_in"] == EXPECTED_FMU_INPUT
@@ -720,6 +722,11 @@ def test_submission_fixtures_are_deterministic_and_domain_representative():
         f"<propertyId>{EXPECTED_PORTFOLIO_MANAGER_PROPERTY_ID}</propertyId>"
         in portfolio_manager_text
     )
+    assert len(BACKENDS) == EXPECTED_MANAGED_BACKEND_COUNT
+    assert isinstance(pdf_bytes, bytes)
+    assert pdf_bytes.startswith(b"%PDF-2.0")
+    assert pdf_filename == "aec-issue-package-clean.pdf"
+    assert pdf_file_type == SubmissionFileType.PDF
 
 
 @pytest.mark.django_db
@@ -782,6 +789,24 @@ def test_portfolio_manager_fixture_exercises_explicit_target_comparison():
 
 
 @pytest.mark.django_db
+def test_pdf_fixture_exercises_the_fixed_positive_package_policy():
+    """Release acceptance must launch the reviewed PDF package through real upload."""
+    call_command("sync_validators", stdout=StringIO(), stderr=StringIO())
+
+    scenario = AcceptanceFixtureBuilder().build(BACKENDS[5])
+    step = scenario.workflow.steps.get()
+
+    assert step.ruleset is None
+    assert step.config == {
+        "policy": "static_text_package_v1",
+        "execution_timeout_seconds": 300,
+    }
+    assert scenario.file_type == SubmissionFileType.PDF
+    assert isinstance(scenario.inline_text, bytes)
+    assert scenario.inline_text.startswith(b"%PDF-2.0")
+
+
+@pytest.mark.django_db
 def test_fixture_builder_covers_every_compatible_semantic_validator_row():
     """Distinct compatible semantic rows must never collide on one workflow."""
     call_command("sync_validators", stdout=StringIO(), stderr=StringIO())
@@ -816,6 +841,7 @@ def test_runtime_image_includes_only_explicit_acceptance_assets():
     assert "tests/*" in dockerignore
     assert "!tests/assets/fmu/Feedthrough.fmu" in dockerignore
     assert "!tests/assets/idf/window_glazing_template.idf" in dockerignore
+    assert "!tests/assets/pdf/aec-issue-package-clean.pdf" in dockerignore
     assert "!tests/assets/portfolio_manager/property-report-valid.xml" in dockerignore
     assert "!tests/assets/shacl/valid_person.ttl" in dockerignore
     assert (

@@ -1494,7 +1494,7 @@ _run-migrate-job stage image:
             --task-timeout {{gcp_migrate_task_timeout}} \
             --execution-environment gen2 \
             --command "/bin/bash" \
-            --args "-c,set -a && source /secrets/.env && set +a && python manage.py check_migration_history && python manage.py migrate --noinput && python manage.py createcachetable && python manage.py ensure_oidc_clients && python manage.py initialize_validibot --if-needed && echo Migrations and application initialization complete" \
+            --args "-c,set -a && source /secrets/.env && set +a && python manage.py check_migration_history && python manage.py migrate --noinput && python manage.py createcachetable && python manage.py ensure_oidc_clients && python manage.py initialize_validibot --if-needed && python manage.py sync_validators && python manage.py seed_weather_files --strict && echo Migrations and application-data reconciliation complete" \
             --project {{gcp_project}} \
             --quiet
     else
@@ -1509,7 +1509,7 @@ _run-migrate-job stage image:
             --task-timeout {{gcp_migrate_task_timeout}} \
             --execution-environment gen2 \
             --command "/bin/bash" \
-            --args "-c,set -a && source /secrets/.env && set +a && python manage.py check_migration_history && python manage.py migrate --noinput && python manage.py createcachetable && python manage.py ensure_oidc_clients && python manage.py initialize_validibot --if-needed && echo Migrations and application initialization complete" \
+            --args "-c,set -a && source /secrets/.env && set +a && python manage.py check_migration_history && python manage.py migrate --noinput && python manage.py createcachetable && python manage.py ensure_oidc_clients && python manage.py initialize_validibot --if-needed && python manage.py sync_validators && python manage.py seed_weather_files --strict && echo Migrations and application-data reconciliation complete" \
             --project {{gcp_project}} \
             --quiet
     fi
@@ -1518,7 +1518,7 @@ _run-migrate-job stage image:
     # --wait blocks until the job finishes (success or failure).
     # We capture the execution name for log retrieval.
     # ────────────────────────────────────────────────────────────────────
-    echo "Executing migrations and guarded initialization (waiting for completion)..."
+    echo "Executing migrations and guarded application-data reconciliation (waiting for completion)..."
     EXECUTION=$(gcloud run jobs execute "$JOB_NAME" \
         --region {{gcp_region}} \
         --project {{gcp_project}} \
@@ -4013,7 +4013,7 @@ validator-job-deploy name stage release_tag="": _require-gcp-config
     fi
     case "{{name}}" in
         energyplus) JOB_CPU=4; JOB_MEMORY=8Gi ;;
-        fmu|shacl|schematron|portfolio_manager) JOB_CPU=2; JOB_MEMORY=4Gi ;;
+        fmu|shacl|schematron|portfolio_manager|pdf) JOB_CPU=2; JOB_MEMORY=4Gi ;;
         *) echo "Error: unknown validator Job '{{name}}'" >&2; exit 1 ;;
     esac
     if [ "{{stage}}" = "prod" ]; then
@@ -4150,7 +4150,7 @@ validator-job-deploy name stage release_tag="": _require-gcp-config
 validator-jobs-deploy-all stage: _require-gcp-config
     #!/usr/bin/env bash
     set -euo pipefail
-    for backend in energyplus fmu shacl schematron portfolio_manager; do
+    for backend in energyplus fmu shacl schematron portfolio_manager pdf; do
         SOURCE_TAG=$(python3 ops/gcp/validator_release_control.py \
             inventory --backend "$backend" --field source_tag)
         just gcp validator-job-deploy "$backend" {{stage}} "$SOURCE_TAG"
@@ -4184,6 +4184,7 @@ validator-service-deploy name stage release_tag="": _require-gcp-config
         shacl) CPU=2; MEMORY=4Gi; DEFAULT_MAX_INSTANCES=8 ;;
         schematron) CPU=2; MEMORY=4Gi; DEFAULT_MAX_INSTANCES=8 ;;
         portfolio_manager) CPU=2; MEMORY=4Gi; DEFAULT_MAX_INSTANCES=8 ;;
+        pdf) CPU=2; MEMORY=4Gi; DEFAULT_MAX_INSTANCES=8 ;;
         *) echo "Error: unknown validator Service '{{name}}'" >&2; exit 1 ;;
     esac
     # Validator Services are intentionally scale-to-zero.  Do not make a
@@ -4353,7 +4354,7 @@ validator-service-deploy name stage release_tag="": _require-gcp-config
 validator-services-deploy-all stage: _require-gcp-config
     #!/usr/bin/env bash
     set -euo pipefail
-    for backend in energyplus fmu shacl schematron portfolio_manager; do
+    for backend in energyplus fmu shacl schematron portfolio_manager pdf; do
         SOURCE_TAG=$(python3 ops/gcp/validator_release_control.py \
             inventory --backend "$backend" --field source_tag)
         just gcp validator-service-deploy "$backend" {{stage}} "$SOURCE_TAG"
@@ -4373,7 +4374,7 @@ validator-deploy name stage release_tag: _require-gcp-config
         exit 1
     fi
     case "{{name}}" in
-        energyplus|fmu|shacl|schematron|portfolio_manager) ;;
+        energyplus|fmu|shacl|schematron|portfolio_manager|pdf) ;;
         *) echo "Error: unknown managed validator '{{name}}'." >&2; exit 1 ;;
     esac
     if [ "{{stage}}" = "prod" ]; then
@@ -4398,7 +4399,7 @@ validator-deploy-all stage: _require-gcp-config
     if [ "{{stage}}" = "prod" ]; then
         just gcp _maintenance-assert-offline {{stage}}
     fi
-    for backend in energyplus fmu shacl schematron portfolio_manager; do
+    for backend in energyplus fmu shacl schematron portfolio_manager pdf; do
         SOURCE_TAG=$(python3 ops/gcp/validator_release_control.py \
             inventory --backend "$backend" --field source_tag)
         just gcp validator-deploy "$backend" {{stage}} "$SOURCE_TAG"
@@ -4915,9 +4916,9 @@ validator-status stage: _require-gcp-config
       ]) | @tsv
     ' "$STATUS_JSON" | column -t -s $'\t'
 
-# Install all five independently versioned backends. Provider pairs are
+# Install all six independently versioned backends. Provider pairs are
 # accepted one at a time but returned to inactive until every backend passes;
-# the final five backend transactions run before public dispatch resumes.
+# the final six backend transactions run before public dispatch resumes.
 [arg('stage', pattern='dev|staging|prod')]
 validator-setup stage: _require-gcp-config
     #!/usr/bin/env bash
@@ -4975,9 +4976,10 @@ validator-setup stage: _require-gcp-config
     if [ "$INITIAL_MODE" = "PARKED" ]; then
         ensure_uninstalled
     fi
+    just gcp management-cmd {{stage}} "seed_weather_files --check"
     just gcp _validator-release-require-idle {{stage}}
     just gcp _validator-runtime-iam-reconcile {{stage}}
-    for backend in energyplus fmu shacl schematron portfolio_manager; do
+    for backend in energyplus fmu shacl schematron portfolio_manager pdf; do
         VERSION=$(python3 ops/gcp/validator_release_control.py \
             inventory --backend "$backend" --field release_version)
         SOURCE_TAG="${backend}-v${VERSION}"
@@ -4987,7 +4989,7 @@ validator-setup stage: _require-gcp-config
     done
     GROUP_COMMAND="activate_validator_backend_release_group --mode=normal --cause=SUPERSEDED_BY_ACCEPTED_RELEASE"
     ACTIVATION_ARGS=()
-    for backend in energyplus fmu shacl schematron portfolio_manager; do
+    for backend in energyplus fmu shacl schematron portfolio_manager pdf; do
         VERSION=$(python3 ops/gcp/validator_release_control.py \
             inventory --backend "$backend" --field release_version)
         SOURCE_TAG="${backend}-v${VERSION}"
@@ -5160,6 +5162,7 @@ validator-update stage backend="": _require-gcp-config
     echo ""
     echo "Putting {{stage}} into MAINTENANCE so validator routes and queues can be changed safely."
     GCP_YES=1 just gcp mode-maintenance {{stage}}
+    just gcp management-cmd {{stage}} "seed_weather_files --check"
     just gcp _validator-release-require-idle {{stage}}
     just gcp _validator-runtime-iam-reconcile {{stage}}
     MIGRATED_LEGACY_RECORD=0

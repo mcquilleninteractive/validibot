@@ -55,6 +55,7 @@ DOCS_ROOT = REPO_ROOT / "docs" / "operations" / "self-hosting"
 GCP_SERVICE_ACCOUNT_ID_MAX_LENGTH = 30
 EXPECTED_RELEASE_VERIFICATION_CALL_COUNT = 2
 EXPECTED_LIVE_GUARDED_DEPLOYMENTS = 3
+EXPECTED_VALIDATOR_SETUP_BACKEND_LOOP_COUNT = 2
 
 # The two host-prep helper scripts the kit ships. Only these two
 # remain as scripts because they have to run *before* ``just`` is
@@ -849,7 +850,12 @@ class GcpOperatorRecipeInvariantTests(SimpleTestCase):
         assert "verify-backup" in block
 
     def test_deploy_preparation_initializes_before_service_cutover(self):
-        """A fresh database must be complete before new services receive traffic."""
+        """Fresh and upgraded databases must reconcile before service cutover.
+
+        The first-install marker may skip broad initialization, but strict
+        Validator synchronization and bundled-resource reconciliation still
+        have to run for every image so semantic version bumps are complete.
+        """
         migration_block = self._block_between(
             "_run-migrate-job stage image:",
             "# _resolve-deployed-image",
@@ -864,6 +870,20 @@ class GcpOperatorRecipeInvariantTests(SimpleTestCase):
         assert migration_block.count(
             "python manage.py initialize_validibot --if-needed"
         ) == len(expected_job_paths)
+        assert migration_block.count("python manage.py sync_validators") == len(
+            expected_job_paths
+        )
+        assert migration_block.count(
+            "python manage.py seed_weather_files --strict"
+        ) == len(expected_job_paths)
+        for command in (
+            "python manage.py initialize_validibot --if-needed",
+            "python manage.py sync_validators",
+            "python manage.py seed_weather_files --strict",
+        ):
+            assert migration_block.index(command) < migration_block.index(
+                "gcloud run jobs execute"
+            )
         assert deploy_header.index("_maybe-migrate") < deploy_header.index(
             "_deploy-web"
         )
@@ -1331,7 +1351,7 @@ class GcpOperatorRecipeInvariantTests(SimpleTestCase):
         """
         public_status_block = self._block_between(
             "validator-status stage:",
-            "# Install all five independently versioned backends",
+            "# Install all six independently versioned backends",
         )
         detailed_status_block = self._block_between(
             "_validator-status-json stage output:",
@@ -1541,11 +1561,14 @@ class GcpOperatorRecipeInvariantTests(SimpleTestCase):
             (update, "MIGRATED_LEGACY_RECORD=0"),
         ):
             maintenance = recipe.index("mode-maintenance")
+            fixtures = recipe.index(
+                'management-cmd {{stage}} "seed_weather_files --check"'
+            )
             idle = recipe.index("_validator-release-require-idle")
-            assert maintenance < idle < recipe.index(first_mutation, idle)
+            assert maintenance < fixtures < idle < recipe.index(first_mutation, idle)
 
     def test_validator_setup_reconciles_shared_iam_once(self):
-        """Five backend releases must not rewrite identical IAM bindings."""
+        """Six backend releases must not rewrite identical IAM bindings."""
         setup = self._block_between(
             "validator-setup stage:",
             "# Reconcile one backend",
@@ -1560,6 +1583,12 @@ class GcpOperatorRecipeInvariantTests(SimpleTestCase):
         )
 
         assert setup.count("_validator-runtime-iam-reconcile") == 1
+        assert (
+            setup.count(
+                "for backend in energyplus fmu shacl schematron portfolio_manager pdf"
+            )
+            == EXPECTED_VALIDATOR_SETUP_BACKEND_LOOP_COUNT
+        )
         assert "VALIDATOR_RUNTIME_IAM_READY=1" in setup
         assert "VALIDATOR_RUNTIME_IAM_READY=1" in deploy
         assert "run jobs add-iam-policy-binding" not in job

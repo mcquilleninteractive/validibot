@@ -44,6 +44,9 @@ tests/assets/idf/*
 !tests/assets/portfolio_manager/
 tests/assets/portfolio_manager/*
 !tests/assets/portfolio_manager/property-report-valid.xml
+!tests/assets/pdf/
+tests/assets/pdf/*
+!tests/assets/pdf/aec-issue-package-clean.pdf
 !tests/assets/shacl/
 tests/assets/shacl/*
 !tests/assets/shacl/example_person_shapes.ttl

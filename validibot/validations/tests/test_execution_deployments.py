@@ -1148,7 +1148,7 @@ def test_backend_activation_selects_the_most_recently_verified_service_revision(
 @pytest.mark.django_db
 @pytest.mark.parametrize(
     "backend_slug",
-    ["energyplus", "fmu", "shacl", "schematron", "portfolio_manager"],
+    ["energyplus", "fmu", "shacl", "schematron", "portfolio_manager", "pdf"],
 )
 def test_acceptance_certifies_current_service_revision_with_retained_history(
     backend_slug,

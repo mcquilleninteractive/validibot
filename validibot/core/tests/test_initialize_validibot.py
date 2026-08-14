@@ -37,7 +37,7 @@ def test_initializer_runs_every_required_data_command():
     assert managed_call.call_args_list == [
         call("setup_validibot", "--noinput", stdout=ANY),
         call("sync_help", stdout=ANY),
-        call("seed_weather_files", stdout=ANY),
+        call("seed_weather_files", "--strict", stdout=ANY),
     ]
     mark_initialized.assert_called_once_with()
 

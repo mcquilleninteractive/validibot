@@ -43,8 +43,12 @@ if [ "${APP_ROLE:-web}" = "web" ]; then
     # directly after applying migrations, and retries partial initialization.
     python manage.py initialize_validibot --if-needed
 
-    # Strictly verify system validator configuration on every production start.
+    # Strictly verify system validator configuration on every production start,
+    # then reconcile bundled resources against the exact current Validator
+    # version. The deployment migration Job performs the same sequence before
+    # service cutover; this remains the direct-start/self-hosted safety net.
     python manage.py sync_validators
+    python manage.py seed_weather_files --strict
   else
     echo "Database schema not ready yet; skipping initialization and validator sync."
     echo "Run 'just docker-compose migrate' and 'just docker-compose setup-data' after the stack starts."

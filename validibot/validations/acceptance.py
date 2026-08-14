@@ -103,7 +103,7 @@ class BackendSpec:
 
     key: str
     validation_type: str
-    ruleset_type: str
+    ruleset_type: str | None
 
 
 BACKENDS = (
@@ -124,6 +124,7 @@ BACKENDS = (
         ValidationType.PORTFOLIO_MANAGER,
         RulesetType.PORTFOLIO_MANAGER,
     ),
+    BackendSpec("pdf", ValidationType.PDF, None),
 )
 BACKENDS_BY_KEY = {spec.key: spec for spec in BACKENDS}
 
@@ -153,7 +154,7 @@ class AcceptanceScenario:
 
     backend: BackendSpec
     workflow: Workflow
-    inline_text: str
+    inline_text: str | bytes
     filename: str
     file_type: str
     fixture_sha256: str
@@ -344,6 +345,8 @@ class AcceptanceFixtureBuilder:
             return self._create_schematron(spec, validator)
         if spec.validation_type == ValidationType.PORTFOLIO_MANAGER:
             return self._create_portfolio_manager(spec, validator)
+        if spec.validation_type == ValidationType.PDF:
+            return self._create_pdf(spec, validator)
         raise ValueError(f"Unsupported acceptance backend: {spec.key}")
 
     def _current_validator(self, spec: BackendSpec) -> Validator:
@@ -400,14 +403,14 @@ class AcceptanceFixtureBuilder:
         validator: Validator,
     ) -> AcceptanceScenario:
         """Rebuild source-controlled submission metadata for a reused workflow."""
-        text, filename, file_type = self._submission_fixture(spec)
+        content, filename, file_type = self._submission_fixture(spec)
         return AcceptanceScenario(
             backend=spec,
             workflow=workflow,
-            inline_text=text,
+            inline_text=content,
             filename=filename,
             file_type=file_type,
-            fixture_sha256=_sha256_text(text),
+            fixture_sha256=_sha256_content(content),
             validator_id=str(validator.pk),
             validator_slug=validator.slug,
             validator_version=str(validator.version),
@@ -435,11 +438,15 @@ class AcceptanceFixtureBuilder:
             is_active=True,
             allowed_file_types=allowed_file_types,
         )
-        ruleset = self._ensure_ruleset(
-            spec,
-            workflow_slug=workflow_slug,
-            rules_text=rules_text,
-            rules_metadata=rules_metadata,
+        ruleset = (
+            self._ensure_ruleset(
+                spec,
+                workflow_slug=workflow_slug,
+                rules_text=rules_text,
+                rules_metadata=rules_metadata,
+            )
+            if spec.ruleset_type is not None
+            else None
         )
         step = WorkflowStep.objects.create(
             workflow=workflow,
@@ -472,6 +479,8 @@ class AcceptanceFixtureBuilder:
             "rules_text": rules_text,
             "metadata": rules_metadata or {},
         }
+        if spec.ruleset_type is None:
+            raise ValueError(f"{spec.key} acceptance does not use a ruleset")
         ruleset, created = Ruleset.objects.get_or_create(
             org=self.org,
             name=f"{workflow_slug}-rules",
@@ -650,7 +659,25 @@ class AcceptanceFixtureBuilder:
         ).update(default_value="40")
         return self._scenario_for_existing(spec, workflow, validator)
 
-    def _submission_fixture(self, spec: BackendSpec) -> tuple[str, str, str]:
+    def _create_pdf(
+        self,
+        spec: BackendSpec,
+        validator: Validator,
+    ) -> AcceptanceScenario:
+        """Create the fixed-policy positive PDF package canary."""
+        workflow, step = self._create_workflow(
+            spec,
+            validator,
+            allowed_file_types=[SubmissionFileType.PDF],
+            step_config={
+                "policy": "static_text_package_v1",
+                "execution_timeout_seconds": 300,
+            },
+        )
+        ensure_step_input_bindings(step)
+        return self._scenario_for_existing(spec, workflow, validator)
+
+    def _submission_fixture(self, spec: BackendSpec) -> tuple[str | bytes, str, str]:
         """Return exact source-controlled input bytes for one backend."""
         if spec.validation_type == ValidationType.ENERGYPLUS:
             return (
@@ -698,6 +725,12 @@ class AcceptanceFixtureBuilder:
                 self._asset_text("portfolio_manager/property-report-valid.xml"),
                 "property-report-valid.xml",
                 SubmissionFileType.XML,
+            )
+        if spec.validation_type == ValidationType.PDF:
+            return (
+                self._asset_bytes("pdf/aec-issue-package-clean.pdf"),
+                "aec-issue-package-clean.pdf",
+                SubmissionFileType.PDF,
             )
         raise ValueError(f"Unsupported acceptance backend: {spec.key}")
 
@@ -1182,11 +1215,21 @@ class ValidatorAcceptanceRunner:
                 "fixture_sha256": scenario.fixture_sha256,
             },
         )
-        submission.set_content(
-            inline_text=scenario.inline_text,
-            filename=scenario.filename,
-            file_type=scenario.file_type,
-        )
+        if isinstance(scenario.inline_text, bytes):
+            submission.set_content(
+                uploaded_file=ContentFile(
+                    scenario.inline_text,
+                    name=scenario.filename,
+                ),
+                filename=scenario.filename,
+                file_type=scenario.file_type,
+            )
+        else:
+            submission.set_content(
+                inline_text=scenario.inline_text,
+                filename=scenario.filename,
+                file_type=scenario.file_type,
+            )
         submission.save()
         request = HttpRequest()
         request.method = "POST"
@@ -1359,9 +1402,10 @@ def persist_acceptance_report(report: dict[str, Any]) -> dict[str, str] | None:
     }
 
 
-def _sha256_text(value: str) -> str:
+def _sha256_content(value: str | bytes) -> str:
     """Return the fixture identity used in reports and submission metadata."""
-    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+    payload = value.encode("utf-8") if isinstance(value, str) else value
+    return hashlib.sha256(payload).hexdigest()
 
 
 def _scenario_key(scenario: AcceptanceScenario) -> str:

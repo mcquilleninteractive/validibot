@@ -56,7 +56,7 @@ class Command(BaseCommand):
         # management concerns, but they are still required application data on
         # a fresh installation.  Operators should never have to remember them.
         call_command("sync_help", stdout=self.stdout)
-        call_command("seed_weather_files", stdout=self.stdout)
+        call_command("seed_weather_files", "--strict", stdout=self.stdout)
 
         # Write the marker last. If any preceding command fails, a retry sees
         # the older value and safely reruns the idempotent sequence instead of

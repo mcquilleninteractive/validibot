@@ -1,10 +1,11 @@
-"""Regression tests for code-backed data used by local development.
+"""Regression tests for code-backed application data used by every runtime.
 
-Local startup synchronizes the validator catalog before seeding bundled
-EnergyPlus weather files. Validator version history is intentionally retained,
-so setup commands must bind new resources and workflows to the exact contract
-declared by the running code rather than assuming one row per validation type.
-These tests preserve that contract as validator versions accumulate.
+Deployment and local startup synchronize the validator catalog before
+reconciling bundled EnergyPlus weather files. Validator version history is
+intentionally retained, so setup commands must bind new resources and
+workflows to the exact contract declared by the running code rather than
+assuming one row per validation type. These tests preserve that contract as
+validator versions accumulate.
 """
 
 from types import SimpleNamespace
@@ -13,6 +14,7 @@ from unittest.mock import Mock
 import pytest
 from django.core.files.base import ContentFile
 from django.core.management import call_command
+from django.core.management.base import CommandError
 
 from validibot.core.management.commands.seed_weather_files import WEATHER_FILES
 from validibot.core.management.commands.setup_e2e_workflows import EP_WEATHER_FILENAME
@@ -70,6 +72,77 @@ def test_seed_weather_files_uses_current_energyplus_contract(tmp_path):
     assert resources.count() == 1
     assert resources.get().validator == current
     assert not resources.filter(validator=historical).exists()
+
+
+def test_strict_weather_reconciliation_populates_a_new_energyplus_version(tmp_path):
+    """A semantic EnergyPlus version bump must receive its own complete catalogue.
+
+    Historical resources remain attached to the contract that existing workflows
+    used. Deployment reconciliation must create the five current-version rows
+    even when one-time application initialization completed long ago.
+    """
+    historical = _energyplus_validator(version=energyplus_config.version - 1)
+    current = _energyplus_validator(version=energyplus_config.version)
+    historical_filename, historical_name = WEATHER_FILES[0]
+    ValidatorResourceFile.objects.create(
+        validator=historical,
+        org=None,
+        resource_type=ResourceFileType.ENERGYPLUS_WEATHER,
+        name=historical_name,
+        filename=historical_filename,
+        file=ContentFile(b"historical weather", name=historical_filename),
+    )
+    for filename, _display_name in WEATHER_FILES:
+        (tmp_path / filename).write_bytes(f"weather:{filename}".encode())
+
+    call_command("seed_weather_files", source_dir=str(tmp_path), strict=True)
+    call_command("seed_weather_files", source_dir=str(tmp_path), check=True)
+
+    assert ValidatorResourceFile.objects.filter(validator=current).count() == len(
+        WEATHER_FILES
+    )
+    assert ValidatorResourceFile.objects.filter(validator=historical).count() == 1
+
+
+def test_strict_weather_reconciliation_rejects_an_incomplete_runtime_image(tmp_path):
+    """A production image missing any bundled EPW must fail before service cutover."""
+    _energyplus_validator(version=energyplus_config.version)
+    filename, _display_name = WEATHER_FILES[0]
+    (tmp_path / filename).write_bytes(b"only one weather asset")
+
+    with pytest.raises(CommandError, match="catalogue is incomplete"):
+        call_command("seed_weather_files", source_dir=str(tmp_path), strict=True)
+
+    assert not ValidatorResourceFile.objects.exists()
+
+
+def test_weather_check_detects_stored_object_drift(tmp_path):
+    """Release preflight must hash durable bytes instead of trusting DB metadata.
+
+    Normal startup can use the persisted content hash for an inexpensive
+    idempotency check. Before provider routes change, ``--check`` must still
+    read storage and catch an object that drifted independently of its row.
+    """
+    current = _energyplus_validator(version=energyplus_config.version)
+    for filename, _display_name in WEATHER_FILES:
+        (tmp_path / filename).write_bytes(f"weather:{filename}".encode())
+    call_command("seed_weather_files", source_dir=str(tmp_path), strict=True)
+    resource = ValidatorResourceFile.objects.get(
+        validator=current,
+        filename=WEATHER_FILES[0][0],
+    )
+    original_hash = resource.content_hash
+    storage = resource.file.storage
+    object_name = resource.file.name
+    storage.delete(object_name)
+    saved_name = storage.save(object_name, ContentFile(b"drifted weather"))
+    assert saved_name == object_name
+
+    with pytest.raises(CommandError, match="differs from the bundled asset"):
+        call_command("seed_weather_files", source_dir=str(tmp_path), check=True)
+
+    resource.refresh_from_db()
+    assert resource.content_hash == original_hash
 
 
 def test_setup_e2e_workflow_uses_current_energyplus_contract():
