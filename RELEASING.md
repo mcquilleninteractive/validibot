@@ -63,8 +63,16 @@ Verify the GitHub artifact attestation:
 ```bash
 gh attestation verify \
   validibot-X.Y.Z.tar.gz \
-  --repo mcquilleninteractive/validibot
+  --repo mcquilleninteractive/validibot \
+  --predicate-type https://cyclonedx.org/bom \
+  --signer-workflow mcquilleninteractive/validibot/.github/workflows/release.yml \
+  --source-ref refs/tags/vX.Y.Z
 ```
+
+The workflow creates a CycloneDX SBOM attestation rather than the GitHub CLI's
+default SLSA provenance predicate, so `--predicate-type` is required. The
+workflow and tag constraints additionally prove which repository workflow and
+release ref signed the claim.
 
 The automatically generated GitHub “Source code” archives are convenience
 downloads and are not the canonical attested artifact. Use the explicitly

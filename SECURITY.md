@@ -41,9 +41,14 @@ directory. Then run:
 sha256sum --check SHA256SUMS
 gh attestation verify \
   validibot-X.Y.Z.tar.gz \
-  --repo mcquilleninteractive/validibot
+  --repo mcquilleninteractive/validibot \
+  --predicate-type https://cyclonedx.org/bom \
+  --signer-workflow mcquilleninteractive/validibot/.github/workflows/release.yml \
+  --source-ref refs/tags/vX.Y.Z
 ```
 
+The predicate is explicit because this release contains a CycloneDX SBOM
+attestation rather than the GitHub CLI's default SLSA provenance predicate.
 GitHub also generates automatic “Source code” archives. Those are convenience
 downloads, not the canonical attested archive. Full release and verification
 instructions are in [`RELEASING.md`](RELEASING.md).
