@@ -356,10 +356,11 @@ SIGNING_ALGORITHM=ES256
 #     && base64 < oidc-key.pem | tr -d '\n'
 IDP_OIDC_PRIVATE_KEY_B64=<your-base64-encoded-pem>
 
-# ChatGPT displays an installation-specific callback URI in the plugin builder.
-# Paste that exact URI here, upload this Django env, and deploy. The migration
-# job runs ensure_oidc_clients before the new web revision receives traffic.
-IDP_OIDC_CHATGPT_REDIRECT_URIS=https://chatgpt.com/replace-with-builder-callback
+# ChatGPT's app-management page generates an app-specific callback in the form
+# below. Copy the complete URL; do not invent or manually replace callback_id.
+# The migration job runs ensure_oidc_clients before the new web revision
+# receives traffic. Leave this unset to skip only the ChatGPT registration.
+#IDP_OIDC_CHATGPT_REDIRECT_URIS=https://chatgpt.com/connector/oauth/{callback_id}
 
 # Optional Claude Desktop compatibility is managed by the predefined public
 # client defaults. No confidential client or service-to-service MCP secret is

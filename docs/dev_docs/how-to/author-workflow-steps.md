@@ -32,8 +32,8 @@ Re-enable the workflow from the same panel when you are ready to accept submissi
 The dedicated editor is specific to the validation type you picked. All forms include a **Step name** field along with convenient navigation at the bottom of the page to jump back to the workflow overview or, when editing, to switch between adjacent steps.
 
 On a deployment that supports more than one validator execution shape,
-container-based validators (EnergyPlus, FMU, SHACL, Schematron, and Portfolio Manager) also show
-an **Execution profile**:
+container-based validators (EnergyPlus, FMU, SHACL, Schematron, Portfolio
+Manager, and PDF) also show an **Execution profile**:
 
 - **Fast response** is the default for short, interactive validation work.
 - **Long-running** is for large files or simulations that may need the full

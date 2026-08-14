@@ -182,7 +182,7 @@ The official-SDK MCP endpoint runs inside the Django ASGI process at
 | Variable | Description | Default |
 | --- | --- | --- |
 | `IDP_OIDC_MCP_RESOURCE_AUDIENCE` | Exact OAuth resource and access-token audience. | `<SITE_URL>/mcp` |
-| `IDP_OIDC_CHATGPT_REDIRECT_URIS` | Exact callback URI or URIs supplied by ChatGPT. | empty |
+| `IDP_OIDC_CHATGPT_REDIRECT_URIS` | Complete app-specific URI generated in ChatGPT app management: `https://chatgpt.com/connector/oauth/{callback_id}`. Omit it to skip ChatGPT client provisioning. | empty |
 | `MCP_FILE_MAX_BYTES` | Maximum downloaded ChatGPT validation file. | `2500000` |
 | `MCP_MAX_REQUEST_BODY_BYTES` | Maximum Streamable HTTP body. | `4194304` |
 | `MCP_READS_PER_MINUTE` | Shared per-principal budget across read tools. | `120` |

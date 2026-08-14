@@ -106,7 +106,7 @@ Empty for community deployments.
 | `GCP_KMS_SIGNING_KEY_VERSION` | Explicit active KMS version. Required with `GCP_KMS_SIGNING_KEY`; rotate it only after registering the candidate public key. |
 | `JWKS_PUBLIC_PATH` | Path to the public JWKS. Pro only. Served at `/.well-known/jwks.json` for credentials issued by this instance. |
 | `IDP_OIDC_MCP_RESOURCE_AUDIENCE` | Exact MCP OAuth resource and JWT audience. Defaults to `<SITE_URL>/mcp`. |
-| `IDP_OIDC_CHATGPT_REDIRECT_URIS` | Exact callback URI or comma-separated URIs supplied by the ChatGPT plugin builder. The client is public and has no secret. |
+| `IDP_OIDC_CHATGPT_REDIRECT_URIS` | Complete app-specific callback generated in ChatGPT app management: `https://chatgpt.com/connector/oauth/{callback_id}`. The client is public, uses PKCE, and has no secret. Omit it to skip ChatGPT provisioning. |
 | `MCP_FILE_MAX_BYTES` | Maximum downloaded ChatGPT validation file size. Default: `2500000`. |
 | `MCP_MAX_REQUEST_BODY_BYTES` | Maximum Streamable HTTP request body. Default: `4194304`. |
 | `MCP_READS_PER_MINUTE` | Shared per-principal quota across all read tools. Default: `120`. |

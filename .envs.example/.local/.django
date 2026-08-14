@@ -159,10 +159,12 @@ SIGNING_ALGORITHM=ES256
 # EMBEDDED MCP OAUTH
 # ==============================================================================
 # local-pro and local-cloud expose the licensed endpoint at
-# http://localhost:8000/mcp. Configure a signing key and an exact client
-# callback when testing the OAuth flow; no service-to-service secret is used.
+# http://localhost:8000/mcp. Configure a signing key when testing OAuth.
+# ChatGPT's app-management page generates a callback in the form shown below;
+# copy the complete URL after creating the app. If it is omitted,
+# ensure_oidc_clients skips only the ChatGPT registration.
 #IDP_OIDC_PRIVATE_KEY_B64=
-#IDP_OIDC_CHATGPT_REDIRECT_URIS=
+#IDP_OIDC_CHATGPT_REDIRECT_URIS=https://chatgpt.com/connector/oauth/{callback_id}
 
 # X402 AGENT PAYMENTS (cloud-only — local-cloud stack)
 # ==============================================================================

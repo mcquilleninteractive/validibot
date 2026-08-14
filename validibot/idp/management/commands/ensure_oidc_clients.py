@@ -5,12 +5,14 @@ This command manages two OIDC clients needed for the MCP OAuth flow:
 1. **Claude Desktop public client** — used by Claude Desktop / Claude Code
    to authenticate end users via the standard OAuth 2.1 PKCE flow.
 
-2. **ChatGPT public client** — created when the plugin builder's callback URI
-   has been configured. It authenticates directly against Django using PKCE.
+2. **ChatGPT public client** — created when its app-specific
+   ``https://chatgpt.com/connector/oauth/{callback_id}`` URI has been
+   configured. It authenticates directly against Django using PKCE.
 
 Both clients are intentionally idempotent: the command creates them if missing,
 updates them if configuration has drifted, and is safe to run on every deploy
-after migrations.
+after migrations. An absent ChatGPT callback is a supported state: the command
+reports that it skipped ChatGPT and continues managing Claude.
 """
 
 from __future__ import annotations
@@ -22,6 +24,9 @@ from typing import Any
 from allauth.idp.oidc.models import Client as OIDCClient
 from django.conf import settings
 from django.core.management.base import BaseCommand
+from django.core.management.base import CommandError
+
+from validibot.idp.constants import validate_chatgpt_redirect_uri
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -84,6 +89,12 @@ class Command(BaseCommand):
             ),
         )
         if chatgpt_redirect_uris:
+            try:
+                chatgpt_redirect_uris = tuple(
+                    validate_chatgpt_redirect_uri(uri) for uri in chatgpt_redirect_uris
+                )
+            except ValueError as exc:
+                raise CommandError(str(exc)) from exc
             clients.append(
                 ManagedOIDCClient(
                     client_id=settings.IDP_OIDC_CHATGPT_CLIENT_ID,
@@ -96,6 +107,16 @@ class Command(BaseCommand):
                         settings.IDP_OIDC_CHATGPT_RESPONSE_TYPES,
                     ),
                     skip_consent=settings.IDP_OIDC_CHATGPT_SKIP_CONSENT,
+                ),
+            )
+        else:
+            self.stdout.write(
+                self.style.WARNING(
+                    "Skipped ChatGPT OIDC client: "
+                    "IDP_OIDC_CHATGPT_REDIRECT_URIS is not configured. "
+                    "Copy the app-specific callback URL from ChatGPT before "
+                    "enabling this integration. Any existing database "
+                    "registration is left unchanged.",
                 ),
             )
 

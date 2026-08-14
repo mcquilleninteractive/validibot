@@ -1,7 +1,8 @@
 # Validator Containers (Advanced Validators)
 
 Validator containers run advanced validations such as EnergyPlus, FMU,
-SHACL, and Schematron. They support two deployment modes:
+SHACL, Schematron, Portfolio Manager, and PDF. They support two deployment
+modes:
 
 1. **GCP managed execution**: Cloud Run Services are the normal route, with
    retained Cloud Run Jobs for author-selected long-running work and rollback
@@ -33,7 +34,7 @@ IAM roles involved:
 
 - **Web/Worker service account** (`$GCP_APP_NAME-cloudrun-{stage}`): Custom `validibot_job_runner` role (the historical ID now represents the validator controller) so Django can read exact Job/Service configuration, verify Service invoker IAM, and call the Jobs API with overrides for `VALIDIBOT_INPUT_URI`.
 - **Validator runtime service account** (`$GCP_APP_NAME-validator-{stage}`): Used by both Services and Jobs. It has `roles/run.invoker` on the worker for callbacks and renewal, but **no project or bucket storage role**. Django supplies a short-lived Credential Access Boundary token limited to one attempt prefix and the `roles/storage.objectViewer` + `roles/storage.objectCreator` permission ceiling.
-- **Provider-task invoker** (`$GCP_APP_NAME-val-invoker-{stage}`): Has no project roles. It is the only `roles/run.invoker` member on the five private validator Services and is attached only to provider-queue tasks. The abbreviated resource name stays within Google's 30-character service-account ID limit for `prod`, `staging`, and `dev`.
+- **Provider-task invoker** (`$GCP_APP_NAME-val-invoker-{stage}`): Has no project roles. It is the only `roles/run.invoker` member on the six private validator Services and is attached only to provider-queue tasks. The abbreviated resource name stays within Google's 30-character service-account ID limit for `prod`, `staging`, and `dev`.
 - **Worker**: private, only allows authenticated calls; rejects callbacks on web.
 
 Cloud Run Jobs remain a separate execution shape. They have queryable provider

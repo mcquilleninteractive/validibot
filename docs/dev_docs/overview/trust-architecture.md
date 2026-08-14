@@ -217,8 +217,11 @@ private-to-org for free yet paid-public to anonymous agents.
 
 Django and MCP share one process and one `.django` environment. The canonical
 `SITE_URL` determines the default MCP resource at `<SITE_URL>/mcp`; explicit
-audience, ChatGPT callback, request bounds, and quotas also live in `.django`.
-There is no MCP-only env file or paired service credential.
+audience, ChatGPT's generated app-specific callback, request bounds, and quotas
+also live in `.django`. There is no MCP-only env file or paired service
+credential. Omitting the ChatGPT callback leaves that client unprovisioned
+without preventing the application or the predefined Claude client from
+starting.
 
 Hosted x402 is a separate Cloud Django channel. Its active mode, pay-to,
 network/asset pair, and facilitator credentials all live in the Cloud Django

@@ -168,7 +168,7 @@ The quick version of "where does each variable go":
 | `DJANGO_ALLOWED_HOSTS`, `DJANGO_CSRF_TRUSTED_ORIGINS` | `.django` | Hostnames accepted by Django and full HTTPS origins allowed to submit CSRF-protected requests. GCP production must include its public application origin in both forms. |
 | `IDP_OIDC_PRIVATE_KEY_B64` | `.django` | Signs JWT access tokens |
 | `IDP_OIDC_MCP_RESOURCE_AUDIENCE` | `.django` | Exact embedded MCP resource and JWT audience; defaults to `<SITE_URL>/mcp`. |
-| `IDP_OIDC_CHATGPT_REDIRECT_URIS` | `.django` | Exact callback URI or URIs supplied by the ChatGPT plugin builder. |
+| `IDP_OIDC_CHATGPT_REDIRECT_URIS` | `.django` | Complete app-specific URI generated in ChatGPT app management: `https://chatgpt.com/connector/oauth/{callback_id}`. If empty, `ensure_oidc_clients` skips ChatGPT without affecting Claude. |
 | `MCP_FILE_MAX_BYTES`, `MCP_MAX_REQUEST_BODY_BYTES` | `.django` | Bound downloaded validation content and total Streamable HTTP request size. |
 | `MCP_READS_PER_MINUTE`, `MCP_STARTS_PER_MINUTE` | `.django` | Separate per-principal read and validation-start budgets. |
 | `MCP_ALLOWED_ORIGINS` | `.django` | Optional additional exact browser origins. |

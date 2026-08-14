@@ -1445,9 +1445,11 @@ IDP_OIDC_CLAUDE_SKIP_CONSENT = env.bool(
     default=False,
 )
 
-# ── ChatGPT plugin public client ─────────────────────────────────────────
-# The plugin builder displays an installation-specific callback URI. Configure
-# it here, then run ``ensure_oidc_clients``. No client secret is used.
+# ── ChatGPT app public client ────────────────────────────────────────────
+# ChatGPT's app-management page displays an app-specific callback in the form
+# https://chatgpt.com/connector/oauth/{callback_id}. Copy the complete URL here,
+# then run ``ensure_oidc_clients``. If omitted, that command skips the ChatGPT
+# client cleanly. This predefined public client uses PKCE and has no secret.
 IDP_OIDC_CHATGPT_CLIENT_ID = env.str(
     "IDP_OIDC_CHATGPT_CLIENT_ID",
     default=_IDP_CHATGPT_CLIENT_ID,
