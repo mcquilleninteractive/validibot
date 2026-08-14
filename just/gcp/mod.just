@@ -1435,11 +1435,13 @@ _migrate stage:
 #   4. Check the exit status and fail the recipe if migrations failed
 #   5. Show the execution logs for visibility
 #
-# The job runs: /entrypoint → gosu django → check_migration_history → migrate.
-# The read-only history guard refuses deleted pre-reset migration tails before
-# any schema write. Cache/OIDC setup and the guarded application-data
-# initializer follow. A fresh database is therefore complete before any new
-# service revision receives traffic.
+# The job runs: /entrypoint → gosu django → web configuration preflight →
+# check_migration_history → migrate. The MCP check validates the activated
+# web-only surface against the stage secret before any schema write or service
+# cutover. The read-only history guard then refuses deleted pre-reset migration
+# tails. Cache/OIDC setup and the guarded application-data initializer follow.
+# A fresh database is therefore complete before any new service revision
+# receives traffic.
 # This means it goes through the same entrypoint as the web service
 # (loading /secrets/.env, waiting for the DB, etc.) but runs migrate
 # instead of gunicorn.
@@ -1494,7 +1496,7 @@ _run-migrate-job stage image:
             --task-timeout {{gcp_migrate_task_timeout}} \
             --execution-environment gen2 \
             --command "/bin/bash" \
-            --args "-c,set -a && source /secrets/.env && set +a && python manage.py check_migration_history && python manage.py migrate --noinput && python manage.py createcachetable && python manage.py ensure_oidc_clients && python manage.py initialize_validibot --if-needed && python manage.py sync_validators && python manage.py seed_weather_files --strict && echo Migrations and application-data reconciliation complete" \
+            --args "-c,set -a && source /secrets/.env && set +a && python manage.py check_mcp_configuration --role=web && python manage.py check_migration_history && python manage.py migrate --noinput && python manage.py createcachetable && python manage.py ensure_oidc_clients && python manage.py initialize_validibot --if-needed && python manage.py sync_validators && python manage.py seed_weather_files --strict && echo Migrations and application-data reconciliation complete" \
             --project {{gcp_project}} \
             --quiet
     else
@@ -1509,7 +1511,7 @@ _run-migrate-job stage image:
             --task-timeout {{gcp_migrate_task_timeout}} \
             --execution-environment gen2 \
             --command "/bin/bash" \
-            --args "-c,set -a && source /secrets/.env && set +a && python manage.py check_migration_history && python manage.py migrate --noinput && python manage.py createcachetable && python manage.py ensure_oidc_clients && python manage.py initialize_validibot --if-needed && python manage.py sync_validators && python manage.py seed_weather_files --strict && echo Migrations and application-data reconciliation complete" \
+            --args "-c,set -a && source /secrets/.env && set +a && python manage.py check_mcp_configuration --role=web && python manage.py check_migration_history && python manage.py migrate --noinput && python manage.py createcachetable && python manage.py ensure_oidc_clients && python manage.py initialize_validibot --if-needed && python manage.py sync_validators && python manage.py seed_weather_files --strict && echo Migrations and application-data reconciliation complete" \
             --project {{gcp_project}} \
             --quiet
     fi

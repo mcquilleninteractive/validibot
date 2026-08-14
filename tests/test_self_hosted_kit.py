@@ -868,6 +868,9 @@ class GcpOperatorRecipeInvariantTests(SimpleTestCase):
 
         expected_job_paths = {"create", "update"}
         assert migration_block.count(
+            "python manage.py check_mcp_configuration --role=web"
+        ) == len(expected_job_paths)
+        assert migration_block.count(
             "python manage.py initialize_validibot --if-needed"
         ) == len(expected_job_paths)
         assert migration_block.count("python manage.py sync_validators") == len(
@@ -877,6 +880,7 @@ class GcpOperatorRecipeInvariantTests(SimpleTestCase):
             "python manage.py seed_weather_files --strict"
         ) == len(expected_job_paths)
         for command in (
+            "python manage.py check_mcp_configuration --role=web",
             "python manage.py initialize_validibot --if-needed",
             "python manage.py sync_validators",
             "python manage.py seed_weather_files --strict",
@@ -884,6 +888,9 @@ class GcpOperatorRecipeInvariantTests(SimpleTestCase):
             assert migration_block.index(command) < migration_block.index(
                 "gcloud run jobs execute"
             )
+        assert migration_block.index(
+            "python manage.py check_mcp_configuration --role=web"
+        ) < migration_block.index("python manage.py migrate --noinput")
         assert deploy_header.index("_maybe-migrate") < deploy_header.index(
             "_deploy-web"
         )

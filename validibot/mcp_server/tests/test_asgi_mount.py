@@ -13,6 +13,7 @@ import importlib
 import anyio
 import httpx
 import pytest
+from django.test import override_settings
 
 from validibot.core.features import CommercialFeature
 from validibot.core.license import Edition
@@ -66,6 +67,33 @@ def test_pro_mounts_authenticated_mcp_without_stealing_health(settings) -> None:
         importlib.reload(asgi_module)
 
     assert statuses == (401, 200)
+
+
+def test_worker_does_not_initialize_mcp_for_an_activated_license() -> None:
+    """Worker startup must not depend on configuration for the web-only MCP app."""
+
+    import config.asgi as asgi_module
+
+    original_license = get_license()
+    try:
+        with override_settings(
+            APP_ROLE="worker",
+            APP_IS_WORKER=True,
+            MCP_STRICT_CONFIGURATION=True,
+            MCP_FILE_ALLOWED_HOSTS=[],
+        ):
+            set_license(
+                License(
+                    edition=Edition.PRO,
+                    features=frozenset({CommercialFeature.MCP_SERVER.value}),
+                ),
+            )
+            asgi_module = importlib.reload(asgi_module)
+
+            assert asgi_module.mcp_application is None
+    finally:
+        set_license(original_license)
+        importlib.reload(asgi_module)
 
 
 async def _request_mount_and_health(application) -> tuple[int, int]:

@@ -13,7 +13,10 @@ from cryptography.hazmat.primitives.serialization import Encoding
 from cryptography.hazmat.primitives.serialization import NoEncryption
 from cryptography.hazmat.primitives.serialization import PrivateFormat
 from django.core.exceptions import ImproperlyConfigured
+from django.core.management import call_command
+from django.core.management.base import CommandError
 
+from validibot.core.features import CommercialFeature
 from validibot.mcp_server.configuration import validate_production_mcp_configuration
 
 
@@ -82,3 +85,36 @@ def test_strict_configuration_rejects_each_unsafe_boundary(
 
     with pytest.raises(ImproperlyConfigured, match="Unsafe MCP"):
         validate_production_mcp_configuration()
+
+
+def test_deploy_check_rejects_invalid_activated_web_configuration(
+    settings,
+    monkeypatch,
+) -> None:
+    """Deployment must reject an unsafe MCP web configuration before cutover."""
+
+    _configure_valid_production(settings)
+    settings.MCP_FILE_ALLOWED_HOSTS = []
+    monkeypatch.setattr(
+        "validibot.core.management.commands.check_mcp_configuration.is_feature_enabled",
+        lambda feature: feature is CommercialFeature.MCP_SERVER,
+    )
+
+    with pytest.raises(CommandError, match="MCP_FILE_ALLOWED_HOSTS"):
+        call_command("check_mcp_configuration", role="web")
+
+
+def test_deploy_check_skips_mcp_configuration_for_worker(
+    settings,
+    monkeypatch,
+) -> None:
+    """The worker preflight must remain independent of web-only MCP settings."""
+
+    settings.MCP_STRICT_CONFIGURATION = True
+    settings.MCP_FILE_ALLOWED_HOSTS = []
+    monkeypatch.setattr(
+        "validibot.core.management.commands.check_mcp_configuration.is_feature_enabled",
+        lambda feature: feature is CommercialFeature.MCP_SERVER,
+    )
+
+    call_command("check_mcp_configuration", role="worker")

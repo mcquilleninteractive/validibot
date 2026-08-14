@@ -17,6 +17,7 @@ from asgiref.typing import ASGI3Application
 from asgiref.typing import ASGIReceiveCallable
 from asgiref.typing import ASGISendCallable
 from asgiref.typing import Scope
+from django.conf import settings
 from django.core.asgi import get_asgi_application
 
 # This allows easy placement of apps within the interior
@@ -36,7 +37,13 @@ from validibot.core.features import CommercialFeature  # noqa: E402
 from validibot.core.features import is_feature_enabled  # noqa: E402
 
 mcp_application: ASGI3Application | None
-if is_feature_enabled(CommercialFeature.MCP_SERVER):
+# The shared image also serves the private worker API. MCP is a public web
+# surface, so worker startup must remain independent of its OAuth and file-host
+# configuration even when the installed Cloud/Pro license activates MCP.
+_is_worker = bool(getattr(settings, "APP_IS_WORKER", False)) or (
+    str(getattr(settings, "APP_ROLE", "web")).lower() == "worker"
+)
+if not _is_worker and is_feature_enabled(CommercialFeature.MCP_SERVER):
     from validibot.mcp_server.server import build_mcp_asgi_application
 
     mcp_application = cast("ASGI3Application", build_mcp_asgi_application())
