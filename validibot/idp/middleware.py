@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 
 from django.conf import settings
 from django.http import JsonResponse
+from django.urls import NoReverseMatch
 from django.urls import reverse
 
 from validibot.core.client_ip import resolve_client_ip
@@ -23,6 +24,10 @@ if TYPE_CHECKING:
 
 _WINDOW_SECONDS = 60
 _CACHE_TIMEOUT_SECONDS = 70
+_ENDPOINT_SETTINGS = (
+    ("idp:oidc:token", "IDP_OIDC_TOKEN_REQUESTS_PER_IP_PER_MINUTE"),
+    ("idp:oidc:revoke", "IDP_OIDC_REVOKE_REQUESTS_PER_IP_PER_MINUTE"),
+)
 
 
 class OIDCEndpointAbuseProtectionMiddleware:
@@ -30,12 +35,17 @@ class OIDCEndpointAbuseProtectionMiddleware:
 
     def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]) -> None:
         self.get_response = get_response
-        self.endpoint_limits = {
-            reverse("idp:oidc:token"): "IDP_OIDC_TOKEN_REQUESTS_PER_IP_PER_MINUTE",
-            reverse(
-                "idp:oidc:revoke",
-            ): "IDP_OIDC_REVOKE_REQUESTS_PER_IP_PER_MINUTE",
-        }
+        self.endpoint_limits: dict[str, str] = {}
+        for view_name, setting_name in _ENDPOINT_SETTINGS:
+            try:
+                endpoint_path = reverse(view_name)
+            except NoReverseMatch:
+                # Worker and other deliberately reduced URL configurations do
+                # not expose OAuth. Middleware construction must remain valid
+                # there; an absent route cannot receive work or consume a
+                # budget.
+                continue
+            self.endpoint_limits[endpoint_path] = setting_name
 
     def __call__(self, request: HttpRequest) -> HttpResponse:
         """Return OAuth-compatible 429 responses after either budget is spent."""

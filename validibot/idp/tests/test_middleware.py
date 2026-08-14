@@ -14,6 +14,7 @@ import pytest
 from django.core.cache import cache
 from django.http import HttpResponse
 from django.test import RequestFactory
+from django.test import override_settings
 from django.urls import reverse
 
 from validibot.idp.middleware import OIDCEndpointAbuseProtectionMiddleware
@@ -87,3 +88,21 @@ def test_non_post_and_unrelated_routes_are_not_consumed(settings) -> None:
 
     assert token_get.status_code == HTTPStatus.NO_CONTENT
     assert unrelated.status_code == HTTPStatus.NO_CONTENT
+
+
+@override_settings(ROOT_URLCONF="config.urls_worker")
+def test_urlconf_without_oauth_routes_constructs_middleware_safely() -> None:
+    """A private worker must start even though it cannot expose OAuth routes."""
+
+    middleware = OIDCEndpointAbuseProtectionMiddleware(
+        lambda request: HttpResponse(status=HTTPStatus.NO_CONTENT),
+    )
+    request = RequestFactory().post(
+        "/api/v1/validation-callback/",
+        REMOTE_ADDR="203.0.113.10",
+    )
+
+    response = middleware(request)
+
+    assert middleware.endpoint_limits == {}
+    assert response.status_code == HTTPStatus.NO_CONTENT
