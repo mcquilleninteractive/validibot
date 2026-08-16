@@ -898,6 +898,32 @@ class GcpOperatorRecipeInvariantTests(SimpleTestCase):
             "_deploy-worker"
         )
 
+    def test_gcp_worker_scales_single_request_processes_horizontally(self):
+        """Worker isolation must prevent one instance multiplying memory use.
+
+        Initial worker-queue deliveries and validator callbacks share this
+        Cloud Run service. Each instance therefore accepts one request in one
+        Gunicorn process, while the service scales to the three-instance
+        release-smoke burst instead of multiplexing that work inside 1 GiB.
+        """
+        deploy_block = self._block_between(
+            "_deploy-worker stage:",
+            "# Secrets Management",
+        )
+        start_script = (
+            REPO_ROOT / "compose" / "production" / "django" / "start.sh"
+        ).read_text(encoding="utf-8")
+
+        assert "APP_ROLE=worker,WEB_CONCURRENCY=1" in deploy_block
+        assert "--concurrency 1" in deploy_block
+        assert "--min 0" in deploy_block
+        assert "--max 3" in deploy_block
+        assert "--min-instances default" in deploy_block
+        assert "--max-instances default" in deploy_block
+        assert "--max-instances 2" not in deploy_block
+        assert 'WEB_CONCURRENCY="${WEB_CONCURRENCY:-4}"' in start_script
+        assert '--workers "${WEB_CONCURRENCY}"' in start_script
+
     def test_prod_deploy_confirmation_acknowledges_start_immediately(self):
         """Confirmation must not leave the operator staring at a silent terminal."""
         confirmation = self._block_between(

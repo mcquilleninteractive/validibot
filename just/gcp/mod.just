@@ -524,6 +524,7 @@ deploy stage: _require-gcp-config (_confirm-deploy stage) (_mode-require-live st
 # Key differences from web service:
 #   - no-allow-unauthenticated: Only Cloud Tasks/Scheduler can invoke
 #   - Always scales to zero (no warm instances needed)
+#   - One request and one Gunicorn process per instance; Cloud Run scales out
 #   - Same image as web, different APP_ROLE env var
 #
 # Migrations run before the worker deploy too, because the worker
@@ -1088,6 +1089,11 @@ _deploy-worker stage:
     # Resolve image tag (see comment in _deploy-web for why).
     IMAGE_TAG="${VALIDIBOT_REVISION:-{{git_sha}}}"
 
+    # Worker requests can perform substantial orchestration and callback work.
+    # Keep one request in one Gunicorn process so separate requests cannot
+    # multiply memory use inside a 1 GiB instance. Cloud Run supplies the
+    # parallelism by scaling to three instances, matching the release-smoke
+    # concurrency policy. Additional Cloud Tasks deliveries remain queued.
     echo "Deploying $SERVICE to Cloud Run ({{stage}}, private)..."
     gcloud run deploy "$SERVICE" \
         --image {{gcp_image}}:${IMAGE_TAG} \
@@ -1096,11 +1102,14 @@ _deploy-worker stage:
         --service-account "$SA" \
         --add-cloudsql-instances "$DB" \
         --set-secrets=/secrets/.env="$SECRET":latest \
-        --set-env-vars APP_ROLE=worker,GCP_APP_NAME={{app_name}},VALIDIBOT_STAGE={{stage}},VALIDIBOT_VERSION="${VALIDIBOT_VERSION:-{{validibot_version}}}" \
+        --set-env-vars APP_ROLE=worker,WEB_CONCURRENCY=1,GCP_APP_NAME={{app_name}},VALIDIBOT_STAGE={{stage}},VALIDIBOT_VERSION="${VALIDIBOT_VERSION:-{{validibot_version}}}" \
         --no-allow-unauthenticated \
         --ingress internal \
-        --min-instances 0 \
-        --max-instances 2 \
+        --min 0 \
+        --max 3 \
+        --min-instances default \
+        --max-instances default \
+        --concurrency 1 \
         --memory 1Gi \
         --timeout {{gcp_cloud_run_request_timeout}} \
         --execution-environment gen2 \
@@ -1127,7 +1136,7 @@ _deploy-worker stage:
     fi
 
     echo ""
-    echo "Worker service deployed to {{stage}} (ingress: internal)"
+    echo "Worker service deployed to {{stage}} (ingress=internal, concurrency=1, min=0, max=3)"
 
 # =============================================================================
 # Secrets Management
