@@ -94,7 +94,7 @@ dependencies = [
   "pydantic==2.13.4",
   "python-jsonpath==2.2.1",
   "python-slugify==8.0.4",
-  "sentry-sdk==2.66.1",
+  "sentry-sdk==2.67.1",
   # Task queue: Celery with Redis broker and periodic scheduling.
   # celery[redis] pulls in kombu's redis extra, which caps the redis version.
   # As of kombu 5.6.2 the cap is redis<6.5; kombu main has bumped to <7.1
@@ -106,7 +106,7 @@ dependencies = [
   # See: https://github.com/celery/django-celery-beat/issues/977
   "django-celery-beat==2.9.0",
   "uvicorn-worker==0.4.0",
-  "uvicorn[standard]==0.52.1",
+  "uvicorn[standard]==0.52.2",
   "whitenoise==6.12.0",
   "google-cloud-run==0.16.1",
   "python-json-logger==4.1.0",
@@ -184,7 +184,7 @@ dependencies = [
 
 [project.optional-dependencies]
 cloud = [
-  "stripe==15.4.0",
+  "stripe==15.5.0",
 ]
 # Docker SDK for the Docker-based validator runner (VALIDATOR_RUNNER=docker).
 # Not needed for Cloud Run deployments. Reduces attack surface when omitted.
@@ -388,19 +388,19 @@ dev = [
   "django-coverage-plugin==3.2.2",
   "factory-boy==3.3.3",
   "pytest==9.1.1",
-  "pytest-django==4.13.0",
+  "pytest-django==4.14.0",
   "pytest-sugar==1.1.1",
-  "selenium==4.46.0",
+  "selenium==4.47.0",
   # Linting and formatting
   "djlint==1.44.2",
-  "pre-commit==4.6.1",
+  "pre-commit==4.6.2",
   "ruff==0.16.2",
   # Type checking
-  "django-stubs[compatible-mypy]==6.0.9",
-  "djangorestframework-stubs==3.17.1",
+  "django-stubs[compatible-mypy]==6.1.0",
+  "djangorestframework-stubs==3.18.0",
   "mypy==2.3.0",
   # Debugging and development utilities
-  "django-debug-toolbar==7.0.0",
+  "django-debug-toolbar==7.1.0",
   "django-extensions==4.1",
   "ipdb==0.13.13",
   "watchfiles==1.2.0",
