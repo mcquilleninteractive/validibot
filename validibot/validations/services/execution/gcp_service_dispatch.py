@@ -1,4 +1,4 @@
-"""Dispatch one pinned validator Service attempt through its provider queue.
+"""Dispatch one pinned validator Service attempt through its backend queue.
 
 This is the only code allowed to turn staged attempt data into a provider task.
 The task name is the attempt UUID, so application-task redelivery and Cloud
@@ -248,7 +248,7 @@ def dispatch_cloud_run_service_validation(
     queue_name = str(getattr(settings, "GCP_VALIDATOR_TASK_QUEUE_NAME", ""))
     invoker = str(getattr(settings, "GCP_VALIDATOR_TASK_INVOKER_SERVICE_ACCOUNT", ""))
     if not queue_name or not invoker:
-        raise RuntimeError("Validator provider queue and invoker must be configured.")
+        raise RuntimeError("Validator backend queue and invoker must be configured.")
     if attempt.timeout_at is None:
         raise RuntimeError("Managed Service attempt has no absolute deadline.")
     if attempt.state == ExecutionAttemptState.RUNNING and attempt.provider_execution_id:

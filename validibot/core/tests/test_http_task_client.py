@@ -1,6 +1,6 @@
 """Tests for the shared low-level Cloud Tasks HTTP transport.
 
-The application and provider queues intentionally keep separate policy.  These
+The worker and validator backend queues intentionally keep separate policy. These
 tests cover only the reusable transport guarantee: exact OIDC/deadline fields,
 deterministic task names, and ``AlreadyExists`` convergence without another
 identity.

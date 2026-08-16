@@ -994,12 +994,12 @@ class Command(BaseCommand):
             )
 
     def _check_validator_execution_deployments(self):
-        """Report safe GCP provider queue, route, identity, and capacity facts."""
+        """Report safe GCP backend queue, route, identity, and capacity facts."""
         if self.target != "gcp":
             self._add_result(
                 "VB720",
                 "validators",
-                "Validator provider queue",
+                "Validator backend queue",
                 CheckStatus.SKIPPED,
                 "Managed validator Service routing is specific to GCP.",
             )
@@ -1113,7 +1113,7 @@ class Command(BaseCommand):
         self._add_result(
             "VB720",
             "validators",
-            "Validator provider queue",
+            "Validator backend queue",
             (
                 CheckStatus.OK
                 if provider_configured
@@ -1122,9 +1122,9 @@ class Command(BaseCommand):
                 else CheckStatus.WARN
             ),
             (
-                f"Provider queue '{queue}' uses dedicated invoker '{invoker}'"
+                f"Validator backend queue '{queue}' uses dedicated invoker '{invoker}'"
                 if provider_configured
-                else "Provider queue or dedicated invoker is not configured."
+                else "Validator backend queue or dedicated invoker is not configured."
             ),
             fix_hint=(
                 "Set GCP_VALIDATOR_TASK_QUEUE_NAME and "

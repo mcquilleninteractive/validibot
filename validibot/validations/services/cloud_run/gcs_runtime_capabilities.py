@@ -34,7 +34,7 @@ if TYPE_CHECKING:
 
 
 _CLOUD_PLATFORM_SCOPE = "https://www.googleapis.com/auth/cloud-platform"
-# The initial token must survive provider-queue delay and loading the immutable
+# The initial token must survive validator-backend-queue delay and loading the immutable
 # input envelope. Only after that envelope is parsed does the validator have
 # the callback-bound proof needed to use the authenticated refresh endpoint.
 _MIN_REMAINING_LIFETIME_SECONDS = 300

@@ -1203,6 +1203,23 @@ class GcpOperatorRecipeInvariantTests(SimpleTestCase):
             assert "trap - EXIT INT TERM" in block
         assert "GCP_INIT_STAGE_MAINTENANCE=1" in init_block
 
+    def test_maintenance_management_command_preserves_nested_quotes(self):
+        """Maintenance forwarding must not reparse an operator command.
+
+        Shell-backed diagnostics can contain quoted filenames, dictionary keys,
+        or UUIDs. The wrapper must store Just's safely quoted value and forward
+        that variable as one argument so the encoded command runner receives the
+        exact original text.
+        """
+        block = self._block_between(
+            "maintenance-management-cmd stage command:",
+            "# Reconcile a stage to LIVE.",
+        )
+
+        assert "COMMAND_TEXT={{quote(command)}}" in block
+        assert 'management-cmd {{stage}} "$COMMAND_TEXT"' in block
+        assert 'management-cmd {{stage}} "{{command}}"' not in block
+
     def test_parking_prompt_names_the_live_outage_and_database_stop(self):
         """Parking confirmation must accurately describe its production impact.
 

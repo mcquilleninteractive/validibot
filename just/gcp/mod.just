@@ -2857,7 +2857,7 @@ init-stage stage: _require-gcp-config
     fi
     echo ""
 
-    # The provider queue uses a distinct OIDC principal. It has no project
+    # The validator backend queue uses a distinct OIDC principal. It has no project
     # roles and receives run.invoker only on the managed validator Services.
     echo "2d. Creating provider-task invoker: $PROVIDER_INVOKER_NAME"
     if gcloud iam service-accounts describe "$PROVIDER_INVOKER_EMAIL" --project={{gcp_project}} &>/dev/null; then
@@ -3054,7 +3054,7 @@ init-stage stage: _require-gcp-config
 
     # Long validator deliveries never consume the short application-worker
     # queue. Retry duration cannot outlive the 30-minute task/token contract.
-    echo "5b. Reconciling validator provider queue: $PROVIDER_QUEUE_NAME"
+    echo "5b. Reconciling validator backend queue: $PROVIDER_QUEUE_NAME"
     if gcloud tasks queues describe "$PROVIDER_QUEUE_NAME" --location={{gcp_region}} --project={{gcp_project}} &>/dev/null; then
         gcloud tasks queues update "$PROVIDER_QUEUE_NAME" \
             --location={{gcp_region}} \
@@ -3066,7 +3066,7 @@ init-stage stage: _require-gcp-config
             --max-backoff=60s \
             --max-doublings=5 \
             --project={{gcp_project}} >/dev/null
-        echo "   Provider queue updated"
+        echo "   Validator backend queue updated"
     else
         gcloud tasks queues create "$PROVIDER_QUEUE_NAME" \
             --location={{gcp_region}} \
@@ -3078,7 +3078,7 @@ init-stage stage: _require-gcp-config
             --max-backoff=60s \
             --max-doublings=5 \
             --project={{gcp_project}}
-        echo "   Provider queue created"
+        echo "   Validator backend queue created"
     fi
     echo ""
 
@@ -5851,7 +5851,7 @@ validator-observability stage: _require-gcp-config
     PENDING_LATENCY_FILTER="metric.type=\"run.googleapis.com/request_latency/pending\" resource.type=\"cloud_run_revision\" resource.labels.service_name=monitoring.regex.full_match(\"$SERVICE_REGEX\")"
     PENDING_FILTER="metric.type=\"run.googleapis.com/pending_queue/pending_requests\" resource.type=\"cloud_run_revision\" resource.labels.service_name=monitoring.regex.full_match(\"$SERVICE_REGEX\")"
     IDLE_FILTER="metric.type=\"run.googleapis.com/container/instance_count\" resource.type=\"cloud_run_revision\" resource.labels.service_name=monitoring.regex.full_match(\"$SERVICE_REGEX\") metric.labels.state=\"idle\""
-    upsert_policy "Validibot {{stage}} validator provider backlog" "Provider queue depth exceeds 10" "$QUEUE_FILTER" 10 300s ALIGN_MAX
+    upsert_policy "Validibot {{stage}} validator backend backlog" "Validator backend queue depth exceeds 10" "$QUEUE_FILTER" 10 300s ALIGN_MAX
     upsert_policy "Validibot {{stage}} validator provider delivery errors" "Provider task returned an error" "$QUEUE_ERROR_FILTER" 0 0s ALIGN_SUM
     upsert_policy "Validibot {{stage}} validator startup latency" "Service pending/startup p95 exceeds target" "$PENDING_LATENCY_FILTER" "${VALIDATOR_SERVICE_PENDING_P95_ALERT_MS:-30000}" 300s ALIGN_PERCENTILE_95
     upsert_policy "Validibot {{stage}} validator saturation" "Service requests remain pending" "$PENDING_FILTER" 0 300s ALIGN_MAX
@@ -6273,10 +6273,10 @@ _maintenance-assert-offline stage:
         --location {{gcp_region}} --project {{gcp_project}} \
         --format="value(state)" 2>/dev/null || echo "NOT_FOUND")
     if [ "$QUEUE_STATE" != "PAUSED" ]; then
-        record_isolation_error "main queue is $QUEUE_STATE, not PAUSED."
+        record_isolation_error "worker queue is $QUEUE_STATE, not PAUSED."
     fi
     if [ "$PROVIDER_STATE" != "PAUSED" ] && [ "$PROVIDER_STATE" != "NOT_FOUND" ]; then
-        record_isolation_error "provider queue is $PROVIDER_STATE, not PAUSED."
+        record_isolation_error "validator backend queue is $PROVIDER_STATE, not PAUSED."
     fi
     for job_base in ${APP_NAME}-clear-sessions ${APP_NAME}-cleanup-idempotency-keys ${APP_NAME}-cleanup-callback-receipts ${APP_NAME}-purge-expired-submissions ${APP_NAME}-purge-expired-outputs ${APP_NAME}-process-purge-retries ${APP_NAME}-cleanup-stuck-runs ${APP_NAME}-verify-validator-deployments ${APP_NAME}-send-periodic-emails ${APP_NAME}-enforce-audit-retention; do
         job="${job_base}${JOB_SUFFIX}"
@@ -6662,7 +6662,12 @@ maintenance-management-cmd stage command: _require-gcp-config
     }
     trap cleanup EXIT INT TERM
     GCP_YES=1 just gcp mode-maintenance {{stage}}
-    just gcp management-cmd {{stage}} "{{command}}"
+    # Preserve the operator command as one opaque argument. Interpolating it
+    # directly inside another quoted ``just`` invocation consumes nested
+    # quotes (for example, ``shell -c`` Python string literals) before the
+    # encoded management-command runner can protect them.
+    COMMAND_TEXT={{quote(command)}}
+    just gcp management-cmd {{stage}} "$COMMAND_TEXT"
     just gcp _enforce-maintenance {{stage}}
     MODE=$(just gcp _mode-current {{stage}})
     if [ "$MODE" != "MAINTENANCE" ]; then
@@ -6908,8 +6913,8 @@ mode-status stage: _require-gcp-config
     echo "  Web minimum:   service=$WEB_SERVICE_MIN revision=$WEB_REVISION_MIN"
     echo "  Database:      $DB_STATUS"
     echo "  DB operation:  ${DB_ACTIVE_OPERATION:-none}"
-    echo "  Main queue:    $QUEUE_STATUS"
-    echo "  Provider queue: $PROVIDER_STATUS"
+    echo "  Worker queue:            $QUEUE_STATUS"
+    echo "  Validator backend queue: $PROVIDER_STATUS"
     echo "  Scheduler jobs: enabled=$SCHEDULER_ENABLED paused=$SCHEDULER_PAUSED other=$SCHEDULER_OTHER missing=$SCHEDULER_MISSING expected=$SCHEDULER_EXPECTED"
     RUNTIME_ISOLATED=0
     if [ "$WEB_INGRESS" = "internal" ] && [ "$WEB_SERVICE_MIN" = "0" ] && [ "$WEB_REVISION_MIN" = "0" ] && [ "$QUEUE_STATUS" = "PAUSED" ] && [ "$RUNTIME_ISOLATION_ISSUES" = "0" ] && [ "$SCHEDULER_ENABLED" = "0" ] && [ "$SCHEDULER_OTHER" = "0" ] && { [ "$PROVIDER_STATUS" = "PAUSED" ] || [ "$PROVIDER_STATUS" = "NOT_FOUND" ]; }; then
