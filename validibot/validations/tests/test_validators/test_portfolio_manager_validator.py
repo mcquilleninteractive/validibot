@@ -567,7 +567,7 @@ def test_zip_envelope_materializes_report_ebl_and_resolved_inputs() -> None:
 
 
 def test_preflight_enforces_the_author_selected_submission_shape(monkeypatch) -> None:
-    """Single mode refuses a ZIP before container compute is allocated."""
+    """Preflight resolves the catalog report port and rejects the wrong shape."""
     validator = PortfolioManagerValidator()
     step = SimpleNamespace(config={"submission_structure": "single_report"})
     submission = SimpleNamespace()
@@ -575,10 +575,17 @@ def test_preflight_enforces_the_author_selected_submission_shape(monkeypatch) ->
         name="portfolio.zip",
         identity=SimpleNamespace(size_bytes=100),
     )
+
+    def resolve_report(contract_key, *, load_content):
+        """Pin preflight to the same contract key declared by the catalog."""
+        assert contract_key == "portfolio_manager_report"
+        assert load_content is False
+        return resolved
+
     monkeypatch.setattr(
         validator,
         "resolve_file_input",
-        lambda *args, **kwargs: resolved,
+        resolve_report,
     )
 
     with pytest.raises(ValidationError, match="Single-report mode"):

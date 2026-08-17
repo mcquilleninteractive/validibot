@@ -30,7 +30,10 @@ class PortfolioManagerValidator(AdvancedValidator):
     def preprocess_submission(self, *, step, submission) -> dict[str, object]:
         """Reject a mode/extension mismatch before spending container compute."""
         del submission
-        resolved = self.resolve_file_input("benchmark_report", load_content=False)
+        resolved = self.resolve_file_input(
+            "portfolio_manager_report",
+            load_content=False,
+        )
         structure = (step.config or {}).get("submission_structure", "single_report")
         suffix = Path(resolved.name).suffix.casefold()
         expected = (

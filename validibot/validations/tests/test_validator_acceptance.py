@@ -632,6 +632,61 @@ def test_smoke_verdict_requires_matching_immutable_attempt_provenance():
     )
 
 
+def test_failed_smoke_report_includes_the_recorded_validation_finding():
+    """Acceptance failures must expose their precise finding to the operator."""
+    runner = ValidatorAcceptanceRunner(
+        backend=ACCEPTANCE_BACKEND,
+        release_tag=ACCEPTANCE_RELEASE_TAG,
+    )
+    scenario = AcceptanceScenario(
+        backend=BACKENDS[4],
+        workflow=SimpleNamespace(),
+        inline_text="fixture",
+        filename="fixture.xml",
+        file_type=SubmissionFileType.XML,
+        fixture_sha256="a" * SHA256_HEX_LENGTH,
+    )
+    finding = SimpleNamespace(
+        severity="ERROR",
+        code="",
+        path="",
+        message="Required input 'portfolio_manager_report' could not be resolved.",
+    )
+    run = SimpleNamespace(
+        pk="run-1",
+        status=ValidationRunStatus.FAILED,
+        error="One or more validation steps failed.",
+        findings=SimpleNamespace(order_by=lambda _field: [finding]),
+    )
+    report = AcceptanceReport(
+        backend=ACCEPTANCE_BACKEND,
+        release_tag=ACCEPTANCE_RELEASE_TAG,
+        attempts_per_backend=1,
+    )
+    queryset = MagicMock()
+    queryset.select_related.return_value.order_by.return_value.last.return_value = None
+
+    with patch(
+        "validibot.validations.acceptance.ExecutionAttempt.objects.filter",
+        return_value=queryset,
+    ):
+        runner._record_run(report, scenario, 1, run)
+
+    check = report.checks[-1]
+    assert check.status == "failed"
+    assert check.details["run_error"] == "One or more validation steps failed."
+    assert check.details["findings"] == [
+        {
+            "severity": "ERROR",
+            "code": "",
+            "path": "",
+            "message": (
+                "Required input 'portfolio_manager_report' could not be resolved."
+            ),
+        }
+    ]
+
+
 def test_job_only_smoke_accepts_the_exact_immutable_job_snapshot():
     """The second canary pass must prove dispatch used the fallback Job route."""
     runner = ValidatorAcceptanceRunner(

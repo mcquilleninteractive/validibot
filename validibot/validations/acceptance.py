@@ -95,6 +95,8 @@ RELEASE_TAG_PATTERN = re.compile(
 )
 MAX_ATTEMPTS_PER_BACKEND = 20
 ROUTINE_ACCEPTANCE_ATTEMPTS = 3
+MAX_REPORTED_FAILURE_FINDINGS = 10
+MAX_REPORTED_FAILURE_TEXT_LENGTH = 500
 
 
 @dataclass(frozen=True, slots=True)
@@ -1351,7 +1353,10 @@ class ValidatorAcceptanceRunner:
         if failure:
             details["error"] = failure
             if run.error:
-                details["run_error"] = str(run.error)[:500]
+                details["run_error"] = str(run.error)[:MAX_REPORTED_FAILURE_TEXT_LENGTH]
+            findings = _failure_findings(run)
+            if findings:
+                details["findings"] = findings
             report.add(
                 check_id,
                 "failed",
@@ -1440,6 +1445,22 @@ def _timing_summary(values: list[float]) -> dict[str, float]:
 def _iso(value) -> str | None:
     """Render optional datetimes consistently in JSON details."""
     return value.isoformat() if value is not None else None
+
+
+def _failure_findings(run) -> list[dict[str, str]]:
+    """Return bounded finding details that explain a failed acceptance run."""
+    findings_manager = getattr(run, "findings", None)
+    if findings_manager is None:
+        return []
+    return [
+        {
+            "severity": str(finding.severity),
+            "code": str(finding.code),
+            "path": str(finding.path),
+            "message": str(finding.message)[:MAX_REPORTED_FAILURE_TEXT_LENGTH],
+        }
+        for finding in findings_manager.order_by("pk")[:MAX_REPORTED_FAILURE_FINDINGS]
+    ]
 
 
 def _safe_error(exc: Exception) -> str:
