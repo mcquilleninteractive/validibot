@@ -27,7 +27,7 @@ exclude = [
 
 [project]
 name = "validibot"
-version = "0.16.3"
+version = "0.16.4"
 description = "Open-source data validation platform"
 requires-python = ">=3.13"
 license = { text = "AGPL-3.0-only" }
