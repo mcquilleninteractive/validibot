@@ -1,4 +1,4 @@
-"""Shared-cache abuse protection for public OAuth token endpoints."""
+"""Shared-cache abuse protection and issuer binding for public OAuth routes."""
 
 from __future__ import annotations
 
@@ -7,6 +7,10 @@ import hmac
 import time
 from http import HTTPStatus
 from typing import TYPE_CHECKING
+from urllib.parse import parse_qsl
+from urllib.parse import urlencode
+from urllib.parse import urlsplit
+from urllib.parse import urlunsplit
 
 from django.conf import settings
 from django.http import JsonResponse
@@ -25,18 +29,73 @@ if TYPE_CHECKING:
 _WINDOW_SECONDS = 60
 _CACHE_TIMEOUT_SECONDS = 70
 _ENDPOINT_SETTINGS = (
-    ("idp:oidc:token", "IDP_OIDC_TOKEN_REQUESTS_PER_IP_PER_MINUTE"),
-    ("idp:oidc:revoke", "IDP_OIDC_REVOKE_REQUESTS_PER_IP_PER_MINUTE"),
+    (
+        "idp:oidc:client_registration",
+        "registration",
+        "IDP_OIDC_REGISTRATION_REQUESTS_PER_IP_PER_MINUTE",
+    ),
+    ("idp:oidc:token", "token", "IDP_OIDC_TOKEN_REQUESTS_PER_IP_PER_MINUTE"),
+    ("idp:oidc:revoke", "revoke", "IDP_OIDC_REVOKE_REQUESTS_PER_IP_PER_MINUTE"),
 )
 
 
-class OIDCEndpointAbuseProtectionMiddleware:
-    """Bound unauthenticated token and revocation requests before parsing."""
+class OIDCAuthorizationResponseIssuerMiddleware:
+    """Add RFC 9207 issuer identification to final OAuth redirects.
+
+    django-allauth validates the client and exact redirect URI before emitting
+    a callback, but does not yet include ``iss`` in that response.  MCP clients
+    use the parameter to prevent authorization-server mix-up attacks.  Login
+    and other intermediate redirects are untouched because they contain
+    neither an authorization code nor an OAuth error.
+    """
 
     def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]) -> None:
         self.get_response = get_response
-        self.endpoint_limits: dict[str, str] = {}
-        for view_name, setting_name in _ENDPOINT_SETTINGS:
+        self.authorization_path: str | None
+        try:
+            self.authorization_path = reverse("idp:oidc:authorization")
+        except NoReverseMatch:
+            self.authorization_path = None
+
+    def __call__(self, request: HttpRequest) -> HttpResponse:
+        """Bind successful and error callbacks to the configured issuer."""
+
+        response = self.get_response(request)
+        is_redirect = (
+            HTTPStatus.MULTIPLE_CHOICES <= response.status_code < HTTPStatus.BAD_REQUEST
+        )
+        if request.path != self.authorization_path or not is_redirect:
+            return response
+
+        location = response.headers.get("Location")
+        if not location:
+            return response
+        parsed = urlsplit(location)
+        query = parse_qsl(parsed.query, keep_blank_values=True)
+        if not any(key in {"code", "error"} for key, _value in query):
+            return response
+
+        query = [(key, value) for key, value in query if key != "iss"]
+        query.append(("iss", str(settings.SITE_URL).rstrip("/")))
+        response["Location"] = urlunsplit(
+            (
+                parsed.scheme,
+                parsed.netloc,
+                parsed.path,
+                urlencode(query),
+                parsed.fragment,
+            ),
+        )
+        return response
+
+
+class OIDCEndpointAbuseProtectionMiddleware:
+    """Bound registration, token, and revocation requests before parsing."""
+
+    def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]) -> None:
+        self.get_response = get_response
+        self.endpoint_limits: dict[str, tuple[str, str]] = {}
+        for view_name, endpoint, setting_name in _ENDPOINT_SETTINGS:
             try:
                 endpoint_path = reverse(view_name)
             except NoReverseMatch:
@@ -45,16 +104,14 @@ class OIDCEndpointAbuseProtectionMiddleware:
                 # there; an absent route cannot receive work or consume a
                 # budget.
                 continue
-            self.endpoint_limits[endpoint_path] = setting_name
+            self.endpoint_limits[endpoint_path] = (endpoint, setting_name)
 
     def __call__(self, request: HttpRequest) -> HttpResponse:
         """Return OAuth-compatible 429 responses after either budget is spent."""
 
-        setting_name = self.endpoint_limits.get(request.path)
-        if request.method == "POST" and setting_name:
-            endpoint = (
-                "token" if setting_name.startswith("IDP_OIDC_TOKEN") else "revoke"
-            )
+        endpoint_policy = self.endpoint_limits.get(request.path)
+        if request.method == "POST" and endpoint_policy:
+            endpoint, setting_name = endpoint_policy
             identity = _client_identity(request)
             per_ip = max(0, int(getattr(settings, setting_name, 0)))
             global_limit = max(
@@ -68,18 +125,20 @@ class OIDCEndpointAbuseProtectionMiddleware:
                 ),
             )
             if _limit_exceeded(endpoint, "ip", identity, per_ip) or _limit_exceeded(
-                endpoint,
+                "all",
                 "global",
                 "all",
                 global_limit,
             ):
-                return JsonResponse(
+                response = JsonResponse(
                     {
                         "error": "temporarily_unavailable",
                         "error_description": "Too many requests. Retry shortly.",
                     },
                     status=HTTPStatus.TOO_MANY_REQUESTS,
                 )
+                response["Retry-After"] = str(_WINDOW_SECONDS)
+                return response
         return self.get_response(request)
 
 

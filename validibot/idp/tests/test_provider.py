@@ -58,6 +58,9 @@ TEST_CODE_VERIFIER = "pkce-verifier-for-validibot-tests-0123456789"
     SITE_URL=TEST_SITE_URL,
     IDP_OIDC_PRIVATE_KEY=TEST_OIDC_PRIVATE_KEY,
     IDP_OIDC_MCP_RESOURCE_AUDIENCE=TEST_MCP_AUDIENCE,
+    IDP_OIDC_RATE_LIMITS=False,
+    IDP_OIDC_REGISTRATION_REQUESTS_PER_IP_PER_MINUTE=0,
+    IDP_OIDC_ENDPOINT_GLOBAL_REQUESTS_PER_MINUTE=0,
 )
 class ValidibotOIDCProviderTests(TestCase):
     """Verify the Validibot OIDC issuer surface behaves as required for MCP.
@@ -99,6 +102,12 @@ class ValidibotOIDCProviderTests(TestCase):
         )
         self.assertIn("validibot:mcp", payload["scopes_supported"])
         self.assertEqual(payload["code_challenge_methods_supported"], ["S256"])
+        self.assertEqual(
+            payload["registration_endpoint"],
+            f"{TEST_SITE_URL}/identity/o/api/clients",
+        )
+        self.assertTrue(payload["authorization_response_iss_parameter_supported"])
+        self.assertNotIn("client_id_metadata_document_supported", payload)
 
     def test_oauth_authorization_server_metadata_is_derived_from_oidc(self) -> None:
         """RFC 8414 metadata should mirror the OIDC discovery core endpoints."""
@@ -128,6 +137,10 @@ class ValidibotOIDCProviderTests(TestCase):
             oauth_payload["code_challenge_methods_supported"],
             ["S256"],
         )
+        self.assertEqual(
+            oauth_payload["registration_endpoint"],
+            oidc_payload["registration_endpoint"],
+        )
 
     def test_authorization_page_uses_branded_mcp_copy(self) -> None:
         """The consent page should explain the AI-assistant access boundary."""
@@ -151,6 +164,252 @@ class ValidibotOIDCProviderTests(TestCase):
         self.assertContains(response, "connect to your Validibot account")
         self.assertContains(response, "Validibot MCP server")
         self.assertContains(response, "does not grant general administration access")
+        self.assertContains(response, TEST_REDIRECT_URI)
+
+    def test_dcr_registers_codex_as_a_consent_gated_public_client(self) -> None:
+        """Codex should obtain a client ID without an administrator or secret."""
+
+        redirect_uri = "http://127.0.0.1:43123/callback/codex-test"
+        response = self.client.post(
+            reverse("idp:oidc:client_registration"),
+            data=json.dumps(
+                {
+                    "client_name": "Codex",
+                    "redirect_uris": [redirect_uri],
+                    "grant_types": ["authorization_code", "refresh_token"],
+                    "response_types": ["code"],
+                    "token_endpoint_auth_method": "none",
+                    "application_type": "native",
+                },
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        payload = response.json()
+        self.assertNotIn("client_secret", payload)
+        self.assertEqual(payload["token_endpoint_auth_method"], "none")
+        self.assertEqual(payload["scope"], TEST_SCOPE)
+        oidc_client = OIDCClient.objects.get(id=payload["client_id"])
+        self.assertEqual(oidc_client.type, OIDCClient.Type.PUBLIC)
+        self.assertFalse(oidc_client.skip_consent)
+        self.assertEqual(oidc_client.get_default_scopes(), ["validibot:mcp"])
+        self.assertTrue((oidc_client.data or {}).get("dcr"))
+
+        consent = self.client.get(
+            reverse("idp:oidc:authorization"),
+            {
+                "response_type": "code",
+                "client_id": oidc_client.id,
+                "redirect_uri": redirect_uri,
+                "scope": TEST_SCOPE,
+                "state": "state-123",
+                "code_challenge": self._code_challenge(TEST_CODE_VERIFIER),
+                "code_challenge_method": "S256",
+                "resource": TEST_MCP_AUDIENCE,
+            },
+        )
+        self.assertEqual(consent.status_code, 200)
+        self.assertContains(consent, "application running on this computer")
+
+    def test_dcr_client_completes_consent_and_pkce_token_exchange(self) -> None:
+        """A newly registered desktop client must complete the whole OAuth flow."""
+
+        registration = self.client.post(
+            reverse("idp:oidc:client_registration"),
+            data=json.dumps(
+                {
+                    "client_name": "Codex end-to-end",
+                    "redirect_uris": [TEST_REDIRECT_URI],
+                    "grant_types": ["authorization_code", "refresh_token"],
+                    "response_types": ["code"],
+                    "token_endpoint_auth_method": "none",
+                },
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(registration.status_code, 201)
+        client_id = registration.json()["client_id"]
+
+        authorization = self.client.get(
+            reverse("idp:oidc:authorization"),
+            {
+                "response_type": "code",
+                "client_id": client_id,
+                "redirect_uri": TEST_REDIRECT_URI,
+                "scope": TEST_SCOPE,
+                "state": "state-123",
+                "code_challenge": self._code_challenge(TEST_CODE_VERIFIER),
+                "code_challenge_method": "S256",
+                "resource": TEST_MCP_AUDIENCE,
+            },
+        )
+        self.assertEqual(authorization.status_code, 200)
+        signed_request = authorization.context["form"].initial["request"]
+
+        consent = self.client.post(
+            reverse("idp:oidc:authorization"),
+            {
+                "request": signed_request,
+                "scopes": TEST_SCOPE.split(),
+                "action": "grant",
+            },
+        )
+        self.assertEqual(consent.status_code, 302)
+        callback = parse_qs(urlparse(consent["Location"]).query)
+        self.assertEqual(callback["iss"], [TEST_SITE_URL])
+
+        token = self.client.post(
+            reverse("idp:oidc:token"),
+            {
+                "grant_type": "authorization_code",
+                "client_id": client_id,
+                "code": callback["code"][0],
+                "redirect_uri": TEST_REDIRECT_URI,
+                "code_verifier": TEST_CODE_VERIFIER,
+                "resource": TEST_MCP_AUDIENCE,
+            },
+        )
+        self.assertEqual(token.status_code, 200)
+        payload = token.json()
+        decoded = self._decode_jwt_payload(payload["access_token"])
+        self.assertEqual(decoded["aud"], [TEST_MCP_AUDIENCE])
+        self.assertEqual(decoded["scope"], TEST_SCOPE)
+        self.assertIn("refresh_token", payload)
+
+    def test_dcr_registers_claude_hosted_callback(self) -> None:
+        """Claude Desktop should register its hosted callback without a secret."""
+
+        response = self.client.post(
+            reverse("idp:oidc:client_registration"),
+            data=json.dumps(
+                {
+                    "client_name": "Claude",
+                    "redirect_uris": [TEST_REDIRECT_URI],
+                    "grant_types": ["authorization_code", "refresh_token"],
+                    "response_types": ["code"],
+                    "token_endpoint_auth_method": "none",
+                    "scope": "validibot:mcp",
+                    "application_type": "web",
+                },
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        oidc_client = OIDCClient.objects.get(id=response.json()["client_id"])
+        self.assertEqual(oidc_client.get_redirect_uris(), [TEST_REDIRECT_URI])
+        self.assertEqual(oidc_client.get_scopes(), TEST_SCOPE.split())
+
+    def test_dcr_accepts_localhost_with_an_ephemeral_port(self) -> None:
+        """Native clients must be able to choose a safe callback port at runtime."""
+
+        redirect_uri = "http://localhost:54321/oauth/callback"
+        response = self.client.post(
+            reverse("idp:oidc:client_registration"),
+            data=json.dumps(
+                {
+                    "client_name": "Claude Code",
+                    "redirect_uris": [redirect_uri],
+                    "grant_types": ["authorization_code", "refresh_token"],
+                    "response_types": ["code"],
+                    "token_endpoint_auth_method": "none",
+                    "application_type": "native",
+                },
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        client = OIDCClient.objects.get(id=response.json()["client_id"])
+        self.assertEqual(client.get_redirect_uris(), [redirect_uri])
+
+    def test_dcr_rejects_untrusted_redirect_hosts(self) -> None:
+        """An unauthenticated registration must not create an open redirect."""
+
+        response = self.client.post(
+            reverse("idp:oidc:client_registration"),
+            data=json.dumps(
+                {
+                    "client_name": "Impostor",
+                    "redirect_uris": ["https://attacker.example/callback"],
+                    "grant_types": ["authorization_code"],
+                    "response_types": ["code"],
+                    "token_endpoint_auth_method": "none",
+                },
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"], "invalid_client_metadata")
+        self.assertFalse(OIDCClient.objects.filter(name="Impostor").exists())
+
+    def test_dcr_rejects_non_loopback_http_callbacks(self) -> None:
+        """A native callback must never send an authorization code over cleartext."""
+
+        response = self.client.post(
+            reverse("idp:oidc:client_registration"),
+            data=json.dumps(
+                {
+                    "client_name": "Cleartext collector",
+                    "redirect_uris": ["http://attacker.example/callback"],
+                    "grant_types": ["authorization_code"],
+                    "response_types": ["code"],
+                    "token_endpoint_auth_method": "none",
+                },
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"], "invalid_client_metadata")
+        self.assertFalse(
+            OIDCClient.objects.filter(name="Cleartext collector").exists(),
+        )
+
+    def test_dcr_rejects_confidential_desktop_clients(self) -> None:
+        """Automatic registration must never mint a reusable client secret."""
+
+        response = self.client.post(
+            reverse("idp:oidc:client_registration"),
+            data=json.dumps(
+                {
+                    "client_name": "Secret collector",
+                    "redirect_uris": [TEST_REDIRECT_URI],
+                    "grant_types": ["authorization_code"],
+                    "response_types": ["code"],
+                    "token_endpoint_auth_method": "client_secret_basic",
+                },
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"], "invalid_client_metadata")
+        self.assertFalse(OIDCClient.objects.filter(name="Secret collector").exists())
+
+    def test_authorization_response_includes_issuer_identifier(self) -> None:
+        """RFC 9207 should bind the callback to Validibot's exact issuer."""
+
+        oidc_client = self._create_public_client(skip_consent=True)
+        response = self.client.get(
+            reverse("idp:oidc:authorization"),
+            {
+                "response_type": "code",
+                "client_id": oidc_client.id,
+                "redirect_uri": TEST_REDIRECT_URI,
+                "scope": TEST_SCOPE,
+                "state": "state-123",
+                "code_challenge": self._code_challenge(TEST_CODE_VERIFIER),
+                "code_challenge_method": "S256",
+                "resource": TEST_MCP_AUDIENCE,
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        query = parse_qs(urlparse(response["Location"]).query)
+        self.assertEqual(query["iss"], [TEST_SITE_URL])
 
     def test_public_client_token_exchange_requires_pkce_verifier(self) -> None:
         """A public client must provide a code verifier during token exchange."""

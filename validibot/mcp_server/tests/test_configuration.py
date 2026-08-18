@@ -70,6 +70,9 @@ def test_complete_strict_configuration_is_accepted(settings) -> None:
         ("MCP_FILE_ALLOWED_HOSTS", []),
         ("MCP_FILE_ALLOWED_HOSTS", ["*.oaiusercontent.com"]),
         ("MCP_MAX_RESPONSE_BYTES", 0),
+        ("IDP_OIDC_DCR_HTTPS_REDIRECT_HOSTS", ["*.claude.ai"]),
+        ("IDP_OIDC_DCR_INACTIVE_CLIENT_RETENTION_DAYS", 0),
+        ("IDP_OIDC_REGISTRATION_REQUESTS_PER_IP_PER_MINUTE", 0),
         ("IDP_OIDC_REFRESH_TOKEN_EXPIRES_IN", 0),
     ],
 )

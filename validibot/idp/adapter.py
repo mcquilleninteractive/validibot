@@ -13,6 +13,7 @@ from django.core.exceptions import ValidationError
 from django.utils.translation import gettext_lazy as _
 
 from validibot.idp.constants import MCP_OIDC_SCOPE
+from validibot.idp.registration import validate_dynamic_client_registration
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -78,6 +79,20 @@ class ValidibotOIDCAdapter(DefaultOIDCAdapter):
                 code="invalid_target",
             )
 
+    def validate_client_registration(
+        self,
+        *,
+        client: OIDCClient,
+        client_metadata: dict[str, Any],
+        **kwargs: Any,
+    ) -> None:
+        """Restrict DCR to consent-gated public desktop MCP clients."""
+
+        validate_dynamic_client_registration(
+            client=client,
+            client_metadata=client_metadata,
+        )
+
     def populate_access_token(
         self,
         access_token: dict[str, Any],
@@ -118,7 +133,7 @@ class ValidibotOIDCAdapter(DefaultOIDCAdapter):
         if refresh_token and refresh_token.get_resources() == [expected]:
             access_token["aud"] = [expected]
 
-    def populate_server_metadata(self, data: dict[str, str | list[str]]) -> None:
+    def populate_server_metadata(self, data: dict[str, Any]) -> None:
         """Customize allauth's discovery metadata for the public MCP origin.
 
         allauth owns the discovery document and its declared protocol
@@ -130,6 +145,13 @@ class ValidibotOIDCAdapter(DefaultOIDCAdapter):
         scopes = data.get("scopes_supported")
         if isinstance(scopes, list) and MCP_OIDC_SCOPE not in scopes:
             scopes.append(MCP_OIDC_SCOPE)
+
+        # Validibot's authorization-response middleware adds ``iss`` to final
+        # callbacks. Advertising it lets MCP clients enforce RFC 9207 mix-up
+        # protection and use their stable callback/client identities.
+        data["authorization_response_iss_parameter_supported"] = True
+        data["grant_types_supported"] = ["authorization_code", "refresh_token"]
+        data["response_types_supported"] = ["code"]
 
         site_url = str(settings.SITE_URL).rstrip("/")
         for key in _SERVER_ENDPOINT_KEYS:

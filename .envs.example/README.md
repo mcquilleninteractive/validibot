@@ -183,7 +183,13 @@ The official-SDK MCP endpoint runs inside the Django ASGI process at
 | Variable | Description | Default |
 | --- | --- | --- |
 | `IDP_OIDC_MCP_RESOURCE_AUDIENCE` | Exact OAuth resource and access-token audience. | `<SITE_URL>/mcp` |
-| `IDP_OIDC_CHATGPT_REDIRECT_URIS` | Complete app-specific URI generated in ChatGPT app management: `https://chatgpt.com/connector/oauth/{callback_id}`. Omit it to skip ChatGPT client provisioning. | empty |
+| `IDP_OIDC_DCR_ENABLED` | Advertise constrained public-client registration for desktop MCP clients. | `True` |
+| `IDP_OIDC_DCR_HTTPS_REDIRECT_HOSTS` | Comma-separated exact approved HTTPS callback hosts. Native loopback HTTP callbacks are supported separately. | `chatgpt.com,claude.ai` |
+| `IDP_OIDC_DCR_MAX_METADATA_BYTES` | Maximum serialized registration metadata. | `16384` |
+| `IDP_OIDC_DCR_MAX_REDIRECT_URIS` | Maximum callbacks in one registration. | `8` |
+| `IDP_OIDC_DCR_MAX_REDIRECT_URI_LENGTH` | Maximum length of one callback URI. | `2048` |
+| `IDP_OIDC_DCR_INACTIVE_CLIENT_RETENTION_DAYS` | Retention for unused DCR clients with no live token. | `30` |
+| `IDP_OIDC_CHATGPT_REDIRECT_URIS` | Optional complete callback for the predefined hosted ChatGPT plugin client. Desktop Codex and Claude do not use it. | empty |
 | `IDP_OIDC_ACCESS_TOKEN_EXPIRES_IN` | Short access-token lifetime in seconds. | `900` |
 | `IDP_OIDC_REFRESH_TOKEN_EXPIRES_IN` | Absolute rotating refresh-token lifetime in seconds. | `2592000` |
 | `MCP_FILE_ALLOWED_HOSTS` | Comma-separated exact attachment-delivery hosts. Empty denies downloads; wildcards are rejected. | empty |
@@ -197,9 +203,10 @@ The official-SDK MCP endpoint runs inside the Django ASGI process at
 | `MCP_REQUESTS_PER_IP_PER_MINUTE` | Shared-cache MCP transport budget per trusted client address. | `240` |
 | `MCP_FAILED_AUTH_PER_IP_PER_MINUTE` | Failed bearer attempts allowed per trusted client address. | `20` |
 | `MCP_GLOBAL_REQUESTS_PER_MINUTE` | Deployment-wide MCP transport ceiling. | `3000` |
+| `IDP_OIDC_REGISTRATION_REQUESTS_PER_IP_PER_MINUTE` | OAuth client registrations per trusted client address. | `10` |
 | `IDP_OIDC_TOKEN_REQUESTS_PER_IP_PER_MINUTE` | OAuth token requests per trusted client address. | `60` |
 | `IDP_OIDC_REVOKE_REQUESTS_PER_IP_PER_MINUTE` | OAuth revocation requests per trusted client address. | `30` |
-| `IDP_OIDC_ENDPOINT_GLOBAL_REQUESTS_PER_MINUTE` | Deployment-wide token/revocation ceiling. | `1000` |
+| `IDP_OIDC_ENDPOINT_GLOBAL_REQUESTS_PER_MINUTE` | Deployment-wide registration/token/revocation ceiling. | `1000` |
 | `MCP_ALLOWED_ORIGINS` | Additional exact trusted browser origins. | empty |
 
 ### Django Variables (`.django`)

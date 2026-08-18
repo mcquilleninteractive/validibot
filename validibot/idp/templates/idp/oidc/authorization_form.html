@@ -17,6 +17,24 @@
 {% endelement %}
 
 {% element p %}
+{% trans "Registered callback location(s):" %}
+{% for redirect_uri in client.get_redirect_uris %}
+  <code>{{ redirect_uri }}</code>
+  {% if not forloop.last %}
+    ,
+  {% endif %}
+{% endfor %}
+{% endelement %}
+
+{% for redirect_uri in client.get_redirect_uris %}
+  {% if "localhost" in redirect_uri or "127.0.0.1" in redirect_uri or "[::1]" in redirect_uri %}
+    {% element p %}
+    {% trans "This client returns authorization to an application running on this computer. Continue only if you started this connection." %}
+  {% endelement %}
+{% endif %}
+{% endfor %}
+
+{% element p %}
 {% trans "This lets the connected AI assistant browse and run workflows through the Validibot MCP server. It does not grant general administration access to your account." %}
 {% endelement %}
 

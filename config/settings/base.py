@@ -318,9 +318,12 @@ MIDDLEWARE = [
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.locale.LocaleMiddleware",
     "django.middleware.common.CommonMiddleware",
-    # Token/revocation requests are public and CSRF-exempt by protocol. Bound
-    # them before body parsing and OAuth cryptography, using the shared cache.
+    # Registration/token/revocation requests are public and CSRF-exempt by
+    # protocol. Bound them before expensive OAuth work, using the shared cache.
     "validibot.idp.middleware.OIDCEndpointAbuseProtectionMiddleware",
+    # allauth validates the OAuth callback first; this response-boundary shim
+    # then adds the RFC 9207 issuer identifier advertised in discovery.
+    "validibot.idp.middleware.OIDCAuthorizationResponseIssuerMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     # Must come AFTER AuthenticationMiddleware so ``request.user`` is
@@ -1333,6 +1336,7 @@ TASK_OIDC_ALLOWED_SERVICE_ACCOUNTS = env.list(
 #   * ValidibotOIDCAdapter       — exact resource policy + canonical metadata
 #   * RFC 8414 discovery alias   — reuses allauth's official discovery view
 #   * ensure_oidc_clients command — idempotent bootstrap of public agent clients
+#   * constrained DCR policy and bounded inactive-client cleanup
 #
 # Store the signing key PEM base64-encoded (``base64 < key.pem | tr -d '\n'``)
 # to avoid multiline escaping pain in env files and secret stores.
@@ -1379,7 +1383,36 @@ def _decode_idp_pem_from_env(b64_value: str) -> str:
 IDP_OIDC_ADAPTER = "validibot.idp.adapter.ValidibotOIDCAdapter"
 IDP_OIDC_ACCESS_TOKEN_FORMAT = "jwt"
 IDP_OIDC_ROTATE_REFRESH_TOKEN = True
-IDP_OIDC_DCR_ENABLED = False
+# Desktop MCP clients do not have a pre-existing OAuth client relationship
+# with arbitrary Validibot deployments. Constrained DCR is enabled for current
+# Codex and Claude clients. CIMD remains disabled until allauth can apply
+# server-owned scopes and RFC 8252 variable-port matching to localhost without
+# application-level patching. DCR is deliberately public-client-only and does
+# not require an initial access token; the adapter applies redirect, scope,
+# grant, and consent policy before allauth persists a registration.
+IDP_OIDC_CIMD_ENABLED = False
+IDP_OIDC_DCR_ENABLED = env.bool("IDP_OIDC_DCR_ENABLED", default=True)
+IDP_OIDC_DCR_REQUIRES_INITIAL_ACCESS_TOKEN = False
+IDP_OIDC_DCR_HTTPS_REDIRECT_HOSTS = env.list(
+    "IDP_OIDC_DCR_HTTPS_REDIRECT_HOSTS",
+    default=["chatgpt.com", "claude.ai"],
+)
+IDP_OIDC_DCR_MAX_METADATA_BYTES = env.int(
+    "IDP_OIDC_DCR_MAX_METADATA_BYTES",
+    default=16_384,
+)
+IDP_OIDC_DCR_MAX_REDIRECT_URIS = env.int(
+    "IDP_OIDC_DCR_MAX_REDIRECT_URIS",
+    default=8,
+)
+IDP_OIDC_DCR_MAX_REDIRECT_URI_LENGTH = env.int(
+    "IDP_OIDC_DCR_MAX_REDIRECT_URI_LENGTH",
+    default=2_048,
+)
+IDP_OIDC_DCR_INACTIVE_CLIENT_RETENTION_DAYS = env.int(
+    "IDP_OIDC_DCR_INACTIVE_CLIENT_RETENTION_DAYS",
+    default=30,
+)
 IDP_OIDC_AUTHORIZATION_CODE_EXPIRES_IN = env.int(
     "IDP_OIDC_AUTHORIZATION_CODE_EXPIRES_IN",
     default=60,
@@ -1435,8 +1468,14 @@ MCP_GLOBAL_REQUESTS_PER_MINUTE = env.int(
     "MCP_GLOBAL_REQUESTS_PER_MINUTE",
     default=3_000,
 )
-# The OAuth token and revocation endpoints sit outside the MCP SDK transport,
-# so they receive their own shared-cache limits at the Django boundary.
+# The OAuth registration, token, and revocation endpoints sit outside the MCP
+# SDK transport, so they receive their own shared-cache limits at the Django
+# boundary. allauth also applies its tighter 3/min/IP DCR default; the limits
+# here add one deployment-wide ceiling shared by all three endpoint types.
+IDP_OIDC_REGISTRATION_REQUESTS_PER_IP_PER_MINUTE = env.int(
+    "IDP_OIDC_REGISTRATION_REQUESTS_PER_IP_PER_MINUTE",
+    default=10,
+)
 IDP_OIDC_TOKEN_REQUESTS_PER_IP_PER_MINUTE = env.int(
     "IDP_OIDC_TOKEN_REQUESTS_PER_IP_PER_MINUTE",
     default=60,

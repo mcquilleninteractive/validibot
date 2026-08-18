@@ -65,6 +65,19 @@ def validate_production_mcp_configuration() -> None:
     if "*" in getattr(settings, "ALLOWED_HOSTS", []):
         failures.append("DJANGO_ALLOWED_HOSTS must not contain a wildcard")
 
+    dcr_redirect_hosts = [
+        str(host).strip()
+        for host in getattr(settings, "IDP_OIDC_DCR_HTTPS_REDIRECT_HOSTS", [])
+        if str(host).strip()
+    ]
+    if bool(getattr(settings, "IDP_OIDC_DCR_ENABLED", False)) and (
+        not dcr_redirect_hosts
+        or any("*" in host or "/" in host or ":" in host for host in dcr_redirect_hosts)
+    ):
+        failures.append(
+            "IDP_OIDC_DCR_HTTPS_REDIRECT_HOSTS must list exact DNS hostnames",
+        )
+
     positive_settings = (
         "MCP_FILE_MAX_BYTES",
         "MCP_FILE_DOWNLOAD_TOTAL_TIMEOUT_SECONDS",
@@ -76,6 +89,11 @@ def validate_production_mcp_configuration() -> None:
         "MCP_REQUESTS_PER_IP_PER_MINUTE",
         "MCP_FAILED_AUTH_PER_IP_PER_MINUTE",
         "MCP_GLOBAL_REQUESTS_PER_MINUTE",
+        "IDP_OIDC_DCR_MAX_METADATA_BYTES",
+        "IDP_OIDC_DCR_MAX_REDIRECT_URIS",
+        "IDP_OIDC_DCR_MAX_REDIRECT_URI_LENGTH",
+        "IDP_OIDC_DCR_INACTIVE_CLIENT_RETENTION_DAYS",
+        "IDP_OIDC_REGISTRATION_REQUESTS_PER_IP_PER_MINUTE",
         "IDP_OIDC_TOKEN_REQUESTS_PER_IP_PER_MINUTE",
         "IDP_OIDC_REVOKE_REQUESTS_PER_IP_PER_MINUTE",
         "IDP_OIDC_ENDPOINT_GLOBAL_REQUESTS_PER_MINUTE",
