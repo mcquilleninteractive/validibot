@@ -165,6 +165,9 @@ class ValidibotOIDCProviderTests(TestCase):
         self.assertContains(response, "Validibot MCP server")
         self.assertContains(response, "does not grant general administration access")
         self.assertContains(response, TEST_REDIRECT_URI)
+        self.assertContains(response, 'name="action"')
+        self.assertContains(response, 'value="grant"')
+        self.assertContains(response, 'value="cancel"')
 
     def test_dcr_registers_codex_as_a_consent_gated_public_client(self) -> None:
         """Codex should obtain a client ID without an administrator or secret."""
