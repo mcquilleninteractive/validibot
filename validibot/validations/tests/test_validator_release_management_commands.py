@@ -1,10 +1,11 @@
 """Regression tests for validator release management-command interfaces.
 
 Django's ``BaseCommand`` reserves global options such as ``--version``.
-Release lifecycle commands must therefore use a distinct option name for the
-backend release identity, or their parsers fail before any operator action can
-run. These tests construct the real parsers so option collisions cannot hide
-behind service-level test coverage.
+Release lifecycle commands must therefore use distinct, explicit options for
+backend identity and destructive lifecycle exceptions, or their parsers fail
+before any operator action can run. These tests construct the real parsers so
+option collisions and missing safety flags cannot hide behind service-level
+test coverage.
 """
 
 from io import StringIO
@@ -14,6 +15,7 @@ from django.core.management import call_command
 
 from validibot.validations.acceptance import ROUTINE_ACCEPTANCE_ATTEMPTS
 from validibot.validations.management.commands import activate_validator_backend_release
+from validibot.validations.management.commands import record_validator_provider_deletion
 from validibot.validations.management.commands import retire_validator_backend_release
 
 
@@ -59,6 +61,26 @@ def test_retirement_parser_accepts_release_version_without_shadowing_django():
     assert options.release_version == "0.15.4"
     assert options.immediate is True
     assert options.allow_unaccepted_candidate is True
+
+
+def test_provider_deletion_parser_requires_explicit_superseded_deactivation():
+    """Latest-only repair must be opt-in rather than routine cleanup behavior."""
+    parser = record_validator_provider_deletion.Command().create_parser(
+        "manage.py",
+        "record_validator_provider_deletion",
+    )
+
+    routine = parser.parse_args(["--resource", "projects/example/services/old"])
+    latest_only = parser.parse_args(
+        [
+            "--resource",
+            "projects/example/services/old",
+            "--deactivate-superseded",
+        ]
+    )
+
+    assert routine.deactivate_superseded is False
+    assert latest_only.deactivate_superseded is True
 
 
 def test_certification_runs_both_acceptance_shapes_in_one_command():

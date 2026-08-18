@@ -795,6 +795,83 @@ def test_service_retirement_requires_inactive_cold_and_drained_deployment():
 
 
 @pytest.mark.django_db
+def test_provider_deletion_checkpoint_requires_explicit_stale_route_repair():
+    """Routine cleanup must not silently deactivate a deployment route."""
+    deployment = _save_ready(
+        _service_deployment(validator=ValidatorFactory()),
+        role=ExecutionDeploymentRoutingRole.PRIMARY,
+    )
+
+    with pytest.raises(ExecutionDeploymentResolutionError, match="routing slot"):
+        record_execution_deployment_provider_deleted(deployment)
+
+    deployment.refresh_from_db()
+    assert deployment.routing_role == ExecutionDeploymentRoutingRole.PRIMARY
+    assert deployment.provider_deleted_at is None
+
+
+@pytest.mark.django_db
+def test_latest_only_checkpoint_deactivates_deleted_superseded_route():
+    """Provider absence must repair stale historical routing before retirement.
+
+    A semantic Validator version can leave its accepted route marked primary
+    after the current version moves forward. Latest-only reconciliation must
+    atomically make that historical row inactive and checkpoint provider
+    deletion so the existing retirement phase can finish it.
+    """
+    deployment = _save_ready(
+        _service_deployment(
+            validator=ValidatorFactory(),
+            backend_slug="energyplus",
+            backend_release_identity="0.16.1",
+        ),
+        role=ExecutionDeploymentRoutingRole.PRIMARY,
+    )
+
+    checkpointed = record_execution_deployment_provider_deleted(
+        deployment,
+        deactivate_superseded=True,
+    )
+
+    assert checkpointed.routing_role == ExecutionDeploymentRoutingRole.INACTIVE
+    assert checkpointed.activated_at is None
+    assert checkpointed.deactivated_at == checkpointed.provider_deleted_at
+    assert checkpointed.deactivation_cause == (
+        ExecutionDeploymentDeactivationCause.SUPERSEDED_BY_ACCEPTED_RELEASE
+    )
+    audit_entry = AuditLogEntry.objects.get(
+        action=AuditAction.VALIDATOR_DEPLOYMENT_DEACTIVATED,
+        target_id=str(deployment.pk),
+    )
+    assert audit_entry.changes["routing_role"] == [
+        ExecutionDeploymentRoutingRole.PRIMARY,
+        ExecutionDeploymentRoutingRole.INACTIVE,
+    ]
+    assert audit_entry.metadata["provider_resource_deleted"] is True
+    assert audit_entry.metadata["latest_only_reconciliation"] is True
+
+
+@pytest.mark.django_db
+def test_latest_only_checkpoint_refuses_stale_route_with_unfinished_attempt():
+    """Repair must fail closed when historical work still pins the deployment."""
+    deployment = _save_ready(
+        _service_deployment(validator=ValidatorFactory()),
+        role=ExecutionDeploymentRoutingRole.PRIMARY,
+    )
+    ExecutionAttemptFactory(deployment=deployment, state="RUNNING")
+
+    with pytest.raises(ExecutionDeploymentResolutionError, match="nonterminal"):
+        record_execution_deployment_provider_deleted(
+            deployment,
+            deactivate_superseded=True,
+        )
+
+    deployment.refresh_from_db()
+    assert deployment.routing_role == ExecutionDeploymentRoutingRole.PRIMARY
+    assert deployment.provider_deleted_at is None
+
+
+@pytest.mark.django_db
 def test_managed_attempt_pins_route_snapshot_and_absolute_deadline():
     """Dispatch evidence must be complete before the first provider API call."""
     validator = ValidatorFactory()

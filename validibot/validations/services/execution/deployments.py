@@ -610,21 +610,104 @@ def record_execution_deployment_provider_deleted(
     deployment: ValidatorExecutionDeployment,
     *,
     deleted_at=None,
+    deactivate_superseded: bool = False,
 ) -> ValidatorExecutionDeployment:
-    """Record confirmed absence for one provider member during resumable cleanup."""
+    """Record confirmed provider absence during resumable release cleanup.
+
+    Normal drained-release cleanup requires the deployment to be inactive
+    before provider deletion is checkpointed. The explicit
+    ``deactivate_superseded`` path is reserved for latest-only reconciliation:
+    it repairs a historical semantic Validator route that remained active after
+    its provider release was superseded and removed. That repair remains
+    fail-closed when the deployment has nonterminal attempts.
+    """
+    from validibot.validations.constants import EXECUTION_ATTEMPT_TERMINAL_STATES
+    from validibot.validations.models import ExecutionAttempt
     from validibot.validations.models import ValidatorExecutionDeployment
 
     selected = ValidatorExecutionDeployment.objects.select_for_update().get(
         pk=deployment.pk
     )
-    if selected.routing_role != ExecutionDeploymentRoutingRole.INACTIVE:
+    previous_role = selected.routing_role
+    if (
+        previous_role != ExecutionDeploymentRoutingRole.INACTIVE
+        and not deactivate_superseded
+    ):
         raise ExecutionDeploymentResolutionError(
             f"Deployment {selected.pk} still occupies a routing slot."
         )
-    if selected.provider_deleted_at is not None:
+    if previous_role != ExecutionDeploymentRoutingRole.INACTIVE and (
+        ExecutionAttempt.objects.filter(deployment=selected)
+        .exclude(state__in=EXECUTION_ATTEMPT_TERMINAL_STATES)
+        .exists()
+    ):
+        raise ExecutionDeploymentResolutionError(
+            f"Deployment {selected.pk} still has a nonterminal attempt."
+        )
+
+    checkpoint_time = deleted_at or timezone.now()
+    previous_deactivated_at = selected.deactivated_at
+    previous_deactivation_cause = selected.deactivation_cause
+    previous_provider_deleted_at = selected.provider_deleted_at
+    update_fields = []
+    if previous_role != ExecutionDeploymentRoutingRole.INACTIVE:
+        selected.routing_role = ExecutionDeploymentRoutingRole.INACTIVE
+        selected.activated_at = None
+        selected.deactivated_at = checkpoint_time
+        selected.deactivation_cause = (
+            ExecutionDeploymentDeactivationCause.SUPERSEDED_BY_ACCEPTED_RELEASE
+        )
+        update_fields.extend(
+            [
+                "routing_role",
+                "activated_at",
+                "deactivated_at",
+                "deactivation_cause",
+            ]
+        )
+    if selected.provider_deleted_at is None:
+        selected.provider_deleted_at = checkpoint_time
+        update_fields.append("provider_deleted_at")
+    if not update_fields:
         return selected
-    selected.provider_deleted_at = deleted_at or timezone.now()
-    selected.save(update_fields=["provider_deleted_at", "modified"])
+    selected.save(update_fields=[*update_fields, "modified"])
+
+    if previous_role != ExecutionDeploymentRoutingRole.INACTIVE:
+        changes = {
+            "routing_role": [previous_role, selected.routing_role],
+            "deactivated_at": [
+                (
+                    previous_deactivated_at.isoformat()
+                    if previous_deactivated_at
+                    else None
+                ),
+                checkpoint_time.isoformat(),
+            ],
+            "deactivation_cause": [
+                previous_deactivation_cause,
+                selected.deactivation_cause,
+            ],
+        }
+        if previous_provider_deleted_at != selected.provider_deleted_at:
+            changes["provider_deleted_at"] = [
+                (
+                    previous_provider_deleted_at.isoformat()
+                    if previous_provider_deleted_at
+                    else None
+                ),
+                selected.provider_deleted_at.isoformat(),
+            ]
+        _record_operator_audit(
+            selected,
+            action=AuditAction.VALIDATOR_DEPLOYMENT_DEACTIVATED,
+            changes=changes,
+            metadata={
+                "backend_slug": selected.backend_slug,
+                "backend_release": selected.backend_release_identity,
+                "provider_resource_deleted": True,
+                "latest_only_reconciliation": True,
+            },
+        )
     return selected
 
 

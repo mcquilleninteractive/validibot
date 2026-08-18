@@ -36,6 +36,7 @@ ROUTINE_RECIPE_HEADERS = (
 )
 EXPECTED_STATUS_SELECTION_CALL_COUNT = 3
 EXPECTED_NORMAL_ROUTE_REFERENCES = 3
+EXPECTED_LATEST_ONLY_STATE_EXPORTS = 2
 
 
 def _recipe(text: str, name: str, next_marker: str) -> str:
@@ -159,6 +160,13 @@ def test_latest_only_retries_database_finalization_without_provider_deletions():
 
     assert "exit 0" not in no_provider_branch
     assert "(.deployment_history // .deployments)[]" in recipe
+    assert "every historical deployment attempt to be terminal" in recipe
+    assert "--deactivate-superseded" in recipe
+    assert '[ "$role" = "INACTIVE" ] || continue' not in recipe
+    assert (
+        recipe.count("_validator-state-export {{stage}}")
+        == EXPECTED_LATEST_ONLY_STATE_EXPORTS
+    )
     assert "--allow-unaccepted-candidate" in recipe
 
 

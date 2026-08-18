@@ -4680,6 +4680,11 @@ validator-latest-only stage: _require-gcp-config
     fi
 
     just gcp _validator-state-export {{stage}} "$WORK_DIR/database.json"
+    if ! jq -e 'all((.deployment_history // .deployments)[]; ((.unfinished_attempts // 0) == 0))' "$WORK_DIR/database.json" >/dev/null; then
+        echo "Error: latest-only reconciliation requires every historical deployment attempt to be terminal." >&2
+        jq -r '(.deployment_history // .deployments)[] | select((.unfinished_attempts // 0) != 0) | "  \(.backend) \(.version) \(.provider_resource_name): \(.unfinished_attempts) unfinished"' "$WORK_DIR/database.json" >&2
+        exit 1
+    fi
     : >"$WORK_DIR/expected-services"
     : >"$WORK_DIR/expected-jobs"
     while IFS=$'\t' read -r backend version; do
@@ -4769,19 +4774,23 @@ validator-latest-only stage: _require-gcp-config
         exit 1
     fi
 
-    # Mark every deleted inactive provider row as absent, including resources
-    # already missing from Cloud Run. Legacy provider names may have no row;
-    # those are intentionally just removed from the provider inventory.
-    while IFS=$'\t' read -r backend version resource role deleted_at; do
+    # Mark every deleted provider row as absent, including resources already
+    # missing from Cloud Run. The explicit latest-only option also repairs stale
+    # historical routes that remained active after their semantic Validator was
+    # superseded. Legacy provider names may have no row; those are intentionally
+    # just removed from the provider inventory.
+    while IFS= read -r resource; do
         [ -n "$resource" ] || continue
-        [ "$role" = "INACTIVE" ] || continue
-        [ -n "$deleted_at" ] && continue
         basename="${resource##*/}"
         grep -Fqx "$basename" "$WORK_DIR/expected-services" && continue
         grep -Fqx "$basename" "$WORK_DIR/expected-jobs" && continue
         just gcp management-cmd {{stage}} \
-            "record_validator_provider_deletion --resource=$resource"
-    done < <(jq -r '(.deployment_history // .deployments)[] | [.backend, .version, .provider_resource_name, .routing_role, (.provider_deleted_at // "")] | @tsv' "$WORK_DIR/database.json")
+            "record_validator_provider_deletion --resource=$resource --deactivate-superseded"
+    done < <(jq -r '(.deployment_history // .deployments)[] | select(.provider_deleted_at == null or .routing_role != "INACTIVE") | .provider_resource_name' "$WORK_DIR/database.json" | sort -u)
+
+    # Re-read the state changed by the checkpoint commands so the retirement
+    # phase observes repaired routing roles and provider deletion timestamps.
+    just gcp _validator-state-export {{stage}} "$WORK_DIR/database.json"
 
     # Complete the immediate retirement checkpoint for old release pairs and
     # wholly unaccepted failed candidates. The management command still refuses
