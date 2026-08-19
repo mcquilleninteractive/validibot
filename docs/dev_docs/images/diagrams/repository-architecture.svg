@@ -1,15 +1,15 @@
 <svg xmlns="http://www.w3.org/2000/svg"
-     viewBox="0 0 1500 860"
+     viewBox="0 0 1500 960"
      role="img"
      aria-labelledby="repository-architecture-title repository-architecture-description">
   <title id="repository-architecture-title">Complete Validibot project architecture</title>
   <desc id="repository-architecture-description">
-    The community repository contains the Django application and the official
-    MCP SDK endpoint embedded in its ASGI process. Thin Pro and Enterprise
-    packages register licenses and features. Validibot Cloud imports Pro and
-    overlays settings on Django. The community application and validator
-    backends use validibot-shared, while the CLI accesses Django over REST and
-    MCP tools call Django application services directly.
+    Web users, API users, user AI agents, and the Validibot command-line
+    interface send requests to the community Django application. The official
+    MCP SDK and its ASGI route are embedded inside Django and call application
+    services directly. Thin Pro and Enterprise packages register licenses and
+    features. Validibot Cloud imports Pro and overlays settings on Django. The
+    community application and validator backends use validibot-shared.
   </desc>
   <defs>
     <style>
@@ -25,7 +25,9 @@
       .subtitle { fill: #526079; font: 16px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
       .group-title-blue { fill: #1d4ed8; font: 700 18px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
       .group-title-purple { fill: #6d28d9; font: 700 18px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .section-title { fill: #394762; font: 700 15px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
       .label { fill: #172033; font: 700 17px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; text-anchor: middle; }
+      .source-label { fill: #172033; font: 700 15px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; text-anchor: middle; }
       .detail { fill: #526079; font: 14px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; text-anchor: middle; }
       .edge-label { fill: #394762; font: 13px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; text-anchor: middle; }
       .edge { fill: none; stroke: #526b94; stroke-width: 2.1; marker-end: url(#arrow); }
@@ -40,89 +42,92 @@
     </marker>
   </defs>
 
-  <rect class="background" width="1500" height="860" rx="20"/>
+  <rect class="background" width="1500" height="960" rx="20"/>
   <text class="title" x="50" y="48">Validibot project architecture</text>
-  <text class="subtitle" x="50" y="76">Business logic stays in community; private packages activate features or add hosted infrastructure.</text>
+  <text class="subtitle" x="50" y="76">Business logic stays in community; users and tools enter the Django application through web, API, or MCP.</text>
 
-  <rect class="group-community" x="350" y="110" width="690" height="330" rx="18"/>
-  <text class="group-title-blue" x="380" y="146">validibot · community repository · AGPL-3.0</text>
+  <text class="section-title" x="45" y="205">Incoming requests</text>
 
-  <rect class="node-blue" x="395" y="180" width="330" height="135" rx="14"/>
-  <text class="label" x="560" y="221">Django application</text>
-  <text class="detail" x="560" y="250">workflows · validators · findings</text>
-  <text class="detail" x="560" y="274">REST API</text>
+  <rect class="node" x="45" y="225" width="280" height="50" rx="12"/>
+  <text class="source-label" x="185" y="256">User (web)</text>
 
-  <rect class="node" x="770" y="180" width="225" height="105" rx="14"/>
-  <text class="label" x="882.5" y="220">Django services</text>
-  <text class="detail" x="882.5" y="249">auth · policy · launch</text>
+  <rect class="node" x="45" y="295" width="280" height="50" rx="12"/>
+  <text class="source-label" x="185" y="326">User (API)</text>
 
-  <rect class="node" x="770" y="325" width="225" height="80" rx="14"/>
-  <text class="label" x="882.5" y="360">Embedded MCP</text>
-  <text class="detail" x="882.5" y="383">official SDK · ASGI /mcp</text>
+  <rect class="node" x="45" y="365" width="280" height="50" rx="12"/>
+  <text class="source-label" x="185" y="396">User AI agent (MCP)</text>
 
-  <rect class="node" x="55" y="180" width="225" height="105" rx="14"/>
-  <text class="label" x="167.5" y="221">validibot-cli</text>
-  <text class="detail" x="167.5" y="250">terminal and CI clients</text>
+  <rect class="node" x="45" y="435" width="280" height="50" rx="12"/>
+  <text class="source-label" x="185" y="466">validibot-cli (API)</text>
 
-  <rect class="node" x="55" y="345" width="225" height="105" rx="14"/>
-  <text class="label" x="167.5" y="386">AI agents</text>
-  <text class="detail" x="167.5" y="415">Streamable HTTP + OAuth</text>
+  <rect class="group-community" x="385" y="90" width="720" height="465" rx="18"/>
+  <text class="group-title-blue" x="415" y="126">validibot · community repository · AGPL-3.0</text>
 
-  <rect class="node-green" x="1165" y="125" width="275" height="115" rx="14"/>
-  <text class="label" x="1302.5" y="167">validibot-shared</text>
-  <text class="detail" x="1302.5" y="196">Pydantic envelope models</text>
+  <rect class="node-blue" x="425" y="150" width="640" height="355" rx="16"/>
+  <text class="label" x="745" y="188">Django application</text>
+  <text class="detail" x="745" y="214">web UI · REST API · workflows · validators · findings</text>
 
-  <rect class="node-green" x="1165" y="315" width="275" height="125" rx="14"/>
-  <text class="label" x="1302.5" y="356">Validator backends</text>
-  <text class="detail" x="1302.5" y="385">advanced validator</text>
-  <text class="detail" x="1302.5" y="409">containers</text>
+  <rect class="node" x="500" y="350" width="245" height="90" rx="12"/>
+  <text class="label" x="622.5" y="386">Embedded MCP</text>
+  <text class="detail" x="622.5" y="414">official SDK · /mcp · Pro-gated</text>
 
-  <rect class="group-commercial" x="350" y="555" width="690" height="210" rx="18"/>
-  <text class="group-title-purple" x="380" y="591">Thin commercial activation layers · private</text>
+  <rect class="node" x="790" y="240" width="230" height="230" rx="12"/>
+  <text class="label" x="905" y="282">Django services</text>
+  <text class="detail" x="905" y="312">auth · policy · launch</text>
+  <text class="detail" x="905" y="337">application logic</text>
 
-  <rect class="node-purple" x="395" y="625" width="260" height="100" rx="14"/>
-  <text class="label" x="525" y="665">validibot-pro</text>
-  <text class="detail" x="525" y="694">Pro license and features</text>
+  <rect class="node-green" x="1170" y="125" width="275" height="115" rx="14"/>
+  <text class="label" x="1307.5" y="167">validibot-shared</text>
+  <text class="detail" x="1307.5" y="196">Pydantic envelope models</text>
 
-  <rect class="node-purple" x="730" y="625" width="265" height="100" rx="14"/>
-  <text class="label" x="862.5" y="665">validibot-enterprise</text>
-  <text class="detail" x="862.5" y="694">Enterprise license and SSO</text>
+  <rect class="node-green" x="1170" y="350" width="275" height="125" rx="14"/>
+  <text class="label" x="1307.5" y="391">Validator backends</text>
+  <text class="detail" x="1307.5" y="420">advanced validator</text>
+  <text class="detail" x="1307.5" y="444">containers</text>
 
-  <rect class="node-orange" x="50" y="595" width="240" height="130" rx="14"/>
-  <text class="label" x="170" y="636">validibot-cloud</text>
-  <text class="detail" x="170" y="665">billing · metering</text>
-  <text class="detail" x="170" y="689">tenancy · hosted runs</text>
+  <rect class="group-commercial" x="385" y="690" width="720" height="220" rx="18"/>
+  <text class="group-title-purple" x="415" y="726">Thin commercial activation layers · private</text>
 
-  <path class="edge" d="M 280 232.5 H 395"/>
-  <text class="edge-label" x="337" y="219">REST</text>
+  <rect class="node-purple" x="430" y="760" width="275" height="105" rx="14"/>
+  <text class="label" x="567.5" y="802">validibot-pro</text>
+  <text class="detail" x="567.5" y="831">Pro license and features</text>
 
-  <path class="edge" d="M 280 397.5 H 770"/>
-  <text class="edge-label" x="525" y="383">MCP</text>
+  <rect class="node-purple" x="785" y="760" width="275" height="105" rx="14"/>
+  <text class="label" x="922.5" y="802">validibot-enterprise</text>
+  <text class="detail" x="922.5" y="831">Enterprise license and SSO</text>
 
-  <path class="edge" d="M 882.5 325 V 285"/>
-  <text class="edge-label" x="923" y="310">direct</text>
+  <rect class="node-orange" x="45" y="735" width="280" height="130" rx="14"/>
+  <text class="label" x="185" y="776">validibot-cloud</text>
+  <text class="detail" x="185" y="805">billing · metering</text>
+  <text class="detail" x="185" y="829">tenancy · hosted runs</text>
 
-  <path class="edge" d="M 725 220 C 935 100, 1040 170, 1165 182"/>
-  <text class="edge-label" x="952" y="124">uses</text>
+  <path class="edge" d="M 325 250 H 790"/>
+  <path class="edge" d="M 325 320 H 790"/>
+  <path class="edge" d="M 325 390 H 500"/>
+  <path class="edge" d="M 325 460 H 790"/>
 
-  <path class="edge" d="M 725 285 V 470 H 1105 V 378 H 1165"/>
-  <text class="edge-label" x="1025" y="458">dispatches runs</text>
+  <path class="edge" d="M 745 395 H 790"/>
+  <text class="edge-label" x="767" y="383">direct</text>
 
-  <path class="edge" d="M 1302.5 315 V 240"/>
-  <text class="edge-label" x="1340" y="283">uses</text>
+  <path class="edge" d="M 1020 270 C 1085 215, 1115 185, 1170 182.5"/>
+  <text class="edge-label" x="1094" y="210">uses</text>
 
-  <path class="edge-purple" d="M 525 625 H 330 V 505 H 505 V 315"/>
-  <text class="edge-label" x="445" y="495">registers license</text>
+  <path class="edge" d="M 1020 420 C 1080 420, 1115 412.5, 1170 412.5"/>
+  <text class="edge-label" x="1093" y="440">dispatches runs</text>
 
-  <path class="edge-purple" d="M 862.5 625 H 1085 V 530 H 655 V 315"/>
-  <text class="edge-label" x="790" y="520">registers features</text>
+  <path class="edge" d="M 1307.5 350 V 240"/>
+  <text class="edge-label" x="1345" y="300">uses</text>
 
-  <path class="edge" d="M 290 650 H 395"/>
-  <text class="edge-label" x="342" y="637">imports</text>
+  <path class="edge-purple" d="M 567.5 760 V 615 H 560 V 505"/>
+  <text class="edge-label" x="640" y="625">registers license</text>
 
-  <path class="edge-dashed" d="M 170 595 V 500 H 325 V 285 H 395"/>
-  <text class="edge-label" x="248" y="490">settings overlay</text>
+  <path class="edge-purple" d="M 922.5 760 V 630 H 915 V 505"/>
+  <text class="edge-label" x="990" y="642">registers features</text>
 
-  <path class="edge-dashed" d="M 770 365 C 730 440, 675 425, 650 315"/>
-  <text class="edge-label" x="790" y="455">mcp_server feature gate</text>
+  <path class="edge" d="M 325 800 H 430"/>
+  <text class="edge-label" x="377" y="787">imports</text>
+
+  <path class="edge-dashed" d="M 185 735 V 625 H 365 V 480 H 425"/>
+  <text class="edge-label" x="273" y="615">settings overlay</text>
+
 </svg>

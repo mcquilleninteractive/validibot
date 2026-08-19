@@ -21,6 +21,7 @@ from validibot.mcp_server.exceptions import MCPApplicationError
 from validibot.mcp_server.references import build_run_reference
 from validibot.mcp_server.references import build_workflow_reference
 from validibot.mcp_server.schemas import StartValidationInput
+from validibot.mcp_server.services import authorize_validation_start
 from validibot.mcp_server.services import get_validation_run
 from validibot.mcp_server.services import get_workflow
 from validibot.mcp_server.services import list_validation_findings
@@ -33,6 +34,7 @@ from validibot.users.tests.factories import grant_role
 from validibot.validations.constants import Severity
 from validibot.validations.constants import ValidationRunSource
 from validibot.validations.constants import ValidationRunStatus
+from validibot.validations.constants import ValidatorAvailabilityState
 from validibot.validations.models import ValidationRun
 from validibot.validations.tests.factories import ValidationFindingFactory
 from validibot.validations.tests.factories import ValidationRunFactory
@@ -175,6 +177,31 @@ def test_workflow_detail_caps_steps_and_reports_truncation() -> None:
 
     assert len(result.steps) == MCP_MAX_WORKFLOW_STEPS
     assert result.steps_truncated is True
+
+
+def test_start_reports_unavailable_validator_as_workflow_configuration_error() -> None:
+    """A broken workflow must not be misreported as an identity denial."""
+
+    user, workflow = _accessible_workflow()
+    step = WorkflowStepFactory(workflow=workflow)
+    step.validator.availability_state = ValidatorAvailabilityState.MISSING_CONFIG
+    step.validator.availability_message = (
+        "No registered ValidatorConfig for private.provider.module."
+    )
+    step.validator.save(
+        update_fields=["availability_state", "availability_message"],
+    )
+
+    with pytest.raises(MCPApplicationError) as unavailable:
+        authorize_validation_start(
+            user=user,
+            workflow_ref=build_workflow_reference(workflow),
+        )
+
+    assert unavailable.value.code == MCPErrorCode.WORKFLOW_UNAVAILABLE
+    assert "configured validators is unavailable" in unavailable.value.detail
+    assert "ValidatorConfig" not in unavailable.value.detail
+    assert "private.provider.module" not in unavailable.value.detail
 
 
 def test_run_status_and_findings_follow_row_visibility_and_cursor_contract() -> None:

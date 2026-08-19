@@ -1,12 +1,13 @@
 <svg xmlns="http://www.w3.org/2000/svg"
-     viewBox="0 0 1400 700"
+     viewBox="0 0 1500 800"
      role="img"
      aria-labelledby="repository-overview-title repository-overview-description">
   <title id="repository-overview-title">Validibot repository architecture overview</title>
   <desc id="repository-overview-description">
-    The Validibot command-line interface calls the community Django application
-    over REST. The official MCP SDK is embedded in Django ASGI and calls
-    application services directly. Django uses validibot-shared and dispatches
+    Web users, API users, user AI agents, and the Validibot command-line
+    interface send requests to the community Django application. The official
+    MCP SDK and its ASGI route are embedded inside the Django application and
+    call Django services directly. Django uses validibot-shared and dispatches
     advanced validation runs to validator backend containers. Commercial
     packages unlock gated features in the Django application.
   </desc>
@@ -21,7 +22,9 @@
       .title { fill: #172033; font: 700 28px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
       .subtitle { fill: #526079; font: 16px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
       .group-title { fill: #1d4ed8; font: 700 18px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .section-title { fill: #394762; font: 700 15px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
       .label { fill: #172033; font: 700 18px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; text-anchor: middle; }
+      .source-label { fill: #172033; font: 700 15px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; text-anchor: middle; }
       .detail { fill: #526079; font: 15px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; text-anchor: middle; }
       .edge-label { fill: #394762; font: 14px Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; text-anchor: middle; }
       .edge { fill: none; stroke: #526b94; stroke-width: 2.2; marker-end: url(#arrow); }
@@ -35,55 +38,70 @@
     </marker>
   </defs>
 
-  <rect class="background" width="1400" height="700" rx="20"/>
+  <rect class="background" width="1500" height="800" rx="20"/>
   <text class="title" x="52" y="50">How the Validibot repositories fit together</text>
-  <text class="subtitle" x="52" y="78">Core validation stays in the community application; supporting repositories connect through stable interfaces.</text>
+  <text class="subtitle" x="52" y="78">Core validation stays in the community application; users and tools enter through web, API, or MCP.</text>
 
-  <rect class="group" x="400" y="115" width="600" height="250" rx="18"/>
-  <text class="group-title" x="430" y="150">validibot · community repository · AGPL-3.0</text>
+  <text class="section-title" x="55" y="205">Incoming requests</text>
 
-  <rect class="node-blue" x="445" y="180" width="320" height="125" rx="14"/>
-  <text class="label" x="605" y="222">Django application</text>
-  <text class="detail" x="605" y="252">workflows · validators · findings</text>
-  <text class="detail" x="605" y="277">REST API</text>
+  <rect class="node" x="55" y="225" width="275" height="50" rx="12"/>
+  <text class="source-label" x="192.5" y="256">User (web)</text>
 
-  <rect class="node" x="805" y="180" width="150" height="125" rx="14"/>
-  <text class="label" x="880" y="222">Embedded MCP</text>
-  <text class="detail" x="880" y="252">official SDK</text>
-  <text class="detail" x="880" y="277">ASGI route</text>
+  <rect class="node" x="55" y="295" width="275" height="50" rx="12"/>
+  <text class="source-label" x="192.5" y="326">User (API)</text>
 
-  <rect class="node" x="55" y="170" width="245" height="105" rx="14"/>
-  <text class="label" x="177.5" y="212">validibot-cli</text>
-  <text class="detail" x="177.5" y="242">terminal and CI clients</text>
+  <rect class="node" x="55" y="365" width="275" height="50" rx="12"/>
+  <text class="source-label" x="192.5" y="396">User AI agent (MCP)</text>
 
-  <rect class="node-green" x="1100" y="115" width="245" height="115" rx="14"/>
-  <text class="label" x="1222.5" y="157">Validator backends</text>
-  <text class="detail" x="1222.5" y="187">advanced validator</text>
-  <text class="detail" x="1222.5" y="210">containers</text>
+  <rect class="node" x="55" y="435" width="275" height="50" rx="12"/>
+  <text class="source-label" x="192.5" y="466">validibot-cli (API)</text>
 
-  <rect class="node" x="1100" y="300" width="245" height="105" rx="14"/>
-  <text class="label" x="1222.5" y="342">validibot-shared</text>
-  <text class="detail" x="1222.5" y="372">Pydantic envelope models</text>
+  <rect class="group" x="405" y="95" width="700" height="450" rx="18"/>
+  <text class="group-title" x="435" y="130">validibot · community repository · AGPL-3.0</text>
 
-  <rect class="node-purple" x="465" y="525" width="470" height="105" rx="14"/>
-  <text class="label" x="700" y="567">validibot-pro · validibot-enterprise</text>
-  <text class="detail" x="700" y="597">thin commercial activation layers</text>
+  <rect class="node-blue" x="445" y="155" width="620" height="345" rx="16"/>
+  <text class="label" x="755" y="192">Django application</text>
+  <text class="detail" x="755" y="219">web UI · REST API · workflows · validators · findings</text>
 
-  <path class="edge" d="M 300 222.5 H 445"/>
-  <text class="edge-label" x="372" y="210">REST</text>
+  <rect class="node" x="500" y="350" width="235" height="85" rx="12"/>
+  <text class="label" x="617.5" y="385">Embedded MCP</text>
+  <text class="detail" x="617.5" y="413">official SDK · ASGI /mcp</text>
 
-  <path class="edge" d="M 805 242.5 H 765"/>
-  <text class="edge-label" x="785" y="228">direct</text>
+  <rect class="node" x="790" y="245" width="230" height="220" rx="12"/>
+  <text class="label" x="905" y="285">Django services</text>
+  <text class="detail" x="905" y="316">auth · policy · launch</text>
+  <text class="detail" x="905" y="342">application logic</text>
 
-  <path class="edge" d="M 765 205 C 935 100, 1020 150, 1100 172"/>
-  <text class="edge-label" x="938" y="112">dispatches advanced runs</text>
+  <rect class="node-green" x="1170" y="120" width="275" height="120" rx="14"/>
+  <text class="label" x="1307.5" y="163">Validator backends</text>
+  <text class="detail" x="1307.5" y="193">advanced validator</text>
+  <text class="detail" x="1307.5" y="216">containers</text>
 
-  <path class="edge" d="M 765 275 C 940 390, 1015 352, 1100 352"/>
-  <text class="edge-label" x="935" y="380">uses</text>
+  <rect class="node" x="1170" y="345" width="275" height="105" rx="14"/>
+  <text class="label" x="1307.5" y="387">validibot-shared</text>
+  <text class="detail" x="1307.5" y="417">Pydantic envelope models</text>
 
-  <path class="edge" d="M 1222.5 230 V 300"/>
-  <text class="edge-label" x="1260" y="271">uses</text>
+  <rect class="node-purple" x="500" y="645" width="510" height="105" rx="14"/>
+  <text class="label" x="755" y="687">validibot-pro · validibot-enterprise</text>
+  <text class="detail" x="755" y="717">thin commercial activation layers</text>
 
-  <path class="edge-dashed" d="M 700 525 V 365"/>
-  <text class="edge-label" x="790" y="455">unlocks gated features</text>
+  <path class="edge" d="M 330 250 H 790"/>
+  <path class="edge" d="M 330 320 H 790"/>
+  <path class="edge" d="M 330 390 H 500"/>
+  <path class="edge" d="M 330 460 H 790"/>
+
+  <path class="edge" d="M 735 392.5 H 790"/>
+  <text class="edge-label" x="762" y="381">direct</text>
+
+  <path class="edge" d="M 1020 270 C 1085 210, 1115 185, 1170 180"/>
+  <text class="edge-label" x="1096" y="205">dispatches runs</text>
+
+  <path class="edge" d="M 1020 410 C 1080 410, 1115 397.5, 1170 397.5"/>
+  <text class="edge-label" x="1094" y="430">uses</text>
+
+  <path class="edge" d="M 1307.5 240 V 345"/>
+  <text class="edge-label" x="1345" y="298">uses</text>
+
+  <path class="edge-dashed" d="M 755 645 V 545"/>
+  <text class="edge-label" x="850" y="600">unlocks gated features</text>
 </svg>

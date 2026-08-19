@@ -40,6 +40,7 @@ from validibot.users.tests.factories import OrganizationFactory
 from validibot.users.tests.factories import UserFactory
 from validibot.users.tests.factories import grant_role
 from validibot.validations.constants import ValidationRunStatus
+from validibot.validations.constants import ValidatorAvailabilityState
 from validibot.validations.models import ValidationRun
 from validibot.workflows.tests.factories import WorkflowFactory
 from validibot.workflows.tests.factories import WorkflowStepFactory
@@ -399,6 +400,54 @@ def test_start_checks_execute_permission_before_downloading(
         )
 
     assert denied.value.code == MCPErrorCode.LAUNCH_DENIED
+
+
+def test_start_checks_workflow_readiness_before_downloading(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unavailable validator should produce a truthful error without a fetch."""
+
+    org = OrganizationFactory(mcp_allowed=True)
+    user = UserFactory(orgs=[org])
+    workflow = WorkflowFactory(
+        org=org,
+        user=user,
+        mcp_enabled=True,
+    )
+    step = WorkflowStepFactory(workflow=workflow)
+    step.validator.availability_state = ValidatorAvailabilityState.MISSING_CONFIG
+    step.validator.availability_message = (
+        "No registered ValidatorConfig for private.provider.module."
+    )
+    step.validator.save(
+        update_fields=["availability_state", "availability_message"],
+    )
+
+    def must_not_download(file: OpenAIFileInput) -> DownloadedFile:
+        """Fail loudly if an unrunnable workflow reaches the network boundary."""
+
+        del file
+        pytest.fail("The downloader ran for an unavailable workflow.")
+
+    monkeypatch.setattr(
+        "validibot.mcp_server.server.download_openai_file",
+        must_not_download,
+    )
+
+    with pytest.raises(MCPApplicationError) as unavailable:
+        _start_validation_from_openai_file(
+            user=user,
+            workflow_ref=build_workflow_reference(workflow),
+            file=OpenAIFileInput(
+                download_url="https://files.openai.example/temporary",
+                file_id="file-unavailable-workflow-test",
+            ),
+            idempotency_key="unavailable-workflow-download-test",
+        )
+
+    assert unavailable.value.code == MCPErrorCode.WORKFLOW_UNAVAILABLE
+    assert "configured validators is unavailable" in unavailable.value.detail
+    assert "ValidatorConfig" not in unavailable.value.detail
 
 
 def test_total_result_guard_rejects_an_oversized_future_projection(settings) -> None:

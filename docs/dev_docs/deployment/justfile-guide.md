@@ -268,7 +268,7 @@ just gcp verify-deployment-quick dev
 # After testing on dev, promote to prod
 just gcp deploy-all prod
 
-# Hotfix path: web-only deploy, skips worker and MCP
+# Hotfix path: web-only deploy (including MCP when licensed), skips worker
 just gcp deploy prod
 
 # Self-hosted Docker Compose: versioned upgrade

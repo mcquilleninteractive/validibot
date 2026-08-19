@@ -41,8 +41,8 @@ imports the other's transport code.
 ChatGPT, Codex, or another MCP client
   -> HTTPS <SITE_URL>/mcp
   -> Gunicorn with UvicornWorker (production) or Uvicorn (local)
-  -> config.asgi
-  -> official SDK authentication and Streamable HTTP handler
+  -> Django ASGI application (config.asgi)
+  -> embedded official SDK authentication and Streamable HTTP handler
   -> typed MCP tool
   -> Django application service
   -> canonical queryset, policy, launch, and audit services
@@ -242,4 +242,5 @@ tests, denied-access checks, deployment rollback, and OpenAI review assets.
 | Tool is not listed | Run the official-client protocol test and inspect `build_mcp_server()` registration. |
 | Tool returns `NOT_FOUND` | The reference is malformed or the authenticated user cannot access the object; the response deliberately does not distinguish those cases. |
 | Tool returns `RATE_LIMITED` | Wait for the current fixed minute window; all reads share one budget and starts use a separate budget. |
+| Launch returns `WORKFLOW_UNAVAILABLE` | The workflow is inactive, has no steps, or references a validator version that is unavailable in this deployment. Update the workflow to an available validator version or restore the required version. |
 | File is rejected | Check that every temporary/redirect hostname appears exactly in `MCP_FILE_ALLOWED_HOSTS`, the URL is still valid, the file is below `MCP_FILE_MAX_BYTES`, and its type satisfies workflow policy. |

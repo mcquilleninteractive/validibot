@@ -54,6 +54,7 @@ from validibot.validations.exceptions import OrgPolicyDeniedError
 from validibot.validations.models import ValidationFinding
 from validibot.validations.models import ValidationRun
 from validibot.validations.services.validation_run import ValidationRunService
+from validibot.workflows.constants import WorkflowStartErrorCode
 from validibot.workflows.models import Workflow
 from validibot.workflows.version_utils import get_latest_workflow_ids
 from validibot.workflows.views_launch_helpers import LaunchValidationError
@@ -67,6 +68,18 @@ if TYPE_CHECKING:
     from validibot.users.models import User
 
 _CURSOR_SALT = "validibot.mcp.cursor.v1"
+
+_WORKFLOW_READINESS_ERROR_DETAILS: dict[str, str] = {
+    WorkflowStartErrorCode.WORKFLOW_INACTIVE.value: "This workflow is not active.",
+    WorkflowStartErrorCode.NO_WORKFLOW_STEPS.value: (
+        "This workflow cannot run because it has no validation steps."
+    ),
+    WorkflowStartErrorCode.VALIDATOR_UNAVAILABLE.value: (
+        "This workflow cannot run because one of its configured validators is "
+        "unavailable. Update the workflow to use an available validator, or ask "
+        "an administrator to restore the required validator version."
+    ),
+}
 
 
 def list_workflows(
@@ -152,11 +165,36 @@ def authorize_validation_start(*, user: User, workflow_ref: str) -> None:
     workflow = _resolve_workflow(user=user, workflow_ref=workflow_ref)
     try:
         ensure_launch_preconditions(workflow=workflow, user=user)
-    except (LaunchValidationError, OrgPolicyDeniedError, PermissionError) as exc:
+    except LaunchValidationError as exc:
+        raise _mcp_error_from_launch_validation_error(exc) from exc
+    except (OrgPolicyDeniedError, PermissionError) as exc:
         raise MCPApplicationError(
             MCPErrorCode.LAUNCH_DENIED,
             "This workflow cannot be launched for the current user.",
         ) from exc
+
+
+def _mcp_error_from_launch_validation_error(
+    exc: LaunchValidationError,
+) -> MCPApplicationError:
+    """Translate canonical launch failures into safe, truthful MCP errors."""
+
+    workflow_error_code = str(exc.payload.get("code") or "")
+    if workflow_error_code == WorkflowStartErrorCode.PERMISSION_DENIED.value:
+        return MCPApplicationError(
+            MCPErrorCode.PERMISSION_DENIED,
+            "You do not have permission to run this workflow.",
+        )
+
+    readiness_detail = _WORKFLOW_READINESS_ERROR_DETAILS.get(workflow_error_code)
+    if readiness_detail is not None:
+        return MCPApplicationError(
+            MCPErrorCode.WORKFLOW_UNAVAILABLE,
+            readiness_detail,
+        )
+
+    detail = str(exc.payload.get("detail") or "The validation input was rejected.")
+    return MCPApplicationError(MCPErrorCode.INVALID_INPUT, detail)
 
 
 def resolve_audit_organization(
@@ -273,8 +311,7 @@ def start_validation(
     except LaunchValidationError as exc:
         if key_record is not None:
             key_record.delete()
-        detail = str(exc.payload.get("detail") or "The validation input was rejected.")
-        raise MCPApplicationError(MCPErrorCode.INVALID_INPUT, detail) from exc
+        raise _mcp_error_from_launch_validation_error(exc) from exc
     except (OrgPolicyDeniedError, PermissionError) as exc:
         if key_record is not None:
             key_record.delete()

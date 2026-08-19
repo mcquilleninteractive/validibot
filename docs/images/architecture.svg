@@ -9,6 +9,7 @@
       .label { font-family: system-ui, -apple-system, sans-serif; font-size: 14px; fill: #1f2937; }
       .label-bold { font-weight: 600; }
       .label-small { font-size: 12px; fill: #6b7280; }
+      .label-source { font-size: 11px; font-weight: 600; }
       .arrow { stroke: #6b7280; stroke-width: 2; fill: none; marker-end: url(#arrowhead); }
       .arrow-dashed { stroke-dasharray: 6,4; }
       .section-label { font-family: system-ui, -apple-system, sans-serif; font-size: 11px; fill: #9ca3af; font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; }
@@ -25,16 +26,25 @@
   <rect x="20" y="420" width="760" height="160" fill="#f0fdf4" rx="12" stroke="#bbf7d0" stroke-width="1" />
   <text x="40" y="440" class="section-label">Advanced Validator Containers (Ephemeral)</text>
 
-  <!-- Users -->
-  <rect x="300" y="10" width="200" height="50" class="box box-primary" />
-  <text x="400" y="40" class="label label-bold" text-anchor="middle">Users</text>
-  <text x="400" y="55" class="label-small" text-anchor="middle">Web UI • CLI • API Clients</text>
+  <!-- Incoming requests -->
+  <rect x="20" y="10" width="175" height="50" class="box box-primary" />
+  <text x="107.5" y="40" class="label label-source" text-anchor="middle">User (web)</text>
+
+  <rect x="215" y="10" width="175" height="50" class="box box-primary" />
+  <text x="302.5" y="40" class="label label-source" text-anchor="middle">User (API)</text>
+
+  <rect x="410" y="10" width="175" height="50" class="box box-primary" />
+  <text x="497.5" y="40" class="label label-source" text-anchor="middle">User AI agent (MCP)</text>
+
+  <rect x="605" y="10" width="175" height="50" class="box box-primary" />
+  <text x="692.5" y="40" class="label label-source" text-anchor="middle">validibot-cli (API)</text>
 
   <!-- Web Server -->
-  <rect x="280" y="110" width="240" height="80" class="box box-primary" />
-  <text x="400" y="140" class="label label-bold" text-anchor="middle">Django Web Server</text>
-  <text x="400" y="158" class="label-small" text-anchor="middle">REST API • Web UI</text>
-  <text x="400" y="175" class="label-small" text-anchor="middle">Built-in Validators • Workflow Engine</text>
+  <rect x="280" y="100" width="240" height="105" class="box box-primary" />
+  <text x="400" y="127" class="label label-bold" text-anchor="middle">Django Application</text>
+  <text x="400" y="148" class="label-small" text-anchor="middle">Web UI • REST API</text>
+  <text x="400" y="166" class="label-small" text-anchor="middle">Embedded MCP • ASGI /mcp</text>
+  <text x="400" y="184" class="label-small" text-anchor="middle">Built-in Validators • Workflow Engine</text>
 
   <!-- Worker -->
   <rect x="560" y="110" width="200" height="80" class="box box-secondary" />
@@ -88,20 +98,23 @@
   <text x="655" y="554" class="label-small">• Ephemeral</text>
 
   <!-- Arrows -->
-  <!-- Users to Web -->
-  <path d="M400 60 L400 110" class="arrow" />
+  <!-- Incoming requests to Django -->
+  <path d="M107.5 60 C180 75 250 85 320 100" class="arrow" />
+  <path d="M302.5 60 C320 75 345 88 365 100" class="arrow" />
+  <path d="M497.5 60 C480 75 455 88 435 100" class="arrow" />
+  <path d="M692.5 60 C620 75 550 85 480 100" class="arrow" />
 
   <!-- Web to PostgreSQL -->
-  <path d="M280 150 L240 150" class="arrow" />
+  <path d="M280 152 L240 152" class="arrow" />
 
   <!-- Web to Redis (enqueue) -->
-  <path d="M520 150 L560 150" class="arrow" />
+  <path d="M520 152 L560 152" class="arrow" />
 
   <!-- Worker to Redis (poll) -->
   <path d="M660 190 L660 220" class="arrow" />
 
   <!-- Web to File Storage -->
-  <path d="M320 190 L320 230 L240 230 L240 230" class="arrow" />
+  <path d="M320 205 L320 230 L240 230" class="arrow" />
 
   <!-- Worker to PostgreSQL -->
   <path d="M560 170 L540 170 L540 200 L180 200 L180 190" class="arrow arrow-dashed" />
@@ -115,7 +128,6 @@
   <path d="M460 360 L460 400 L530 400 L530 460" class="arrow" />
 
   <!-- Labels on arrows -->
-  <text x="395" y="88" class="label-small" text-anchor="end">HTTP/S</text>
   <text x="258" y="142" class="label-small">read/write</text>
   <text x="542" y="142" class="label-small">enqueue</text>
   <text x="672" y="208" class="label-small">poll</text>
