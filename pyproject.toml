@@ -109,7 +109,7 @@ dependencies = [
   "uvicorn[standard]==0.52.3",
   "whitenoise==6.12.0",
   "google-cloud-run==0.16.1",
-  "python-json-logger==4.1.0",
+  "python-json-logger==4.2.0",
   "django-recaptcha==4.1.0",
   # Maintained blocklist of ~2800 throwaway email domains (mailinator,
   # guerrillamail, tempmail, etc). Used by UserSignupForm when
