@@ -109,13 +109,13 @@ dependencies = [
   "uvicorn[standard]==0.52.3",
   "whitenoise==6.12.0",
   "google-cloud-run==0.16.1",
-  "python-json-logger==4.1.0",
+  "python-json-logger==4.2.0",
   "django-recaptcha==4.1.0",
   # Maintained blocklist of ~2800 throwaway email domains (mailinator,
   # guerrillamail, tempmail, etc). Used by UserSignupForm when
   # REJECT_DISPOSABLE_EMAILS is enabled — off by default for community/
   # self-hosted deployments, on in cloud to deter free-trial abuse.
-  "disposable-email-domains==0.0.237",
+  "disposable-email-domains==0.0.238",
   # validibot-shared: Our shared library for Validibot integrations (e.g., EnergyPlus).
   # 0.7.0 adds ``StepValidatorRecord.validator_backend_image_digest``;
   # 0.7.1–0.7.3 shipped publish-workflow fixes;
@@ -417,5 +417,5 @@ dev = [
 # hash-pinned requirements/docs.txt, independent of this group.
 docs = [
   # Documentation
-  "zensical==0.0.54",
+  "zensical==0.0.55",
 ]
