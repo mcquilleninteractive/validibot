@@ -16,4 +16,4 @@
 # Imported directly by tests/test_docs_supply_chain.py, which the docs-only
 # workflow runs before installing the application dependency set.
 defusedxml==0.7.1
-zensical==0.0.54
+zensical==0.0.57
