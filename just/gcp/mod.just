@@ -2942,6 +2942,7 @@ init-stage stage: _require-gcp-config
             --storage-size=10GB \
             --storage-auto-increase \
             --backup \
+            --backup-location={{gcp_region}} \
             --project={{gcp_project}} \
             $EXTRA_FLAGS
         echo "   Created"
