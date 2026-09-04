@@ -2,15 +2,15 @@ version = 1
 revision = 3
 requires-python = ">=3.13"
 resolution-markers = [
+    "python_full_version >= '3.15' and sys_platform == 'win32'",
+    "python_full_version >= '3.15' and sys_platform == 'emscripten'",
+    "python_full_version >= '3.15' and sys_platform != 'emscripten' and sys_platform != 'win32'",
+    "python_full_version == '3.14.*' and sys_platform == 'win32'",
+    "python_full_version == '3.14.*' and sys_platform == 'emscripten'",
+    "python_full_version == '3.14.*' and sys_platform != 'emscripten' and sys_platform != 'win32'",
     "python_full_version < '3.14' and sys_platform == 'win32'",
     "python_full_version < '3.14' and sys_platform == 'emscripten'",
     "python_full_version < '3.14' and sys_platform != 'emscripten' and sys_platform != 'win32'",
-    "python_full_version >= '3.15' and sys_platform == 'win32'",
-    "python_full_version == '3.14.*' and sys_platform == 'win32'",
-    "python_full_version >= '3.15' and sys_platform == 'emscripten'",
-    "python_full_version == '3.14.*' and sys_platform == 'emscripten'",
-    "python_full_version >= '3.15' and sys_platform != 'emscripten' and sys_platform != 'win32'",
-    "python_full_version == '3.14.*' and sys_platform != 'emscripten' and sys_platform != 'win32'",
 ]
 
 [[package]]
@@ -195,15 +195,15 @@ wheels = [
 
 [[package]]
 name = "authlib"
-version = "1.7.2"
+version = "1.8.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cryptography" },
     { name = "joserfc" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/36/98/7d93f30d029643c0275dbc0bd6d5a6f670661ee6c9a94d93af7ab4887600/authlib-1.7.2.tar.gz", hash = "sha256:2cea25fefcd4e7173bdf1372c0afc265c8034b23a8cd5dcb6a9164b826c64231", size = 176511, upload-time = "2026-05-06T08:10:23.116Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/f1/51/bc1729d3cfdc214b4935f4e886e4dd443c3065fd8e1e66423fe84b490f81/authlib-1.8.0.tar.gz", hash = "sha256:f3ecd5f1da737262fb53bf1a4d95c4ea1ad9dd509316587a255c99ab1838a4f0", size = 177759, upload-time = "2026-08-30T12:12:34.833Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/fb/95/adcb68e20c34162e9135f370d6e31737719c2b6f94bc953fe7ed1f10fe21/authlib-1.7.2-py2.py3-none-any.whl", hash = "sha256:3e1faedc9d87e7d56a164eca3ccb6ace0d61b94abe83e92242f8dc8bba9b4a9f", size = 259548, upload-time = "2026-05-06T08:10:21.436Z" },
+    { url = "https://files.pythonhosted.org/packages/b8/c6/6f124bcfbbfb20fba22c939b4e43a06dccfc0e1ca20e5634ca573cb1e271/authlib-1.8.0-py2.py3-none-any.whl", hash = "sha256:88aebbd9af6757e14e912d5dc007ae1dc1f3e27e3b2152ce7c552ee2c3b3c121", size = 260804, upload-time = "2026-08-30T12:12:33.162Z" },
 ]
 
 [[package]]
@@ -758,11 +758,11 @@ wheels = [
 
 [[package]]
 name = "disposable-email-domains"
-version = "0.0.246"
+version = "0.0.247"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/b7/6c/e62ec2ab55d6d8e89ff1c1b10311146834d846f1205b4298c07da83f4004/disposable_email_domains-0.0.246.tar.gz", hash = "sha256:2f4983d8a432b4e7d5e037881dd5459ed7f1cb5e4a6fcce6bf61e5f136956800", size = 102061, upload-time = "2026-08-27T16:28:34.166Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/cf/1d/e981e245c095ed0b4e056451cdee34f1e4b82771cde53a4fc295becb8780/disposable_email_domains-0.0.247.tar.gz", hash = "sha256:d04370025dd06afd0aac699e972a9d9763b06559d6c79a4c99d94955e0c4f863", size = 106112, upload-time = "2026-08-31T13:18:47.851Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/1b/dc/f8f1809c55425c9db8347b3488dc72e6cfa7e9127d1c915ea3f739b36d0a/disposable_email_domains-0.0.246-py3-none-any.whl", hash = "sha256:655ac4c83d6ed593f5d556688de05002de662dc370df3e47afbe5837b0fa27b4", size = 52431, upload-time = "2026-08-27T16:28:32.57Z" },
+    { url = "https://files.pythonhosted.org/packages/3c/15/df781490d64048a4b2e35419ae282e814ba652c42d01dc5501d17de6b458/disposable_email_domains-0.0.247-py3-none-any.whl", hash = "sha256:ab62d3098a1a99774b3d6de34f0edd403e27a489977fe6d7837f6d6caa275a49", size = 54492, upload-time = "2026-08-31T13:18:46.534Z" },
 ]
 
 [[package]]
@@ -2712,14 +2712,14 @@ wheels = [
 
 [[package]]
 name = "psycopg"
-version = "3.3.4"
+version = "3.3.5"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "tzdata", marker = "sys_platform == 'win32'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/db/2f/cb91e5502ec9de1de6f1b76cfbf69531932725361168bb06963620c77e2e/psycopg-3.3.4.tar.gz", hash = "sha256:e21207764952cff81b6b8bdacad9a3939f2793367fdac2987b3aac36a651b5bc", size = 165799, upload-time = "2026-05-01T23:31:55.179Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/72/73/8fb739d0f6bba247b9b93c9840c402a4f88545be5f1d4b02b23366371c00/psycopg-3.3.5.tar.gz", hash = "sha256:d0a3d9ccf5788af054cbd745278cb02401b5c312aeaafbf2c6144460aec47da4", size = 166508, upload-time = "2026-08-31T22:45:43.151Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/5c/e0/7b3dee031daae7743609ce3c746565d4a3ed7c2c186479eb48e34e838c64/psycopg-3.3.4-py3-none-any.whl", hash = "sha256:b6bbc25ccf05c8fad3b061d9db2ef0909a555171b84b07f29458a447253d679a", size = 213001, upload-time = "2026-05-01T23:20:50.816Z" },
+    { url = "https://files.pythonhosted.org/packages/3d/2e/d0a645bcaadde68bd6d93c43f02f14b0191bdda367ce3f7722abe3da744a/psycopg-3.3.5-py3-none-any.whl", hash = "sha256:ce5aa5cdb4f9379f00f487590e5890bfa7df9a164648c969ffa628505e21af4e", size = 213598, upload-time = "2026-08-31T22:39:02.184Z" },
 ]
 
 [package.optional-dependencies]
@@ -2729,9 +2729,9 @@ c = [
 
 [[package]]
 name = "psycopg-c"
-version = "3.3.4"
+version = "3.3.5"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/21/7c/c08364f2eab2913e4068b3b955d963e7a3491986a85429990969525def30/psycopg_c-3.3.4.tar.gz", hash = "sha256:ed8106128b2d04359c185fc9641b4409abfce4d0b6fb1d1ff6800646e27f1a22", size = 647111, upload-time = "2026-05-01T23:31:58.032Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/21/7b/5da2274bdbfed6b02aea463e2b803b8d4406bbc9d6c6f6bfd7122492254f/psycopg_c-3.3.5.tar.gz", hash = "sha256:5e11edaa0040a64d0af351a8fd3e276a824cd92fe34abc350cd67aa07ad36c55", size = 694569, upload-time = "2026-08-31T22:45:45.337Z" }
 
 [[package]]
 name = "ptyprocess"
@@ -3800,13 +3800,13 @@ docs = [
 [package.metadata]
 requires-dist = [
     { name = "argon2-cffi", specifier = "==25.1.0" },
-    { name = "authlib", specifier = "==1.7.2" },
+    { name = "authlib", specifier = "==1.8.0" },
     { name = "cel-python", specifier = "==0.5.0" },
     { name = "celery", extras = ["redis"], specifier = "==5.6.3" },
     { name = "crispy-bootstrap5", specifier = "==2026.3" },
     { name = "cryptography", specifier = "==50.0.1" },
     { name = "defusedxml", specifier = "==0.7.1" },
-    { name = "disposable-email-domains", specifier = "==0.0.246" },
+    { name = "disposable-email-domains", specifier = "==0.0.247" },
     { name = "django", specifier = "==6.0.7" },
     { name = "django-allauth", extras = ["mfa"], specifier = "==65.19.1" },
     { name = "django-anymail", extras = ["postmark"], specifier = "==15.1" },
@@ -3841,7 +3841,7 @@ requires-dist = [
     { name = "oauthlib", specifier = "==3.3.1" },
     { name = "pandas", specifier = "==3.0.5" },
     { name = "pillow", specifier = "==12.3.0" },
-    { name = "psycopg", extras = ["c"], specifier = "==3.3.4" },
+    { name = "psycopg", extras = ["c"], specifier = "==3.3.5" },
     { name = "pydantic", specifier = "==2.13.5" },
     { name = "pyjwt", extras = ["crypto"], specifier = "==2.13.0" },
     { name = "python-json-logger", specifier = "==4.2.0" },

@@ -48,7 +48,7 @@ keywords = ["validibot", "validation", "django", "data-validation"]
 
 dependencies = [
   "argon2-cffi==25.1.0",
-  "authlib==1.7.2",
+  "authlib==1.8.0",
   "cel-python==0.5.0",
   "crispy-bootstrap5==2026.3",
   "cryptography==50.0.1",
@@ -90,7 +90,7 @@ dependencies = [
   "mcp==2.1.1",
   "nh3==0.3.7",
   "pillow==12.3.0",
-  "psycopg[c]==3.3.4",
+  "psycopg[c]==3.3.5",
   "pydantic==2.13.5",
   "python-jsonpath==2.2.1",
   "python-slugify==8.0.4",
@@ -115,7 +115,7 @@ dependencies = [
   # guerrillamail, tempmail, etc). Used by UserSignupForm when
   # REJECT_DISPOSABLE_EMAILS is enabled — off by default for community/
   # self-hosted deployments, on in cloud to deter free-trial abuse.
-  "disposable-email-domains==0.0.246",
+  "disposable-email-domains==0.0.247",
   # validibot-shared: Our shared library for Validibot integrations (e.g., EnergyPlus).
   # 0.7.0 adds ``StepValidatorRecord.validator_backend_image_digest``;
   # 0.7.1–0.7.3 shipped publish-workflow fixes;
