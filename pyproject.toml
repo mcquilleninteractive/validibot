@@ -54,8 +54,8 @@ dependencies = [
   "cryptography==50.0.1",
   "defusedxml==0.7.1",
   "django==6.0.7",
-  "django-allauth[mfa]==65.19.2",
-  "django-anymail[postmark]==15.1",
+  "django-allauth[mfa]==65.19.4",
+  "django-anymail[postmark]==15.2",
   "django-cors-headers==4.9.0",
   "django-crispy-forms==2.7",
   "django-environ==0.14.0",
@@ -63,16 +63,16 @@ dependencies = [
   "django-markdownify==0.9.7",
   "django-model-utils==5.0.0",
   "django-storages[google]==1.14.6",
-  "djangorestframework==3.18.0",
+  "djangorestframework==3.18.1",
   # Async DNS keeps MCP attachment lookups inside the same total deadline as
   # redirects, connection establishment, and streamed response reads.
   "dnspython==2.8.0",
   "drf-spectacular[sidecar]==0.30.0",
-  "fmpy==0.3.31",
+  "fmpy==0.3.32",
   # Directly used to exchange worker ADC for attempt-scoped GCS Credential
   # Access Boundary tokens. Do not rely on django-storages pulling it in.
-  "google-auth==2.57.1",
-  "google-cloud-kms==3.16.0",
+  "google-auth==2.58.0",
+  "google-cloud-kms==3.17.0",
   "google-cloud-tasks==2.24.0",
   # RE2 regex engine: linear-time, no catastrophic backtracking. Used by
   # validibot.validations.regex_safety to run author-supplied patterns (Basic
@@ -87,14 +87,14 @@ dependencies = [
   "markdown2==2.5.5",
   # Official Model Context Protocol SDK. Validibot owns its curated tool
   # contract; this dependency owns Streamable HTTP and the MCP wire protocol.
-  "mcp==2.1.1",
+  "mcp==2.2.0",
   "nh3==0.3.7",
   "pillow==12.3.0",
-  "psycopg[c]==3.3.5",
+  "psycopg[c]==3.3.6",
   "pydantic==2.13.5",
   "python-jsonpath==2.2.1",
   "python-slugify==8.0.4",
-  "sentry-sdk==2.68.1",
+  "sentry-sdk==2.69.2",
   # Task queue: Celery with Redis broker and periodic scheduling.
   # celery[redis] pulls in kombu's redis extra, which caps the redis version.
   # As of kombu 5.6.2 the cap is redis<6.5; kombu main has bumped to <7.1
@@ -106,7 +106,7 @@ dependencies = [
   # See: https://github.com/celery/django-celery-beat/issues/977
   "django-celery-beat==2.9.0",
   "uvicorn-worker==0.4.0",
-  "uvicorn[standard]==0.52.4",
+  "uvicorn[standard]==0.53.0",
   "whitenoise==6.12.0",
   "google-cloud-run==0.16.1",
   "python-json-logger==4.2.0",
@@ -115,7 +115,7 @@ dependencies = [
   # guerrillamail, tempmail, etc). Used by UserSignupForm when
   # REJECT_DISPOSABLE_EMAILS is enabled — off by default for community/
   # self-hosted deployments, on in cloud to deter free-trial abuse.
-  "disposable-email-domains==0.0.249",
+  "disposable-email-domains==0.0.263",
   # validibot-shared: Our shared library for Validibot integrations (e.g., EnergyPlus).
   # 0.7.0 adds ``StepValidatorRecord.validator_backend_image_digest``;
   # 0.7.1–0.7.3 shipped publish-workflow fixes;
@@ -162,7 +162,7 @@ dependencies = [
   # application and validator backends.
   "validibot-shared==0.28.0",
   "django-csp==4.0",
-  "django-permissions-policy==4.33.0",
+  "django-permissions-policy==4.34.0",
   # OIDC provider runtime deps. allauth.idp.oidc is unconditionally in
   # INSTALLED_APPS (community's `validibot.idp` app extends the allauth
   # adapter for the MCP helper API's JWT access tokens), so these are
@@ -170,7 +170,7 @@ dependencies = [
   # idp tests. Previously declared under the cloud extra back when idp
   # only ran in the hosted offering.
   "oauthlib==3.3.1",
-  "pyjwt[crypto]==2.13.0",
+  "pyjwt[crypto]==2.14.0",
   # Django still uses rdflib for SHACL authoring-time syntax checks and
   # SPARQL security scrubbing. pySHACL/owlrl execution dependencies live in
   # validibot-validator-backends now that SHACL runs in an isolated backend.
@@ -179,7 +179,7 @@ dependencies = [
   # in the platform) — it is load-bearing for the SHACL validator's
   # RDF/XML hardening against XXE / billion-laughs / external-DTD attacks.
   # See ADR-2026-05-18 "Security" section.
-  "pandas==3.0.5",
+  "pandas==3.0.6",
 ]
 
 [project.optional-dependencies]
@@ -384,19 +384,19 @@ force-single-line = true
 [dependency-groups]
 dev = [
   # Testing
-  "coverage==7.16.0",
+  "coverage==7.16.1",
   "django-coverage-plugin==3.2.2",
   "factory-boy==3.3.3",
   "pytest==9.1.1",
   "pytest-django==4.14.0",
   "pytest-sugar==1.1.1",
-  "selenium==4.48.0",
+  "selenium==4.49.0",
   # Linting and formatting
-  "djlint==1.45.0",
+  "djlint==1.46.1",
   "pre-commit==4.6.2",
-  "ruff==0.16.6",
+  "ruff==0.16.8",
   # Type checking
-  "django-stubs[compatible-mypy]==6.1.0",
+  "django-stubs[compatible-mypy]==6.1.1",
   "djangorestframework-stubs==3.18.1",
   "mypy==2.3.1",
   # Debugging and development utilities
