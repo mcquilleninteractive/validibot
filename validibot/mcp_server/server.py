@@ -127,6 +127,14 @@ def build_mcp_server() -> MCPServer:
             issuer_url=issuer_url,
             resource_server_url=resource_url,
             required_scopes=[MCP_REQUIRED_SCOPE],
+            # ``ValidibotTokenVerifier`` already rejects a token whose ``aud``
+            # is not the exact MCP resource, so this is defence in depth: the
+            # SDK's bearer middleware re-checks ``AccessToken.resource``
+            # against ``resource_server_url`` before a request reaches a tool.
+            # mcp 2.2.0 warns when the setting is left unset and will default
+            # it to True in 3.0; stating it keeps the behaviour explicit and
+            # unchanged across that release.
+            validate_token_resource=True,
         ),
     )
 

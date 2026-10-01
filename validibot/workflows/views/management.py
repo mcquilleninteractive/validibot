@@ -58,6 +58,7 @@ from validibot.workflows.views_helpers import public_info_card_context
 
 if TYPE_CHECKING:
     from validibot.users.models import User
+    from validibot.workflows.forms import WorkflowForm
 
 logger = logging.getLogger(__name__)
 
@@ -935,7 +936,9 @@ class WorkflowUpdateView(WorkflowFormViewMixin, UpdateView):
                 }
                 form_kwargs = self.get_form_kwargs()
                 form_kwargs["instance"] = locked_workflow
-                locked_form = self.get_form_class()(**form_kwargs)
+                locked_form = cast("type[WorkflowForm]", self.get_form_class())(
+                    **form_kwargs
+                )
                 if not locked_form.is_valid():
                     self.object = locked_workflow
                     return self.form_invalid(locked_form)
@@ -993,7 +996,7 @@ class WorkflowUpdateView(WorkflowFormViewMixin, UpdateView):
         """Create a new version and apply the submitted settings to it."""
 
         source_workflow = self.object
-        validation_form = self.get_form_class()(
+        validation_form = cast("type[WorkflowForm]", self.get_form_class())(
             request.POST,
             request.FILES,
             instance=source_workflow,
@@ -1011,7 +1014,7 @@ class WorkflowUpdateView(WorkflowFormViewMixin, UpdateView):
             new_workflow = Workflow.objects.get(pk=report.new_workflow_id)
             data = request.POST.copy()
             data["version"] = new_workflow.version
-            apply_form = self.get_form_class()(
+            apply_form = cast("type[WorkflowForm]", self.get_form_class())(
                 data,
                 request.FILES,
                 instance=new_workflow,

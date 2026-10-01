@@ -7,9 +7,13 @@ import {
     initRichTooltips,
 } from './richTooltips';
 
+// The mocks are typed as zero-argument functions on purpose. A bare `vi.fn()`
+// is typed in Vitest 5 as "either a function or a constructor", which no
+// longer satisfies the `() => void` methods that `initRichTooltips` expects
+// of a Bootstrap tooltip instance.
 type MockInstance = {
-    dispose: ReturnType<typeof vi.fn>;
-    hide: ReturnType<typeof vi.fn>;
+    dispose: ReturnType<typeof vi.fn<() => void>>;
+    hide: ReturnType<typeof vi.fn<() => void>>;
 };
 
 function buildTooltipApi() {
@@ -17,8 +21,8 @@ function buildTooltipApi() {
 
     const instances = new WeakMap<Element, MockInstance>();
     class MockTooltip {
-        dispose = vi.fn();
-        hide = vi.fn();
+        dispose = vi.fn<() => void>();
+        hide = vi.fn<() => void>();
 
         constructor(element: HTMLElement) {
             instances.set(element, this);

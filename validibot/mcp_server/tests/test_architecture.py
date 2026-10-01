@@ -8,6 +8,7 @@ application rather than reviving a standalone MCP process.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from django.conf import settings
@@ -27,12 +28,19 @@ def _python_source(path: Path) -> str:
 
 
 def test_only_official_mcp_sdk_is_declared() -> None:
-    """The refactor must never drift back to the third-party FastMCP package."""
+    """The refactor must never drift back to the third-party FastMCP package.
+
+    The assertion matches any exact ``mcp==`` pin rather than one frozen
+    version, because the thing worth protecting is *which* package we depend
+    on, not which release of it. Spelling a literal version here made every
+    routine SDK upgrade fail this test for a reason that has nothing to do
+    with the architectural rule it exists to enforce.
+    """
 
     pyproject = (PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8")
     lockfile = (PROJECT_ROOT / "uv.lock").read_text(encoding="utf-8")
 
-    assert '"mcp==2.0.0"' in pyproject
+    assert re.search(r'^\s*"mcp==\d+\.\d+\.\d+",$', pyproject, re.MULTILINE)
     assert '"fastmcp' not in pyproject.lower()
     assert 'name = "fastmcp"' not in lockfile.lower()
 
