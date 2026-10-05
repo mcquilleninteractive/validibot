@@ -54,7 +54,7 @@ dependencies = [
   "cryptography==50.0.2",
   "defusedxml==0.7.1",
   "django==6.0.8",
-  "django-allauth[mfa]==65.19.6",
+  "django-allauth[mfa]==65.19.7",
   "django-anymail[postmark]==15.2",
   "django-cors-headers==4.9.0",
   "django-crispy-forms==2.7",
@@ -72,8 +72,8 @@ dependencies = [
   # Directly used to exchange worker ADC for attempt-scoped GCS Credential
   # Access Boundary tokens. Do not rely on django-storages pulling it in.
   "google-auth==2.59.1",
-  "google-cloud-kms==3.17.0",
-  "google-cloud-tasks==2.25.0",
+  "google-cloud-kms==3.18.0",
+  "google-cloud-tasks==2.26.0",
   # RE2 regex engine: linear-time, no catastrophic backtracking. Used by
   # validibot.validations.regex_safety to run author-supplied patterns (Basic
   # validator regex, Tabular column `pattern`) against submitter data without a
@@ -114,7 +114,7 @@ dependencies = [
   "uvicorn-worker==0.4.0",
   "uvicorn[standard]==0.54.0",
   "whitenoise==6.12.0",
-  "google-cloud-run==0.16.1",
+  "google-cloud-run==0.16.2",
   "python-json-logger==4.2.0",
   "django-recaptcha==4.1.0",
   # Maintained blocklist of ~2800 throwaway email domains (mailinator,
@@ -400,7 +400,7 @@ dev = [
   # Linting and formatting
   "djlint==1.46.4",
   "pre-commit==4.6.2",
-  "ruff==0.16.9",
+  "ruff==0.16.10",
   # Type checking
   "django-stubs[compatible-mypy]==6.1.1",
   "djangorestframework-stubs==3.18.1",
