@@ -190,7 +190,7 @@ dependencies = [
 
 [project.optional-dependencies]
 cloud = [
-  "stripe==15.6.1",
+  "stripe==16.0.0",
 ]
 # Docker SDK for the Docker-based validator runner (VALIDATOR_RUNNER=docker).
 # Not needed for Cloud Run deployments. Reduces attack surface when omitted.
