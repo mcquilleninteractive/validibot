@@ -54,12 +54,12 @@ dependencies = [
   "cryptography==50.0.2",
   "defusedxml==0.7.1",
   "django==6.0.8",
-  "django-allauth[mfa]==65.19.6",
+  "django-allauth[mfa]==65.19.7",
   "django-anymail[postmark]==15.2",
   "django-cors-headers==4.9.0",
   "django-crispy-forms==2.7",
   "django-environ==0.14.0",
-  "django-filter==26.1",
+  "django-filter==26.2",
   "django-markdownify==0.9.7",
   "django-model-utils==5.0.0",
   "django-storages[google]==1.14.6",
@@ -72,8 +72,8 @@ dependencies = [
   # Directly used to exchange worker ADC for attempt-scoped GCS Credential
   # Access Boundary tokens. Do not rely on django-storages pulling it in.
   "google-auth==2.59.1",
-  "google-cloud-kms==3.17.0",
-  "google-cloud-tasks==2.25.0",
+  "google-cloud-kms==3.18.0",
+  "google-cloud-tasks==2.26.0",
   # RE2 regex engine: linear-time, no catastrophic backtracking. Used by
   # validibot.validations.regex_safety to run author-supplied patterns (Basic
   # validator regex, Tabular column `pattern`) against submitter data without a
@@ -87,7 +87,7 @@ dependencies = [
   "markdown2==2.5.5",
   # Official Model Context Protocol SDK. Validibot owns its curated tool
   # contract; this dependency owns Streamable HTTP and the MCP wire protocol.
-  "mcp==2.2.0",
+  "mcp==2.3.0",
   "nh3==0.3.7",
   "pillow==12.3.0",
   "psycopg[c]==3.3.6",
@@ -114,14 +114,14 @@ dependencies = [
   "uvicorn-worker==0.4.0",
   "uvicorn[standard]==0.54.0",
   "whitenoise==6.12.0",
-  "google-cloud-run==0.16.1",
+  "google-cloud-run==0.16.2",
   "python-json-logger==4.2.0",
   "django-recaptcha==4.1.0",
   # Maintained blocklist of ~2800 throwaway email domains (mailinator,
   # guerrillamail, tempmail, etc). Used by UserSignupForm when
   # REJECT_DISPOSABLE_EMAILS is enabled — off by default for community/
   # self-hosted deployments, on in cloud to deter free-trial abuse.
-  "disposable-email-domains==0.0.271",
+  "disposable-email-domains==0.0.274",
   # validibot-shared: Our shared library for Validibot integrations (e.g., EnergyPlus).
   # 0.7.0 adds ``StepValidatorRecord.validator_backend_image_digest``;
   # 0.7.1–0.7.3 shipped publish-workflow fixes;
@@ -400,7 +400,7 @@ dev = [
   # Linting and formatting
   "djlint==1.46.4",
   "pre-commit==4.6.2",
-  "ruff==0.16.9",
+  "ruff==0.16.10",
   # Type checking
   "django-stubs[compatible-mypy]==6.1.1",
   "djangorestframework-stubs==3.18.1",
