@@ -400,7 +400,7 @@ dev = [
   # Linting and formatting
   "djlint==1.46.4",
   "pre-commit==4.6.2",
-  "ruff==0.16.9",
+  "ruff==0.16.10",
   # Type checking
   "django-stubs[compatible-mypy]==6.1.1",
   "djangorestframework-stubs==3.18.1",
