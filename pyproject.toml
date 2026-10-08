@@ -53,17 +53,17 @@ dependencies = [
   "crispy-bootstrap5==2026.9",
   "cryptography==50.0.2",
   "defusedxml==0.7.1",
-  "django==6.0.8",
-  "django-allauth[mfa]==65.19.6",
+  "django==6.0.9",
+  "django-allauth[mfa]==65.19.7",
   "django-anymail[postmark]==15.2",
   "django-cors-headers==4.9.0",
   "django-crispy-forms==2.7",
   "django-environ==0.14.0",
-  "django-filter==26.1",
+  "django-filter==26.2",
   "django-markdownify==0.9.7",
   "django-model-utils==5.0.0",
   "django-storages[google]==1.14.6",
-  "djangorestframework==3.18.1",
+  "djangorestframework==3.18.3",
   # Async DNS keeps MCP attachment lookups inside the same total deadline as
   # redirects, connection establishment, and streamed response reads.
   "dnspython==2.8.0",
@@ -71,9 +71,9 @@ dependencies = [
   "fmpy==0.3.32",
   # Directly used to exchange worker ADC for attempt-scoped GCS Credential
   # Access Boundary tokens. Do not rely on django-storages pulling it in.
-  "google-auth==2.59.1",
-  "google-cloud-kms==3.17.0",
-  "google-cloud-tasks==2.25.0",
+  "google-auth==2.61.0",
+  "google-cloud-kms==3.18.0",
+  "google-cloud-tasks==2.26.0",
   # RE2 regex engine: linear-time, no catastrophic backtracking. Used by
   # validibot.validations.regex_safety to run author-supplied patterns (Basic
   # validator regex, Tabular column `pattern`) against submitter data without a
@@ -87,13 +87,13 @@ dependencies = [
   "markdown2==2.5.5",
   # Official Model Context Protocol SDK. Validibot owns its curated tool
   # contract; this dependency owns Streamable HTTP and the MCP wire protocol.
-  "mcp==2.2.0",
+  "mcp==2.3.0",
   "nh3==0.3.7",
   "pillow==12.3.0",
   "psycopg[c]==3.3.6",
   "pydantic==2.13.5",
   "python-jsonpath==2.2.1",
-  "python-slugify==9.1.2",
+  "python-slugify==9.1.3",
   "sentry-sdk==2.71.0",
   # Task queue: Celery with Redis broker and periodic scheduling.
   # celery[redis] pulls in kombu's redis extra, which caps the redis version.
@@ -114,14 +114,14 @@ dependencies = [
   "uvicorn-worker==0.4.0",
   "uvicorn[standard]==0.54.0",
   "whitenoise==6.12.0",
-  "google-cloud-run==0.16.1",
+  "google-cloud-run==0.16.2",
   "python-json-logger==4.2.0",
   "django-recaptcha==4.1.0",
   # Maintained blocklist of ~2800 throwaway email domains (mailinator,
   # guerrillamail, tempmail, etc). Used by UserSignupForm when
   # REJECT_DISPOSABLE_EMAILS is enabled — off by default for community/
   # self-hosted deployments, on in cloud to deter free-trial abuse.
-  "disposable-email-domains==0.0.271",
+  "disposable-email-domains==0.0.275",
   # validibot-shared: Our shared library for Validibot integrations (e.g., EnergyPlus).
   # 0.7.0 adds ``StepValidatorRecord.validator_backend_image_digest``;
   # 0.7.1–0.7.3 shipped publish-workflow fixes;
@@ -190,7 +190,7 @@ dependencies = [
 
 [project.optional-dependencies]
 cloud = [
-  "stripe==15.6.1",
+  "stripe==16.0.0",
 ]
 # Docker SDK for the Docker-based validator runner (VALIDATOR_RUNNER=docker).
 # Not needed for Cloud Run deployments. Reduces attack surface when omitted.
