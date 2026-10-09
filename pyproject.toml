@@ -400,11 +400,11 @@ dev = [
   # Linting and formatting
   "djlint==1.46.4",
   "pre-commit==4.6.2",
-  "ruff==0.16.9",
+  "ruff==0.16.10",
   # Type checking
-  "django-stubs[compatible-mypy]==6.1.1",
+  "django-stubs[compatible-mypy]==6.1.2",
   "djangorestframework-stubs==3.18.1",
-  "mypy==2.3.1",
+  "mypy==2.4.0",
   # Debugging and development utilities
   "django-debug-toolbar==8.0.0",
   "django-extensions==4.1",
@@ -423,5 +423,5 @@ dev = [
 # hash-pinned requirements/docs.txt, independent of this group.
 docs = [
   # Documentation
-  "zensical==0.0.67",
+  "zensical==0.0.68",
 ]
