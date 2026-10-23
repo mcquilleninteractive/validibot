@@ -89,7 +89,7 @@ dependencies = [
   # contract; this dependency owns Streamable HTTP and the MCP wire protocol.
   "mcp==2.3.0",
   "nh3==0.3.7",
-  "pillow==12.3.0",
+  "pillow==13.0.0",
   "psycopg[c]==3.3.6",
   "pydantic==2.13.5",
   "python-jsonpath==2.2.1",
