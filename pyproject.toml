@@ -66,7 +66,7 @@ dependencies = [
   "djangorestframework==3.18.3",
   # Async DNS keeps MCP attachment lookups inside the same total deadline as
   # redirects, connection establishment, and streamed response reads.
-  "dnspython==2.8.0",
+  "dnspython==2.9.0",
   "drf-spectacular[sidecar]==0.30.0",
   "fmpy==0.3.32",
   # Directly used to exchange worker ADC for attempt-scoped GCS Credential
