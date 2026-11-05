@@ -175,7 +175,7 @@ dependencies = [
   # base deps — without oauthlib the test suite can't even collect the
   # idp tests. Previously declared under the cloud extra back when idp
   # only ran in the hosted offering.
-  "oauthlib==4.0.0",
+  "oauthlib==4.0.1",
   "pyjwt[crypto]==2.15.1",
   # Django still uses rdflib for SHACL authoring-time syntax checks and
   # SPARQL security scrubbing. pySHACL/owlrl execution dependencies live in
